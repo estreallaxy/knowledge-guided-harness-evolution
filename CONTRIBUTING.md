@@ -8,7 +8,7 @@
 | 赵星源 | `zhaoXY` | `zhaoXY/self-evolution-branch` | `/data1/users/zhaoXY` |
 | 王懿 | `wangY` | `wangY/self-evolution-branch` | `/data1/users/wangY` |
 
-三个 Linux 账号和工作区已分别创建；原先共用 `cc` 的三份仓库副本已移除。首次使用前，需为每个人配置自己的服务器登录公钥、GitHub 账号协作者权限和 GitHub SSH 认证。不要继续共用 `cc` 的 GitHub 密钥进行日常开发。准备就绪后，在自己的工作区克隆对应分支，例如周梦凡：
+三个 Linux 账号和工作区已分别创建，且可以使用各自账号进行密码 SSH 登录；原先共用 `cc` 的三份仓库副本已移除。首次克隆私有仓库前，还需为每个人配置 GitHub 账号协作者权限和 GitHub SSH 认证。不要继续共用 `cc` 的 GitHub 密钥进行日常开发。准备就绪后，在自己的工作区克隆对应分支，例如周梦凡：
 
 ```bash
 cd /data1/users/zhouMF
