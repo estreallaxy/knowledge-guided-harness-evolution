@@ -21,4 +21,4 @@ python3 benchmarks/terminal-bench-2.0/prepare_dataset.py \
 
 输出中的 `train/`、`dev/`、`test/` 都是标准的 Harbor 本地任务集，可分别用 `harbor run -p <目录>` 读取。`dataset-manifest.json` 保存来源提交、划分哈希和每题内容哈希；再次运行命令只核验，不覆盖现有文件。优化器运行容器只挂载 `train/`，不要挂载完整上游 checkout、`dev/` 或 `test/`。
 
-**服务器准备记录（2026-09-28）：**上游 checkout 位于 `/data1/users/zhangXY/benchmarks/terminal-bench-2`，提交为 `69671fbaac6d67a7ef0dfec016cc38a64ef7a77c`；核对 89 个任务均有 `task.toml`、`instruction.md` 和 `tests/test.sh`。`/data1/users/zhangXY/benchmarks/tb2-split-v1` 已生成并通过两次文件哈希核验，分别包含 30/19/40 题。上游 checkout、dev、test 目录仅 `cc` 可读，train 目录供成员读取。仓库快照让其他成员能在自己的目录创建相同数据集；运行优化器时仍只挂载 train。**尚未拉取任务镜像、启动 Harbor 或运行任何模型；这是数据就绪记录，不是评测结果。**
+**服务器准备记录（2026-09-28）：**上游 checkout 位于 `/data1/users/zhangXY/benchmarks/terminal-bench-2`，提交为 `69671fbaac6d67a7ef0dfec016cc38a64ef7a77c`；核对 89 个任务均有 `task.toml`、`instruction.md` 和 `tests/test.sh`。`/data1/users/zhangXY/benchmarks/tb2-split-v1` 已生成并通过文件哈希核验，分别包含 30/19/40 题。仓库快照让有仓库读取权限的成员在各自目录创建相同数据集；运行优化器时只挂载 train。由于完整 89 题已推送到共享私有仓库，dev/test 的保密性不能依靠服务器目录权限保证；若实验要求严格盲测，应由独立评测方保管未公开的测试题。**尚未拉取任务镜像、启动 Harbor 或运行任何模型；这是数据就绪记录，不是评测结果。**
