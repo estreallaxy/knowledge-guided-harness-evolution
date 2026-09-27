@@ -1,21 +1,29 @@
 # GitHub 协作手册
 
-本仓库为私有仓库。`main` 保存共同协议和已审阅的稳定版本；日常开发在各自分支进行。研究规划见 [docs/research-plan.md](docs/research-plan.md)。以下命令在**自己的仓库目录**执行。
+本仓库为私有仓库。`main` 保存共同协议和已审阅的稳定版本；日常开发在各自分支进行。研究规划见 [docs/research-plan.md](docs/research-plan.md)。以下命令在**各自 Linux 账号下的仓库目录**执行。
 
-| 成员 | 开发分支 | 服务器目录 |
-| --- | --- | --- |
-| 周梦凡 | `zhouMF/self-evolution-branch` | `/data1/users/zhouMF/knowledge-guided-harness-evolution` |
-| 赵星源 | `zhaoXY/self-evolution-branch` | `/data1/users/zhaoXY/knowledge-guided-harness-evolution` |
-| 王懿 | `wangY/self-evolution-branch` | `/data1/users/wangY/knowledge-guided-harness-evolution` |
+| 成员 | Linux 账号 | 开发分支 | 专属工作区 |
+| --- | --- | --- | --- |
+| 周梦凡 | `zhouMF` | `zhouMF/self-evolution-branch` | `/data1/users/zhouMF` |
+| 赵星源 | `zhaoXY` | `zhaoXY/self-evolution-branch` | `/data1/users/zhaoXY` |
+| 王懿 | `wangY` | `wangY/self-evolution-branch` | `/data1/users/wangY` |
 
-首次提交前，在**自己的仓库目录**设置真实的 Git 提交身份，勿修改服务器 `cc` 的全局配置：
+三个 Linux 账号和工作区已分别创建；原先共用 `cc` 的三份仓库副本已移除。首次使用前，需为每个人配置自己的服务器登录公钥、GitHub 账号协作者权限和 GitHub SSH 认证。不要继续共用 `cc` 的 GitHub 密钥进行日常开发。准备就绪后，在自己的工作区克隆对应分支，例如周梦凡：
+
+```bash
+cd /data1/users/zhouMF
+git clone --branch zhouMF/self-evolution-branch git@github.com:estreallaxy/knowledge-guided-harness-evolution.git
+cd knowledge-guided-harness-evolution
+```
+
+首次提交前，在**自己的仓库目录**设置真实的 Git 提交身份；勿修改服务器 `cc` 的全局配置：
 
 ```bash
 git config user.name "你的姓名或 GitHub 用户名"
 git config user.email "你在 GitHub 验证过的邮箱"
 ```
 
-服务器 `cc` 已能用仓库配置的 SSH 凭据拉取和推送。**Git 提交作者、推送时认证的 GitHub 账号和 PR 作者不是一回事**：若要用个人 GitHub 账号查看私有仓库、提交或审阅 PR，需由仓库所有者邀请该账号为协作者，并用个人账号登录 GitHub。
+**Git 提交作者、推送时认证的 GitHub 账号和 PR 作者不是一回事**：提交邮箱须关联本人 GitHub 账号；Git 拉取和推送使用本人 SSH 密钥；PR 用本人 GitHub 账号发起和审阅。
 
 ## 每次开始开发
 
