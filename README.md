@@ -4,6 +4,8 @@
 
 完整研究动机、方法与分阶段规划见 [docs/research-plan.md](docs/research-plan.md)。当前仓库只搭建共同开发骨架，不包含已实现的方法或已复现的实验结果。
 
+第一阶段的 benchmark 划分、共同 H0 和首张知识标杆卡已固定为[协议 v1](docs/phase1-decisions.md)。目前完成的是来源核查与静态准备，尚无 benchmark 复现分数。
+
 ## 目录
 
 | 路径 | 用途 |
