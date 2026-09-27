@@ -36,13 +36,20 @@ def git_output(source: Path, *args: str) -> str:
 
 
 def validate_source(source: Path, split: dict) -> list[str]:
-    if not (source / ".git").exists():
-        raise ValueError(f"Expected a Git checkout: {source}")
-    actual_commit = git_output(source, "rev-parse", "HEAD")
-    if actual_commit != split["benchmark_commit"]:
-        raise ValueError(f"Benchmark commit mismatch: {actual_commit}")
-    if git_output(source, "status", "--porcelain"):
-        raise ValueError("Benchmark checkout is dirty")
+    git_checkout = (source / ".git").exists()
+    if git_checkout:
+        actual_commit = git_output(source, "rev-parse", "HEAD")
+        if actual_commit != split["benchmark_commit"]:
+            raise ValueError(f"Benchmark commit mismatch: {actual_commit}")
+        if git_output(source, "status", "--porcelain"):
+            raise ValueError("Benchmark checkout is dirty")
+    else:
+        provenance_path = source / "UPSTREAM_PROVENANCE.json"
+        if not provenance_path.is_file():
+            raise ValueError(f"Expected a pinned Git checkout or verified vendored dataset: {source}")
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        if provenance.get("upstream_commit") != split["benchmark_commit"]:
+            raise ValueError("Vendored dataset commit mismatch")
     source_ids = sorted(p.name for p in source.iterdir() if (p / "task.toml").is_file())
     frozen_ids = sorted(task_id for key in ("train", "dev", "test") for task_id in split[key])
     listed_ids = sorted((HERE / "task-ids.txt").read_text(encoding="utf-8").splitlines())
@@ -52,6 +59,8 @@ def validate_source(source: Path, split: dict) -> list[str]:
         task = source / task_id
         if not (task / "instruction.md").is_file() or not (task / "tests" / "test.sh").is_file():
             raise ValueError(f"Incomplete task: {task_id}")
+        if not git_checkout and task_digest(task) != provenance.get("task_sha256", {}).get(task_id):
+            raise ValueError(f"Vendored task digest differs: {task_id}")
     return source_ids
 
 
