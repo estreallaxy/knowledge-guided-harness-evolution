@@ -20,7 +20,8 @@ MANIFEST_NAME = "dataset-manifest.json"
 
 def task_digest(task_dir: Path) -> str:
     digest = hashlib.sha256()
-    for path in sorted(p for p in task_dir.rglob("*") if p.is_file()):
+    paths = (p for p in task_dir.rglob("*") if p.is_file())
+    for path in sorted(paths, key=lambda p: p.relative_to(task_dir).parts):
         relative = path.relative_to(task_dir).as_posix()
         digest.update(relative.encode("utf-8") + b"\0")
         with path.open("rb") as handle:
