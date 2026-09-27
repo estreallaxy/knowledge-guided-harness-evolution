@@ -29,4 +29,4 @@
 
 ## 协作分支
 
-`main` 保存共同协议和稳定骨架。四位成员分别从 `main` 建立 `zhangXY/self-evolution-branch`、`zhouMF/self-evolution-branch`、`zhaoXY/self-evolution-branch`、`wangY/self-evolution-branch`。共享协议和接口变更先在各自分支记录理由与验证，再合入 `main`。
+`main` 保存共同协议和稳定骨架。四个成员分支分别为 `zhangXY/self-evolution-branch`、`zhouMF/self-evolution-branch`、`zhaoXY/self-evolution-branch`、`wangY/self-evolution-branch`。共享协议和接口变更先在各自分支记录理由与验证，再合入 `main`。具体操作见 [GitHub 协作手册](CONTRIBUTING.md)。
