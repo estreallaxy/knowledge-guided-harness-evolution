@@ -2,7 +2,7 @@
 
 研究目标：把经过核验的外部 harness 方法知识提供给优化 agent，结合任务需求、执行 trace 和自主探索，构建并迭代可验证的 agent harness。
 
-完整研究动机、方法与分阶段规划见 [docs/research-plan.md](docs/research-plan.md)，三人分工见[三阶段并行执行计划](docs/team-execution-plan.md)。当前仓库已经开始保存可直接运行的方法代码，但尚无 benchmark 运行结果。
+完整研究动机、方法与分阶段规划见 [docs/research-plan.md](docs/research-plan.md)，前期论文与近邻工作结论见 [Idea 调研结果](docs/idea-research-findings.md)，三人分工见[三阶段并行执行计划](docs/team-execution-plan.md)。当前仓库已经开始保存可直接运行的方法代码，但尚无 benchmark 运行结果。
 
 Terminal-Bench 2.0 数据、共同 H0 和第一项方法知识已经完成静态准备；目前尚无 benchmark 运行结果。
 
