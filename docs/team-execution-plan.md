@@ -21,9 +21,9 @@ flowchart LR
 
 | 负责人 | 任务 | 仓库相对路径 |
 | --- | --- | --- |
-| **周梦凡** | 独立跑通共同 H0 和 Meta-Harness，并按统一协议记录完整结果。 | 代码：`harness/h0/terminus-kira/`、`optimizer/baselines/meta-harness/`；配置：`experiments/configs/meta-harness-zhouMF.yaml`；结果：`experiments/results/meta-harness/zhouMF/` |
-| **赵星源** | 独立跑通共同 H0 和 Meta-Harness，并按统一协议记录完整结果。 | 代码：`harness/h0/terminus-kira/`、`optimizer/baselines/meta-harness/`；配置：`experiments/configs/meta-harness-zhaoXY.yaml`；结果：`experiments/results/meta-harness/zhaoXY/` |
-| **王懿** | 独立跑通共同 H0 和 Meta-Harness，并按统一协议记录完整结果。 | 代码：`harness/h0/terminus-kira/`、`optimizer/baselines/meta-harness/`；配置：`experiments/configs/meta-harness-wangY.yaml`；结果：`experiments/results/meta-harness/wangY/` |
+| **周梦凡** | 使用统一架构与配置跑通共同 H0 和 Meta-Harness，并独立保存完整结果。 | 代码：`harness/h0/terminus-kira/`、`optimizer/baselines/meta-harness/`；配置：`experiments/configs/meta-harness.yaml`；结果：`experiments/results/meta-harness/zhouMF/` |
+| **赵星源** | 使用统一架构与配置跑通共同 H0 和 Meta-Harness，并独立保存完整结果。 | 代码：`harness/h0/terminus-kira/`、`optimizer/baselines/meta-harness/`；配置：`experiments/configs/meta-harness.yaml`；结果：`experiments/results/meta-harness/zhaoXY/` |
+| **王懿** | 使用统一架构与配置跑通共同 H0 和 Meta-Harness，并独立保存完整结果。 | 代码：`harness/h0/terminus-kira/`、`optimizer/baselines/meta-harness/`；配置：`experiments/configs/meta-harness.yaml`；结果：`experiments/results/meta-harness/wangY/` |
 
 ### 论文收集任务
 
@@ -42,33 +42,34 @@ flowchart LR
 
 现有 [`query-specific-skill-refinement`](../knowledge/methods/query-specific-skill-refinement/README.md) 计入“指令与 Skill”的第 1 篇，可继续重构。
 
-### 三份复现的统一配置（以下仅供参考）
+### 统一复现架构与配置（以下仅供参考）
 
-三人共同讨论并维护 `terminal-bench-2.0-common.yaml` 和 `h0.yaml`；每人单独维护自己的 Meta-Harness 配置。个人配置只记录运行入口、凭据变量等必要差异，不自行改变公共实验条件。
+三人共同使用同一份 Meta-Harness 代码和配置，不建立个人配置。运行结果按成员分别保存，以便核对环境差异和运行稳定性。
 
 | 配置项 | 统一要求 |
 | --- | --- |
-| 配置文件 | 三人共同维护 `experiments/configs/terminal-bench-2.0-common.yaml` 和 `h0.yaml`；个人配置为 `meta-harness-zhouMF.yaml`、`meta-harness-zhaoXY.yaml`、`meta-harness-wangY.yaml`。 |
+| 配置文件 | 三人共同维护 `experiments/configs/terminal-bench-2.0-common.yaml`、`h0.yaml` 和 `meta-harness.yaml`。 |
 | Benchmark | `benchmarks/terminal-bench-2.0/`，使用同一 `split-v1.json` 和任务 ID。 |
 | 初始 Harness | 均从 `harness/h0/terminus-kira/` 开始，不直接修改 H0。 |
-| 执行模型 | 模型、provider、temperature、最大上下文和最大输出一致。 |
+| 执行模型 | 三人统一使用 `deepseek-v4-flash`；provider、temperature、最大上下文和最大输出保持一致。 |
+| 优化模型 | Meta-Harness 的优化 Agent 统一使用 `deepseek-v4-flash`。 |
 | 执行预算 | 每题最大 step、tool call、token、墙钟时间和重试次数一致。 |
 | 运行设置 | 每题重复次数、并发数、Docker 环境和超时设置一致。 |
 | 记录字段 | task ID、配置、trace、分数、token、费用、时延、异常和候选 harness 版本一致。 |
 | Meta-Harness 额外成本 | 优化模型、搜索轮数、候选数和优化成本单独记录，不混入执行预算。 |
 | 配置变更 | 公共参数须由三人商量后修改；影响公平性的参数变化后三份复现一起重跑。 |
 
-以下只是配置字段示例，具体字段、取值和默认值由三人讨论，并分别写入公共配置或个人配置。
+以下只是配置字段示例，具体字段、取值和默认值由三人讨论后写入公共配置。
 
 | 配置部分 | 可讨论的字段示例 |
 | --- | --- |
 | Benchmark | 数据路径、split、任务范围、是否先跑 smoke task |
 | H0 | harness 路径、Python 入口、prompt 路径、可编辑边界 |
-| 执行模型 | provider、model、API 地址、temperature、上下文长度、最大输出 |
+| 执行模型 | `deepseek-v4-flash`、provider、API 地址、temperature、上下文长度、最大输出 |
 | 执行预算 | 最大 step、tool call、token、单题超时、重试次数 |
 | 运行方式 | 重复次数、并发数、Docker 设置、缓存是否启用 |
 | 记录方式 | trace 保存路径、逐题分数、token、费用、时延、异常、候选版本 |
-| Meta-Harness | 优化模型、搜索轮数、每轮候选数、候选选择规则、优化预算 |
+| Meta-Harness | 优化模型固定为 `deepseek-v4-flash`；共同确定搜索轮数、每轮候选数、候选选择规则和优化预算 |
 | 凭据 | 只配置环境变量名，不把 API key 或密码写入仓库 |
 
 公共参数的讨论结果记录到 `experiments/configs/README.md`；未达成一致的字段先标记为“待定”，不要各自采用不同值。三人完成后交叉核对配置、trace、分数与成本记录。
