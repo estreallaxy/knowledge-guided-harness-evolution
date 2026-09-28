@@ -8,7 +8,7 @@
 | 赵星源 | `zhaoXY` | `zhaoXY/self-evolution-branch` | `/data1/users/zhaoXY` |
 | 王懿 | `wangY` | `wangY/self-evolution-branch` | `/data1/users/wangY` |
 
-三个 Linux 账号和工作区已分别创建，且可以使用各自账号进行密码 SSH 登录；原先共用 `cc` 的三份仓库副本已移除。首次克隆私有仓库前，还需为每个人配置 GitHub 账号协作者权限和 GitHub SSH 认证。不要继续共用 `cc` 的 GitHub 密钥进行日常开发。准备就绪后，在自己的工作区克隆对应分支，例如周梦凡：
+三个 Linux 账号和工作区已分别创建，且可以使用各自账号进行密码 SSH 登录。首次克隆私有仓库前，还需为每个人配置 GitHub 账号协作者权限和 GitHub SSH 认证。准备就绪后，在自己的工作区克隆对应分支，例如周梦凡：
 
 ```bash
 cd /data1/users/zhouMF
@@ -16,7 +16,7 @@ git clone --branch zhouMF/self-evolution-branch git@github.com:estreallaxy/knowl
 cd knowledge-guided-harness-evolution
 ```
 
-首次提交前，在**自己的仓库目录**设置真实的 Git 提交身份；勿修改服务器 `cc` 的全局配置：
+首次提交前，在**自己的仓库目录**设置真实的 Git 提交身份；勿修改全局配置：
 
 ```bash
 git config user.name "你的姓名或 GitHub 用户名"
@@ -71,7 +71,7 @@ git push --force-with-lease origin HEAD
 
 `rebase` 会改写自己分支的提交历史，所以已推送过该分支时使用 `--force-with-lease` 更新；**只对本人负责的分支使用，不对 `main` 使用，也不要用普通的 `--force`**。如果别人也在同一分支提交过内容，先沟通并核对远端提交，再决定如何同步。
 
-随后在 GitHub 创建以 `main` 为目标、以自己分支为来源的 PR。PR 至少说明：改动目的、主要文件或机制、验证命令与结果；涉及实验时注明 `H0`、模型、数据划分、预算和结果路径。至少由另一位成员审阅，通过检查并处理意见后再合并。已有 PR 经 rebase 推送后会自动更新，无需另建 PR。
+随后在 GitHub 创建以 `main` 为目标、以自己分支为来源的 PR。PR 至少说明：改动目的、主要文件或机制、验证命令与结果；涉及实验时注明 `H0`、模型、数据划分、预算和结果路径。PR 统一由 `zhangXY` 审阅，通过检查并处理意见后再合并。已有 PR 经 rebase 推送后会自动更新，无需另建 PR。
 
 遇到 rebase 冲突时：
 

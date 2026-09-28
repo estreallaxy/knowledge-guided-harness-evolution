@@ -33,7 +33,16 @@ flowchart LR
 | **赵星源** | 工具与环境交互；容错与故障恢复；执行循环与调度；会话与环境状态管理；权限审批与运行隔离 | **每个方向 2 篇** |
 | **王懿** | 子 Agent 与多 Agent 协作；扩展机制与生命周期钩子；运行观测、Trace 与集成接口；验证、评估与反馈 | **每个方向 2 篇** |
 
-### H0 与 Meta-Harness 的统一配置
+### 论文如何入库
+
+1. 每篇论文建立 `knowledge/sources/<paper-id>/`，保存 PDF、GitHub 链接和来源说明。
+2. 将论文与 GitHub 链接、负责人和进度同步到 `docs/research-plan.md` 的 2.1 表格。
+3. 把各个方向的高价值方法写入 `knowledge/methods/<method>/README.md`。
+4. 把可直接使用的代码放入 `knowledge/methods/<method>/code/`，并在 `knowledge/README.md` 登记。
+
+现有 [`query-specific-skill-refinement`](../knowledge/methods/query-specific-skill-refinement/README.md) 计入“指令与 Skill”的第 1 篇，可继续重构。
+
+### H0 与 Meta-Harness 的统一配置（以下仅供参考）
 
 周梦凡维护 `h0.yaml`，赵星源维护 `meta-harness.yaml`。两人共同讨论并维护 `terminal-bench-2.0-common.yaml`；各自文件只写本方法特有参数。
 
@@ -64,25 +73,16 @@ flowchart LR
 
 公共参数的讨论结果记录到 `experiments/configs/README.md`；未达成一致的字段先标记为“待定”，不要各自采用不同值。王懿只按确定后的配置汇总结果，不参与参数决定。
 
-### 论文如何入库
-
-1. 每篇论文建立 `knowledge/sources/<paper-id>/`，保存 PDF、GitHub 链接和来源说明。
-2. 将论文与 GitHub 链接、负责人和进度同步到 `docs/research-plan.md` 的 2.1 表格。
-3. 把各个方向的高价值方法写入 `knowledge/methods/<method>/README.md`。
-4. 把可直接使用的代码放入 `knowledge/methods/<method>/code/`，并在 `knowledge/README.md` 登记。
-
-现有 [`query-specific-skill-refinement`](../knowledge/methods/query-specific-skill-refinement/README.md) 计入“指令与 Skill”的第 1 篇，可继续重构。
-
 ## 阶段二与阶段三
 
-| 阶段 | 负责人 | 任务 |
-| --- | --- | --- |
-| 二 | **周梦凡** | 根据任务和方法代码实现 `H0 → H1`。 |
-| 二 | **赵星源** | 实现 `Trace → 诊断 → 修改 → 验证`。 |
-| 二 | **王懿** | 接入方法代码，记录采用、拒绝与实验反馈。 |
-| 三 | **周梦凡** | 扩充不同 harness 模块的方法与代码。 |
-| 三 | **赵星源** | 运行 baseline、完整方法和关键消融。 |
-| 三 | **王懿** | 检查未见任务、旧能力和总成本。 |
+| 阶段 | 任务 |
+| --- | --- |
+| 二 | 根据任务和方法代码实现 `H0 → H1`。 |
+| 二 | 实现 `Trace → 诊断 → 修改 → 验证`。 |
+| 二 | 接入方法代码，记录采用、拒绝与实验反馈。 |
+| 三 | 扩充不同 harness 模块的方法与代码。 |
+| 三 | 运行 baseline、完整方法和关键消融。 |
+| 三 | 检查未见任务、旧能力和总成本。 |
 
 | 阶段验收 | 条件 |
 | --- | --- |
