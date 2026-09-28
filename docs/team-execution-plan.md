@@ -21,17 +21,17 @@ flowchart LR
 
 | 负责人 | 任务 | 仓库相对路径 |
 | --- | --- | --- |
+| **王懿** | 创建并维护全部实验配置，核对两条实验线。 | `experiments/configs/terminal-bench-2.0-common.yaml`、`h0.yaml`、`meta-harness.yaml`、`experiments/README.md` |
 | **周梦凡** | 使用统一配置运行 Terminus-KIRA `H0`。 | 代码：`harness/h0/terminus-kira/`；入口：`agents.baseline_kira:AgentHarness`；配置：`experiments/configs/h0.yaml` |
 | **赵星源** | 使用统一配置复现 Meta-Harness，共同起点仍为 Terminus-KIRA。 | 代码：`optimizer/baselines/meta-harness/`；配置：`experiments/configs/meta-harness.yaml` |
-| **王懿** | 创建并维护全部实验配置，核对两条实验线。 | `experiments/configs/terminal-bench-2.0-common.yaml`、`h0.yaml`、`meta-harness.yaml`、`experiments/README.md` |
 
 ### 论文收集任务
 
 | 负责人 | 收集方向 | 数量 |
 | --- | --- | --- |
-| **周梦凡** | 指令与 Skill；上下文管理与压缩；长期记忆与经验复用；规划与任务进度管理；模型选择与资源分配 | **每个方向 3 篇** |
-| **赵星源** | 工具与环境交互；容错与故障恢复；执行循环与调度；会话与环境状态管理；权限审批与运行隔离 | **每个方向 3 篇** |
-| **王懿** | 子 Agent 与多 Agent 协作；扩展机制与生命周期钩子；运行观测、Trace 与集成接口；验证、评估与反馈 | **每个方向 3 篇** |
+| **周梦凡** | 指令与 Skill；上下文管理与压缩；长期记忆与经验复用；规划与任务进度管理；模型选择与资源分配 | **每个方向 2 篇** |
+| **赵星源** | 工具与环境交互；容错与故障恢复；执行循环与调度；会话与环境状态管理；权限审批与运行隔离 | **每个方向 2 篇** |
+| **王懿** | 子 Agent 与多 Agent 协作；扩展机制与生命周期钩子；运行观测、Trace 与集成接口；验证、评估与反馈 | **每个方向 2 篇** |
 
 ### H0 与 Meta-Harness 的统一配置
 
@@ -49,14 +49,29 @@ flowchart LR
 | Meta-Harness 额外成本 | 优化模型、搜索轮数、候选数和优化成本单独记录，不混入执行预算。 |
 | 配置变更 | 王懿统一修改；影响公平性的参数变化后，H0 与 Meta-Harness 一起重跑。 |
 
+以下只是配置字段示例，具体字段、取值和默认值由三人讨论；王懿负责整理结论并写入配置文件。
+
+| 配置部分 | 可讨论的字段示例 |
+| --- | --- |
+| Benchmark | 数据路径、split、任务范围、是否先跑 smoke task |
+| H0 | harness 路径、Python 入口、prompt 路径、可编辑边界 |
+| 执行模型 | provider、model、API 地址、temperature、上下文长度、最大输出 |
+| 执行预算 | 最大 step、tool call、token、单题超时、重试次数 |
+| 运行方式 | 重复次数、并发数、Docker 设置、缓存是否启用 |
+| 记录方式 | trace 保存路径、逐题分数、token、费用、时延、异常、候选版本 |
+| Meta-Harness | 优化模型、搜索轮数、每轮候选数、候选选择规则、优化预算 |
+| 凭据 | 只配置环境变量名，不把 API key 或密码写入仓库 |
+
+讨论结果记录到 `experiments/README.md`；未达成一致的字段先标记为“待定”，不要由个人自行采用不同值。
+
 ### 论文如何入库
 
 1. 每篇论文建立 `knowledge/sources/<paper-id>/`，保存 PDF、GitHub 链接和来源说明。
 2. 将论文与 GitHub 链接、负责人和进度同步到 `docs/research-plan.md` 的 2.1 表格。
-3. 比较同一方向的 3 篇论文，至少选择 1 个高价值方法写入 `knowledge/methods/<method>/README.md`。
+3. 把各个方向的高价值方法写入 `knowledge/methods/<method>/README.md`。
 4. 把可直接使用的代码放入 `knowledge/methods/<method>/code/`，并在 `knowledge/README.md` 登记。
 
-现有 [`query-specific-skill-refinement`](../knowledge/methods/query-specific-skill-refinement/README.md) 计入“指令与 Skill”的第 1 篇，可继续重构；周梦凡还需补充 2 篇。
+现有 [`query-specific-skill-refinement`](../knowledge/methods/query-specific-skill-refinement/README.md) 计入“指令与 Skill”的第 1 篇，可继续重构。
 
 ## 阶段二与阶段三
 
@@ -71,6 +86,6 @@ flowchart LR
 
 | 阶段验收 | 条件 |
 | --- | --- |
-| **验收一** | H0 与 Meta-Harness 在统一配置下稳定运行；2.1 每个方向登记 3 篇论文，并至少形成 1 个带可用代码的方法。 |
+| **验收一** | H0 与 Meta-Harness 在统一配置下稳定运行；2.1 每个方向登记 2 篇论文，并整理其中的高价值方法与可用代码。 |
 | **验收二** | 从 H0 出发，跑通初始化和至少一轮 trace 优化。 |
 | **最终验收** | 完成同条件 baseline、消融、封存测试、能力保留与成本分析。 |
