@@ -1,5 +1,4 @@
-# 实验记录
-
-在相同 `H0`、执行模型、优化模型、数据划分和预算下比较方法。优先记录 `H0`、Meta-Harness、完整方法，再根据需要补充强对照。
-
-消融至少区分任务导向初始化、外部方法知识和 trace 驱动优化；另比较结构化方法卡与直接提供原始文献，并检查自主库外提案的作用。报告未见任务效果、旧能力退化、有效修改所需尝试、token/时延，以及收集与人工复核成本。实验脚本和轻量配置入库，大体积输出留在本地 `runs/` 或 `artifacts/`。
+| 实验 | 执行 Harness | 优化方法 | Benchmark | 状态 | 结果 |
+| --- | --- | --- | --- | --- | --- |
+| H0 + Terminal-Bench 2.0 | [Terminus-KIRA](../harness/h0/terminus-kira/) | 无 | [Terminal-Bench 2.0](../benchmarks/terminal-bench-2.0/README.md) | 待运行 | — |
+| Meta-Harness + Terminal-Bench 2.0 | [Terminus-KIRA](../harness/h0/terminus-kira/) | Meta-Harness | [Terminal-Bench 2.0](../benchmarks/terminal-bench-2.0/README.md) | 待复现 | — |

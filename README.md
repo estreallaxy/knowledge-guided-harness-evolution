@@ -4,14 +4,14 @@
 
 完整研究动机、方法与分阶段规划见 [docs/research-plan.md](docs/research-plan.md)。当前仓库只搭建共同开发骨架，不包含已实现的方法或已复现的实验结果。
 
-第一阶段的 benchmark 划分、共同 H0 和首张知识标杆卡已固定为[协议 v1](docs/phase1-decisions.md)。目前完成的是来源核查与静态准备，尚无 benchmark 复现分数。
+Terminal-Bench 2.0 数据、共同 H0 和首张知识标杆卡已经完成静态准备；目前尚无 benchmark 运行结果。
 
 ## 目录
 
 | 路径 | 用途 |
 | --- | --- |
 | `docs/` | 研究方案、协议和决策记录。 |
-| `harness/h0/` | 各方法共用的初始执行 harness；任务侧代码和配置作为优化对象。 |
+| `harness/h0/<name>/` | 可独立运行的初始执行 harness；当前包含 `terminus-kira`。 |
 | `harness/candidates/` | 版本化候选 harness 的代码与配置；大体积运行产物不入库。 |
 | `optimizer/initialization/` | 任务建模、方法选择、适配及 `H0 → H1` 的实现。 |
 | `optimizer/evolution/` | trace 驱动的诊断、提案、验证与经验回写实现。 |
@@ -22,10 +22,9 @@
 
 ## 当前执行顺序
 
-1. 核对 Meta-Harness 与 Terminal-Bench 2.0 的可运行性，固定训练、开发、测试划分及预算。
-2. 确定可编辑的共同 `H0`，在同一开发任务上重跑 `H0` 和方法 baseline。
-3. 从“指令与 Skill”方向选择一篇论文，制作并人工复核首张方法卡。
-4. 打通知识引导的初始化与 trace 驱动优化闭环，再按封存测试协议评估。
+1. 在 Terminal-Bench 2.0 的训练任务上运行共同 H0，并记录环境、模型、trace、分数与成本。
+2. 在相同设置下复现 Meta-Harness，区分论文原设置与共同协议下的适配结果。
+3. 打通知识引导的初始化与 trace 驱动优化闭环，再按测试协议评估。
 
 评测运行器、任务数据和评分器不属于可优化的任务侧 harness。开发阶段不使用封存测试反馈挑选方法、调参或修改知识卡。
 

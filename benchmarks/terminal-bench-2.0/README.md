@@ -9,7 +9,7 @@
 | [`vendor_dataset.py`](vendor_dataset.py) | 用上游 Git checkout 逐题核验仓库中的快照并生成来源记录。 |
 | [`prepare_dataset.py`](prepare_dataset.py) | 检查上游 checkout 或已核验的仓库快照，复制为独立的 train/dev/test 数据集目录，并校验每题文件哈希。 |
 
-用 `python generate_split.py` 复核清单；若现存 JSON 与生成结果不同，脚本会失败。该清单**复用** [AutoSaddler](https://arxiv.org/html/2608.23041) 的划分规模，**不是**它的同一随机划分。所有方法的优化器只看 train 任务和完整 trace，dev 仅供选择候选，test 到最终评估才运行。仓库快照与固定上游提交逐题比对；正式实验从快照生成本地 train/dev/test 目录，再由 Harbor `-p` 运行，记录镜像 digest 和结果；完整模型与预算协议见[第一阶段决定](../../docs/phase1-decisions.md)。
+用 `python generate_split.py` 复核清单；若现存 JSON 与生成结果不同，脚本会失败。该清单**复用** [AutoSaddler](https://arxiv.org/html/2608.23041) 的划分规模，**不是**它的同一随机划分。所有方法的优化器只看 train 任务和完整 trace，dev 仅供选择候选，test 到最终评估才运行。仓库快照与固定上游提交逐题比对；正式实验从快照生成本地 train/dev/test 目录，再由 Harbor `-p` 运行，记录镜像 digest 和结果。
 
 仓库拉取后的数据准备命令（只复制数据，不运行模型或评分；在仓库根目录执行）：
 
