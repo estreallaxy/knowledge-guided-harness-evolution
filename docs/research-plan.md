@@ -51,15 +51,15 @@
 | 指令与 Skill | 周梦凡 | 1 / 2 | [论文](https://arxiv.org/abs/2604.04323) · [GitHub](https://github.com/UCSB-NLP-Chang/Skill-Usage) · [方法](../knowledge/methods/query-specific-skill-refinement/README.md) · [代码](../knowledge/methods/query-specific-skill-refinement/code/) |
 | 工具与环境交互 | 赵星源 | 0 / 2 | 待补充 |
 | 上下文管理与压缩 | 周梦凡 | 0 / 2 | 待补充 |
-| 长期记忆与经验复用 | 周梦凡 | 0 / 2 | 待补充 |
+| 长期记忆与经验复用 | 永康 | 0 / 2 | 待补充 |
 | 容错与故障恢复 | 赵星源 | 0 / 2 | 待补充 |
 | 执行循环与调度 | 赵星源 | 0 / 2 | 待补充 |
 | 规划与任务进度管理 | 周梦凡 | 0 / 2 | 待补充 |
 | 模型选择与资源分配 | 周梦凡 | 0 / 2 | 待补充 |
-| 会话与环境状态管理 | 赵星源 | 0 / 2 | 待补充 |
+| 会话与环境状态管理 | 永康 | 0 / 2 | 待补充 |
 | 子 Agent 与多 Agent 协作 | 王懿 | 0 / 2 | 待补充 |
 | 权限、审批与运行隔离 | 赵星源 | 0 / 2 | 待补充 |
-| 扩展机制与生命周期钩子 | 王懿 | 0 / 2 | 待补充 |
+| 扩展机制与生命周期钩子 | 永康 | 0 / 2 | 待补充 |
 | 运行观测、Trace 与集成接口 | 王懿 | 0 / 2 | 待补充 |
 | 验证、评估与反馈 | 王懿 | 0 / 2 | 待补充 |
 
@@ -167,20 +167,20 @@ Trace 的采集与展示本身也是可修改的 harness 部分：优化 agent �
 
 ## 4. 规划：先建立可比起点，再实现与检验方法
 
-第一组实验采用 **Meta-Harness + Terminal-Bench 2.0**：前者对应自主代码搜索，后者使用仓库中已经固定的数据快照与训练/开发/测试划分。阶段一由三位同学使用统一架构和配置分别运行，执行模型与优化模型均固定为 `deepseek-v4-flash`。**Baseline 是优化方法，`H0` 是各方法共同使用的初始执行 harness，两者不能混为一谈。**
+第一组实验采用 **Meta-Harness + Terminal-Bench 2.0**：前者对应自主代码搜索，后者使用仓库中已经固定的数据快照与训练/开发/测试划分。阶段一由四位同学使用统一架构和配置分别运行，执行模型与优化模型均固定为 `deepseek-v4-flash`。**Baseline 是优化方法，`H0` 是各方法共同使用的初始执行 harness，两者不能混为一谈。**
 
-三位同学的并行分工、阶段依赖和汇合条件见[三阶段并行执行计划](team-execution-plan.md)。
+四位同学的并行分工、阶段依赖和汇合条件见[三阶段并行执行计划](team-execution-plan.md)。
 
-### 4.1 第一阶段：三人独立复现 Meta-Harness
+### 4.1 第一阶段：四人独立复现 Meta-Harness
 
 | 工作 | 本阶段要完成什么 | 产物与完成条件 |
 | --- | --- | --- |
-| 三人独立复现 | 周梦凡、赵星源和王懿各自先跑共同 H0，再使用同一套 Meta-Harness 架构和配置完成复现。禁止直接复制另一人的运行产物充当复现结果。 | 三份运行命令、原始 trace、候选 harness、逐题分数与成本，分别保存到个人结果目录。 |
-| 公共实验配置 | 三人共同确定 benchmark、H0、预算、环境和记录字段；执行模型与优化模型均固定为 `deepseek-v4-flash`，所有人使用同一配置。 | `experiments/configs/terminal-bench-2.0-common.yaml`、`h0.yaml` 和 `meta-harness.yaml`；公共参数变化后三份实验一起重跑。 |
-| 交叉核对结果 | 三人完成后互查配置差异、运行完整性和结果字段，解释合理波动并修正协议偏差。 | 更新 `experiments/README.md` 和 `experiments/results/meta-harness/<成员>/`，保留可追溯的差异说明。 |
-| 收集并整理方法 | 三人按 2.1 的负责人并行收集；每个方向固定 2 篇论文。 | 论文全部进入 `knowledge/sources/` 并回填 2.1；高价值方法进入 `knowledge/methods/` 并提供代码。 |
+| 四人独立复现 | 周梦凡、赵星源、王懿和永康各自先跑共同 H0，再使用同一套 Meta-Harness 架构和配置完成复现。禁止直接复制另一人的运行产物充当复现结果。 | 四份运行命令、原始 trace、候选 harness、逐题分数与成本，分别保存到个人结果目录。 |
+| 公共实验配置 | 四人共同确定 benchmark、H0、预算、环境和记录字段；执行模型与优化模型均固定为 `deepseek-v4-flash`，所有人使用同一配置。 | `experiments/configs/terminal-bench-2.0-common.yaml`、`h0.yaml` 和 `meta-harness.yaml`；公共参数变化后四份实验一起重跑。 |
+| 交叉核对结果 | 四人完成后互查配置差异、运行完整性和结果字段，解释合理波动并修正协议偏差。 | 更新 `experiments/README.md` 和 `experiments/results/meta-harness/<成员>/`，保留可追溯的差异说明。 |
+| 收集并整理方法 | 四人按 2.1 的负责人并行收集；每个方向固定 2 篇论文。 | 论文全部进入 `knowledge/sources/` 并回填 2.1；高价值方法进入 `knowledge/methods/` 并提供代码。 |
 
-**进入第二阶段的条件：**三人均使用统一架构、统一配置和 `deepseek-v4-flash` 完成 Meta-Harness 独立复现，三份结果可追溯；2.1 每个方向登记 2 篇论文，并整理其中的高价值方法与可用代码。
+**进入第二阶段的条件：**四人均使用统一架构、统一配置和 `deepseek-v4-flash` 完成 Meta-Harness 独立复现，四份结果可追溯；2.1 每个方向登记 2 篇论文，并整理其中的高价值方法与可用代码。
 
 ### 4.2 第二阶段：实现最小的知识引导优化闭环
 

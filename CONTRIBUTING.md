@@ -7,8 +7,9 @@
 | 周梦凡 | `zhouMF` | `zhouMF/self-evolution-branch` | `/data1/users/zhouMF` |
 | 赵星源 | `zhaoXY` | `zhaoXY/self-evolution-branch` | `/data1/users/zhaoXY` |
 | 王懿 | `wangY` | `wangY/self-evolution-branch` | `/data1/users/wangY` |
+| 永康 | `yongK` | `yongK/self-evolution-branch` | `/data1/users/yongK` |
 
-三个 Linux 账号和工作区已分别创建，且可以使用各自账号进行密码 SSH 登录。首次克隆私有仓库前，还需为每个人配置 GitHub 账号协作者权限和 GitHub SSH 认证。准备就绪后，在自己的工作区克隆对应分支，例如周梦凡：
+每位成员使用独立 Linux 账号和工作区，并通过各自账号进行 SSH 登录。首次克隆私有仓库前，还需为本人配置 GitHub 协作者权限和 GitHub SSH 认证。准备就绪后，在自己的工作区克隆对应分支，例如周梦凡：
 
 ```bash
 cd /data1/users/zhouMF
@@ -27,7 +28,7 @@ git config user.email "你在 GitHub 验证过的邮箱"
 
 ## 每次开始开发
 
-先保存或提交自己尚未提交的改动，再同步 `main` 和自己的分支。以下以周梦凡的分支为例；另外两位把分支名换成上表中的名字。
+先保存或提交自己尚未提交的改动，再同步 `main` 和自己的分支。以下以周梦凡的分支为例；其他成员把账号和分支名换成上表中的名字。
 
 ```bash
 git status
