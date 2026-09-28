@@ -169,6 +169,8 @@ Trace 的采集与展示本身也是可修改的 harness 部分：优化 agent �
 
 第一组实验采用 **Meta-Harness + Terminal-Bench 2.0**：前者对应自主代码搜索，后者使用仓库中已经固定的数据快照与训练/开发/测试划分。当前工作从运行共同 H0 和复现 Meta-Harness 开始。**Baseline 是优化方法，`H0` 是各方法共同使用的初始执行 harness，两者不能混为一谈。**
 
+三位同学的并行分工、阶段依赖和汇合条件见[三阶段并行执行计划](team-execution-plan.md)。
+
 ### 4.1 第一阶段：运行共同 H0 并复现 Meta-Harness
 
 | 工作 | 本阶段要完成什么 | 产物与完成条件 |
