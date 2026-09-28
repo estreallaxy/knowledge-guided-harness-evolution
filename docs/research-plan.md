@@ -175,9 +175,10 @@ Trace 的采集与展示本身也是可修改的 harness 部分：优化 agent �
 
 | 工作 | 本阶段要完成什么 | 产物与完成条件 |
 | --- | --- | --- |
-| 运行共同 `H0` | 周梦凡使用统一配置运行 Terminus-KIRA：先完成一个 train 任务 smoke test，再运行冻结的训练集。 | 可重复的运行命令、原始 trace、逐题分数、token、费用与时延。 |
-| 复现 Meta-Harness | 赵星源使用统一配置跑通官方 KIRA 流程，再迁移到共同数据划分与预算；同时保留 Terminus 2 初始 baseline。 | 可重复执行的 baseline 流程、候选代码与日志；结果标记为论文设置复现或共同协议适配。 |
-| 统一实验配置 | 王懿统一维护公共配置、H0 入口配置和 Meta-Harness 入口配置；另外两人只消费配置。 | 三份配置位于 `experiments/configs/`；公共参数变化后两条实验线一起重跑。 |
+| 运行共同 `H0` | 周梦凡编写 H0 配置并运行 Terminus-KIRA：先完成一个 train 任务 smoke test，再运行冻结的训练集。 | `experiments/configs/h0.yaml`、运行命令、原始 trace、逐题分数与成本。 |
+| 复现 Meta-Harness | 赵星源编写 Meta-Harness 配置，跑通官方 KIRA 流程，再迁移到共同数据划分与预算。 | `experiments/configs/meta-harness.yaml`、baseline 流程、候选代码与日志。 |
+| 公共实验配置 | 周梦凡与赵星源商量共同参数，并共同维护公共配置；各自配置只保留方法差异。 | `experiments/configs/terminal-bench-2.0-common.yaml`；公共参数变化后两条实验线一起重跑。 |
+| 结果汇总与知识复核 | 王懿定义统一结果字段，汇总 H0 与 Meta-Harness，检查三人的知识入库。 | 更新 `experiments/README.md`、`experiments/results/`、`knowledge/README.md` 和 2.1 进度。 |
 | 收集并整理方法 | 三人按 2.1 的负责人并行收集；每个方向固定 2 篇论文。 | 论文全部进入 `knowledge/sources/` 并回填 2.1；高价值方法进入 `knowledge/methods/` 并提供代码。 |
 
 **进入第二阶段的条件：**共同 `H0` 和 Meta-Harness 能在同一开发任务、模型与预算下稳定运行；2.1 每个方向登记 2 篇论文，并整理其中的高价值方法与可用代码。

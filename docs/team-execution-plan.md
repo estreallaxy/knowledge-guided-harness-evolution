@@ -6,7 +6,7 @@
 flowchart LR
     A[阶段一：共同起点与知识收集] --> A1[周梦凡：H0]
     A --> A2[赵星源：Meta-Harness]
-    A --> A3[王懿：全部实验配置]
+    A --> A3[王懿：结果汇总与知识复核]
     A1 --> B{验收一}
     A2 --> B
     A3 --> B
@@ -21,9 +21,9 @@ flowchart LR
 
 | 负责人 | 任务 | 仓库相对路径 |
 | --- | --- | --- |
-| **王懿** | 创建并维护全部实验配置，核对两条实验线。 | `experiments/configs/terminal-bench-2.0-common.yaml`、`h0.yaml`、`meta-harness.yaml`、`experiments/README.md` |
-| **周梦凡** | 使用统一配置运行 Terminus-KIRA `H0`。 | 代码：`harness/h0/terminus-kira/`；入口：`agents.baseline_kira:AgentHarness`；配置：`experiments/configs/h0.yaml` |
-| **赵星源** | 使用统一配置复现 Meta-Harness，共同起点仍为 Terminus-KIRA。 | 代码：`optimizer/baselines/meta-harness/`；配置：`experiments/configs/meta-harness.yaml` |
+| **周梦凡** | 编写 H0 配置并运行 Terminus-KIRA；与赵星源共同确定公共参数。 | 代码：`harness/h0/terminus-kira/`；入口：`agents.baseline_kira:AgentHarness`；配置：`experiments/configs/h0.yaml` |
+| **赵星源** | 编写 Meta-Harness 配置并完成复现；与周梦凡共同确定公共参数。 | 代码：`optimizer/baselines/meta-harness/`；配置：`experiments/configs/meta-harness.yaml` |
+| **王懿** | 设计统一结果字段，汇总两条实验线，检查缺失记录；复核三人的知识入库。 | `experiments/README.md`、`experiments/results/`、`knowledge/README.md`、`docs/research-plan.md` 2.1 |
 
 ### 论文收集任务
 
@@ -35,11 +35,11 @@ flowchart LR
 
 ### H0 与 Meta-Harness 的统一配置
 
-全部配置由**王懿**维护。`h0.yaml` 与 `meta-harness.yaml` 只写各自入口和优化器差异，其余参数引用 `terminal-bench-2.0-common.yaml`。周梦凡和赵星源不单独修改公共参数。
+周梦凡维护 `h0.yaml`，赵星源维护 `meta-harness.yaml`。两人共同讨论并维护 `terminal-bench-2.0-common.yaml`；各自文件只写本方法特有参数。
 
 | 配置项 | 统一要求 |
 | --- | --- |
-| 配置文件 | 公共参数：`experiments/configs/terminal-bench-2.0-common.yaml`；H0 入口：`experiments/configs/h0.yaml`；Meta-Harness 入口：`experiments/configs/meta-harness.yaml`。 |
+| 配置文件 | 公共参数由两人共同维护：`experiments/configs/terminal-bench-2.0-common.yaml`；周梦凡维护 `h0.yaml`；赵星源维护 `meta-harness.yaml`。 |
 | Benchmark | `benchmarks/terminal-bench-2.0/`，使用同一 `split-v1.json` 和任务 ID。 |
 | 初始 Harness | 均从 `harness/h0/terminus-kira/` 开始，不直接修改 H0。 |
 | 执行模型 | 模型、provider、temperature、最大上下文和最大输出一致。 |
@@ -47,9 +47,9 @@ flowchart LR
 | 运行设置 | 每题重复次数、并发数、Docker 环境和超时设置一致。 |
 | 记录字段 | task ID、配置、trace、分数、token、费用、时延、异常和候选 harness 版本一致。 |
 | Meta-Harness 额外成本 | 优化模型、搜索轮数、候选数和优化成本单独记录，不混入执行预算。 |
-| 配置变更 | 王懿统一修改；影响公平性的参数变化后，H0 与 Meta-Harness 一起重跑。 |
+| 配置变更 | 公共参数须由周梦凡与赵星源商量后修改；影响公平性的参数变化后两条实验线一起重跑。 |
 
-以下只是配置字段示例，具体字段、取值和默认值由三人讨论；王懿负责整理结论并写入配置文件。
+以下只是配置字段示例，具体字段、取值和默认值由周梦凡与赵星源讨论，并分别写入公共配置或各自配置。
 
 | 配置部分 | 可讨论的字段示例 |
 | --- | --- |
@@ -62,7 +62,7 @@ flowchart LR
 | Meta-Harness | 优化模型、搜索轮数、每轮候选数、候选选择规则、优化预算 |
 | 凭据 | 只配置环境变量名，不把 API key 或密码写入仓库 |
 
-讨论结果记录到 `experiments/README.md`；未达成一致的字段先标记为“待定”，不要由个人自行采用不同值。
+公共参数的讨论结果记录到 `experiments/configs/README.md`；未达成一致的字段先标记为“待定”，不要各自采用不同值。王懿只按确定后的配置汇总结果，不参与参数决定。
 
 ### 论文如何入库
 
