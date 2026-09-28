@@ -1,7 +1,7 @@
 # 方法知识索引
 
-本页是第一层，只用于按问题发现候选方法。优化 agent 只有在方法可能适用时才读取第二层方法页；决定实现或核验后，再进入第三层证据文件。
+本页只用于快速找到可能适用的方法。进入方法页后即可判断是否采用；确定采用后直接运行随方法保存的代码。论文与核验材料不进入默认运行链路。
 
-| 方法 | 解决的问题 | Harness 模块 | 使用前提 | 证据状态 | 成本 | 第二层 |
+| 方法 | 解决的问题 | Harness 模块 | 使用前提 | 可运行代码 | 证据状态 | 方法页 |
 | --- | --- | --- | --- | --- | --- | --- |
-| Query-specific Skill Refinement | 检索到的 Skill 只有部分相关、含噪声，或执行 agent 难以直接采用 | Skill 选择、适配与加载 | 已有包含相关信息的候选 Skill；允许在目标环境中额外探索一次 | 论文与固定版本代码已核对；尚未迁移到共同 H0 | 每个任务增加一次完整探索与整理 | [方法页](methods/query-specific-skill-refinement/README.md) |
+| Query-specific Skill Refinement | 候选 Skill 部分相关、含噪声或难以直接采用 | Skill 选择、适配与加载 | 候选 Skill 已覆盖核心知识；允许额外探索一次 | 已提供；尚未接入共同 H0 | 论文与固定代码已核对，本地代码待真实 Harbor 运行 | [查看](methods/query-specific-skill-refinement/README.md) |

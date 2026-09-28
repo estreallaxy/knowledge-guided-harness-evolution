@@ -23,3 +23,7 @@ refined_skills/<skill-name>/SKILL.md (+ optional helpers)
 ```
 
 论文中的 refinement 产物是**任务专用 Skill**，不是跨任务共享的方法卡，也不是对执行 harness 源码的自动修改。迁移到本研究时必须显式实现 Skill 发现、加载、产物隔离和失败回退，不能只把 refinement 提示词追加到 Terminus-KIRA 的系统提示中。
+
+## 本仓库代码
+
+[`../code/refine_skills.py`](../code/refine_skills.py) 根据上述机制重新实现，而非复制上游脚本。它增加了三项面向本研究的约束：生成结果默认写入隔离目录、收集时检查 Skill 入口文件、显式应用前备份原 Skill。完整提示词随代码保存在 [`../code/refinement_prompt.md`](../code/refinement_prompt.md)，运行时不需要重新检索论文或上游仓库。

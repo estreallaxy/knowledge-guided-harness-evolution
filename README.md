@@ -2,7 +2,7 @@
 
 研究目标：把经过核验的外部 harness 方法知识提供给优化 agent，结合任务需求、执行 trace 和自主探索，构建并迭代可验证的 agent harness。
 
-完整研究动机、方法与分阶段规划见 [docs/research-plan.md](docs/research-plan.md)。当前仓库只搭建共同开发骨架，不包含已实现的方法或已复现的实验结果。
+完整研究动机、方法与分阶段规划见 [docs/research-plan.md](docs/research-plan.md)。当前仓库已经开始保存可直接运行的方法代码，但尚无 benchmark 运行结果。
 
 Terminal-Bench 2.0 数据、共同 H0 和第一项方法知识已经完成静态准备；目前尚无 benchmark 运行结果。
 
@@ -16,7 +16,7 @@ Terminal-Bench 2.0 数据、共同 H0 和第一项方法知识已经完成静态
 | `optimizer/initialization/` | 任务建模、方法选择、适配及 `H0 → H1` 的实现。 |
 | `optimizer/evolution/` | trace 驱动的诊断、提案、验证与经验回写实现。 |
 | `knowledge/sources/` | 外部论文与工程实践的来源索引和核验记录。 |
-| `knowledge/` | 三层方法知识：全局索引、方法决策页，以及实现与证据文件；原始材料单独保存。 |
+| `knowledge/` | 方法索引、方法说明与可运行代码；证据和原始材料独立保存。 |
 | `benchmarks/` | benchmark 适配器、固定任务划分和评测协议。 |
 | `experiments/` | baseline、消融和最终评估的可复现配置与脚本。 |
 
