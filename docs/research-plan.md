@@ -167,21 +167,20 @@ Trace 的采集与展示本身也是可修改的 harness 部分：优化 agent �
 
 ## 4. 规划：先建立可比起点，再实现与检验方法
 
-第一组实验采用 **Meta-Harness + Terminal-Bench 2.0**：前者对应自主代码搜索，后者使用仓库中已经固定的数据快照与训练/开发/测试划分。当前工作从运行共同 H0 和复现 Meta-Harness 开始。**Baseline 是优化方法，`H0` 是各方法共同使用的初始执行 harness，两者不能混为一谈。**
+第一组实验采用 **Meta-Harness + Terminal-Bench 2.0**：前者对应自主代码搜索，后者使用仓库中已经固定的数据快照与训练/开发/测试划分。阶段一由三位同学分别运行共同 H0 并独立复现 Meta-Harness。**Baseline 是优化方法，`H0` 是各方法共同使用的初始执行 harness，两者不能混为一谈。**
 
 三位同学的并行分工、阶段依赖和汇合条件见[三阶段并行执行计划](team-execution-plan.md)。
 
-### 4.1 第一阶段：运行共同 H0 并复现 Meta-Harness
+### 4.1 第一阶段：三人独立复现 Meta-Harness
 
 | 工作 | 本阶段要完成什么 | 产物与完成条件 |
 | --- | --- | --- |
-| 运行共同 `H0` | 周梦凡编写 H0 配置并运行 Terminus-KIRA：先完成一个 train 任务 smoke test，再运行冻结的训练集。 | `experiments/configs/h0.yaml`、运行命令、原始 trace、逐题分数与成本。 |
-| 复现 Meta-Harness | 赵星源编写 Meta-Harness 配置，跑通官方 KIRA 流程，再迁移到共同数据划分与预算。 | `experiments/configs/meta-harness.yaml`、baseline 流程、候选代码与日志。 |
-| 公共实验配置 | 周梦凡与赵星源商量共同参数，并共同维护公共配置；各自配置只保留方法差异。 | `experiments/configs/terminal-bench-2.0-common.yaml`；公共参数变化后两条实验线一起重跑。 |
-| 结果汇总与知识复核 | 王懿定义统一结果字段，汇总 H0 与 Meta-Harness，检查三人的知识入库。 | 更新 `experiments/README.md`、`experiments/results/`、`knowledge/README.md` 和 2.1 进度。 |
+| 三人独立复现 | 周梦凡、赵星源和王懿各自先跑共同 H0，再独立跑通 Meta-Harness 官方流程及共同协议。禁止直接复制另一人的运行产物充当复现结果。 | 三份个人配置、运行命令、原始 trace、候选 harness、逐题分数与成本，分别保存到个人结果目录。 |
+| 公共实验配置 | 三人共同确定 benchmark、H0、模型、预算、环境和记录字段；个人配置只保留运行入口和凭据变量等必要差异。 | `experiments/configs/terminal-bench-2.0-common.yaml`、`h0.yaml` 和三份 `meta-harness-<成员>.yaml`；公共参数变化后三份实验一起重跑。 |
+| 交叉核对结果 | 三人完成后互查配置差异、运行完整性和结果字段，解释合理波动并修正协议偏差。 | 更新 `experiments/README.md` 和 `experiments/results/meta-harness/<成员>/`，保留可追溯的差异说明。 |
 | 收集并整理方法 | 三人按 2.1 的负责人并行收集；每个方向固定 2 篇论文。 | 论文全部进入 `knowledge/sources/` 并回填 2.1；高价值方法进入 `knowledge/methods/` 并提供代码。 |
 
-**进入第二阶段的条件：**共同 `H0` 和 Meta-Harness 能在同一开发任务、模型与预算下稳定运行；2.1 每个方向登记 2 篇论文，并整理其中的高价值方法与可用代码。
+**进入第二阶段的条件：**三人均完成共同协议下的 Meta-Harness 独立复现，三份结果可追溯且主要配置一致；2.1 每个方向登记 2 篇论文，并整理其中的高价值方法与可用代码。
 
 ### 4.2 第二阶段：实现最小的知识引导优化闭环
 
