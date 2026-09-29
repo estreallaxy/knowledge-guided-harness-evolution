@@ -48,12 +48,12 @@ flowchart LR
 
 ### 独立复现工作区与共同协议
 
-四人各自维护完整的 Meta-Harness 代码副本、H0、配置、依赖环境、trace 和结果。任何运行时路径都不得指向其他成员的工作区。仓库根目录的 benchmark 与实验协议可以共享，但 benchmark 只读。
+四人各自维护从官方仓库完整克隆后导入本仓库的 Meta-Harness 代码副本、H0、配置、依赖环境、trace 和结果。上游 `.git` 已移除，个人修改由本仓库各自分支管理。任何运行时路径都不得指向其他成员的工作区。仓库根目录的 benchmark 与实验协议可以共享，但 benchmark 只读。
 
 | 配置项 | 统一要求 |
 | --- | --- |
 | 个人根目录 | `reproductions/<成员>/meta-harness/`；服务器上对应 `/data1/users/<成员>/knowledge-guided-harness-evolution/reproductions/<成员>/meta-harness/`。 |
-| 代码与 H0 | `code/` 是个人代码副本；H0 为 `code/agents/baseline_kira.py`，优化循环为 `code/meta_harness.py`。 |
+| 代码与 H0 | `code/` 是完整的个人仓库副本；H0 为 `code/reference_examples/terminal_bench_2/agents/baseline_kira.py`，优化循环为 `code/reference_examples/terminal_bench_2/meta_harness.py`。 |
 | 配置文件 | 每人在 `configs/` 维护自己的 `terminal-bench-2.0.yaml`、`h0.yaml` 和 `meta-harness.yaml`。 |
 | Benchmark | `benchmarks/terminal-bench-2.0/`，使用同一 `split-v1.json` 和任务 ID。 |
 | 初始 Harness | 四份个人 H0 从同一参考实现复制；原始复现阶段不修改 H0，后续候选只在本人工作区派生。 |

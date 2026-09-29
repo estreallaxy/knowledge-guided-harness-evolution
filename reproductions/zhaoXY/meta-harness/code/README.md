@@ -1,84 +1,73 @@
-# Terminal-Bench 2
+# Meta-Harness
 
-Terminal-Bench 2 reference experiment for Meta-Harness. The default search config in this release uses Harbor on the full 89-task TB2 dataset, with 2 search trials per task on Opus 4.6.
+![Meta-Harness](assets/repo.png)
+
+Meta-Harness is a framework for automated search over task-specific model harnesses: the code around a fixed base model that decides what to store, retrieve, and show while the model works. This repo contains the framework and two reference experiments from the paper.
+The paper is [Meta-Harness: End-to-End Optimization of Model Harnesses](https://arxiv.org/abs/2603.28052).
+
+If you build with Meta-Harness, please send us a link.
+We may add your repository, artifact, post, or paper to this README.
+
+## Contents
+
+- The reusable framework and onboarding flow for applying Meta-Harness to a new domain.
+- Two paper reference experiments under `reference_examples/`:
+  - [`reference_examples/text_classification/`](reference_examples/text_classification/README.md): memory-system search for text classification.
+  - [`reference_examples/terminal_bench_2/`](reference_examples/terminal_bench_2/README.md): scaffold evolution for Terminal-Bench 2.0.
+- The optimized Terminal-Bench 2 harness from the paper lives in the separate artifact repo: [stanford-iris-lab/meta-harness-tbench2-artifact](https://github.com/stanford-iris-lab/meta-harness-tbench2-artifact).
+
+## Community Projects
+
+- [Don't Train the Model, Evolve the Harness](https://huggingface.co/spaces/joelniklaus/harness-optimization): Applies Meta-Harness to Harvey's Legal Agent Benchmark.
+- [dkhanal/meta-harness](https://huggingface.co/dkhanal/meta-harness): Independent implementation with a Symptom2Disease demo.
+- [SuperagenticAI/metaharness](https://github.com/SuperagenticAI/metaharness): Python library and CLI for harness optimization with Codex.
+- [Harness Forge](https://github.com/001TMF/harness-forge): Reimplements Meta-Harness as a native Claude Code skill.
+- [meta-harness-on-islo](https://github.com/zozo123/meta-harness-on-islo): Applies the optimization loop to Islo sandboxes.
+- [VideoHarness-RSI](https://github.com/Tencent/VideoHarness-RSI): Applies Meta-Harness to long-video retrieval and context construction around frozen vision-language models.
 
 ## Quick Start
 
-Install:
+Text classification:
+
+```bash
+cd reference_examples/text_classification
+uv sync
+uv run python meta_harness.py --iterations 1
+```
+
+Terminal-Bench 2 smoke task:
 
 ```bash
 cd reference_examples/terminal_bench_2
 uv sync
-```
-
-Read setup details first:
-
-```bash
-sed -n '1,200p' SETUP.md
-```
-
-Start with a cheap smoke check:
-
-```bash
 uv run bash scripts/run_eval.sh agents.baseline_kira:AgentHarness full 1 1 -i extract-elf
 ```
 
-`run_eval.sh` first verifies that the exact imported object exists, is a class, and subclasses Harbor's `Terminus2`.
-It defaults to Runloop. Use the same entrypoint with Modal by setting:
+Use the subdir READMEs for setup details, expected runtime, and additional commands.
 
-```bash
-HARBOR_ENVIRONMENT=modal uv run bash scripts/run_eval.sh \
-  agents.baseline_kira:AgentHarness full 1 1 -i extract-elf
-```
+## Applying Meta-Harness To A New Domain
 
-When trying a new idea, validate it on the cheaper 30-task `hard` subset before paying for a full default search:
+Start by pointing your coding assistant to [`ONBOARDING.md`](ONBOARDING.md) and having a conversation with it.
+This should produce a `domain_spec.md` file with concrete details on how to proceed with implementing Meta-Harness for your domain.
 
-```bash
-uv run bash scripts/run_eval.sh agents.baseline_kira:AgentHarness hard 1 50
-```
+The shipped examples currently assume Claude Code as the proposer agent. To use a different proposer agent, adapt the example `claude_wrapper.py` scripts in [`reference_examples/text_classification/claude_wrapper.py`](reference_examples/text_classification/claude_wrapper.py) or [`reference_examples/terminal_bench_2/claude_wrapper.py`](reference_examples/terminal_bench_2/claude_wrapper.py). The main requirement is a wrapper that cleanly logs proposer interactions.
 
-Run one evolve iteration with the default full-dataset search config:
+## Release Note
 
-```bash
-uv run python meta_harness.py --iterations 1
-```
+This is a cleaned up version of the code we used for the paper. It has not been tested beyond verifying that it runs. Please let us know if anything goes wrong.
 
-Pass `--full-eval` if you also want the optional 5-trial winner pass on the full dataset.
+## Citation
 
-## Repro And Troubleshooting
+If this repository is useful for your research, please cite the paper:
 
-- The shipped `runloop` path requires both `ANTHROPIC_API_KEY` and `RUNLOOP_API_KEY`.
-- The Modal path requires `modal token new` or `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`.
-- The default paper-style config in this release is Opus 4.6, `full`, `89` tasks, `2` search trials, and concurrency `50`.
-- Anthropic API tier matters for both speed and failure rate.
-- Sharing the same Anthropic API key with other active projects can make runs substantially slower.
-- Many failures at higher concurrency are timeout failures caused by insufficient API throughput, not necessarily reasoning failures.
-- The recommended bring-up order is `extract-elf`, then `hard`, then the full default run.
-
-## Key Files
-
-- `.claude/skills/meta-harness-terminal-bench-2/SKILL.md`: proposer prior used by `meta_harness.py`.
-- `agents/`: baseline agents and the write target for generated candidates.
-- `prompt-templates/terminus-kira.txt`: prompt template used by `baseline_kira.py`.
-
-## Runtime And Cost
-
-With Opus 4.6 and a high-tier API key, the default 89x2 search run at concurrency `50` takes about 4-6 hours and costs roughly $500 _per iteration_. The recommended bring-up path is `extract-elf`, then `hard`, then the full default run.
-
-This setup is sensitive to concurrency and Anthropic API throughput. API tier matters, and sharing the same API key with other active projects can make runs much slower. Many failures at higher concurrency are timeout failures caused by insufficient API throughput at the chosen setting.
-
-The Harbor wall-clock timeout defaults to 8 hours. Override it for both the Python and shell layers with `HARBOR_TIMEOUT_SECONDS`.
-
-## Provider-Free Tests
-
-Run the agent import-path checks independently:
-
-```bash
-uv run python -m unittest -v tests.test_meta_harness.AgentClassValidationTests
-```
-
-Run the timeout wiring checks independently:
-
-```bash
-uv run python -m unittest -v tests.test_meta_harness.TimeoutWiringTests
+```bibtex
+@misc{lee2026metaharnessendtoendoptimizationmodel,
+      title={Meta-Harness: End-to-End Optimization of Model Harnesses},
+      author={Yoonho Lee and Roshen Nair and Qizheng Zhang and Kangwook Lee and Omar Khattab and Chelsea Finn},
+      year={2026},
+      eprint={2603.28052},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2603.28052},
+}
 ```
