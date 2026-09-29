@@ -23,10 +23,10 @@ flowchart LR
 
 | 负责人 | 任务 | 仓库相对路径 |
 | --- | --- | --- |
-| **周梦凡** | 使用统一架构和个人配置跑通共同 H0 与 Meta-Harness，并独立保存完整结果。 | 代码：`harness/h0/terminus-kira/`、`optimizer/baselines/meta-harness/`；配置：`experiments/configs/zhouMF/`；结果：`experiments/results/meta-harness/zhouMF/` |
-| **赵星源** | 使用统一架构和个人配置跑通共同 H0 与 Meta-Harness，并独立保存完整结果。 | 代码：`harness/h0/terminus-kira/`、`optimizer/baselines/meta-harness/`；配置：`experiments/configs/zhaoXY/`；结果：`experiments/results/meta-harness/zhaoXY/` |
-| **王懿** | 使用统一架构和个人配置跑通共同 H0 与 Meta-Harness，并独立保存完整结果。 | 代码：`harness/h0/terminus-kira/`、`optimizer/baselines/meta-harness/`；配置：`experiments/configs/wangY/`；结果：`experiments/results/meta-harness/wangY/` |
-| **永康** | 使用统一架构和个人配置跑通共同 H0 与 Meta-Harness，并独立保存完整结果。 | 代码：`harness/h0/terminus-kira/`、`optimizer/baselines/meta-harness/`；配置：`experiments/configs/yongK/`；结果：`experiments/results/meta-harness/yongK/` |
+| **周梦凡** | 在个人工作区独立维护代码、H0、配置和运行结果。 | `reproductions/zhouMF/meta-harness/` |
+| **赵星源** | 在个人工作区独立维护代码、H0、配置和运行结果。 | `reproductions/zhaoXY/meta-harness/` |
+| **王懿** | 在个人工作区独立维护代码、H0、配置和运行结果。 | `reproductions/wangY/meta-harness/` |
+| **永康** | 在个人工作区独立维护代码、H0、配置和运行结果。 | `reproductions/yongK/meta-harness/` |
 
 ### 论文收集任务
 
@@ -46,20 +46,23 @@ flowchart LR
 
 现有 [`query-specific-skill-refinement`](../knowledge/methods/query-specific-skill-refinement/README.md) 计入“指令与 Skill”的第 1 篇，可继续重构。
 
-### 统一复现架构与个人配置（以下仅供参考）
+### 独立复现工作区与共同协议
 
-四人使用同一份 Meta-Harness 代码，各自在 `experiments/configs/<成员>/` 维护配置。共同实验协议只规定公平比较所需的关键条件，不由四人共同维护同一份配置文件。
+四人各自维护完整的 Meta-Harness 代码副本、H0、配置、依赖环境、trace 和结果。任何运行时路径都不得指向其他成员的工作区。仓库根目录的 benchmark 与实验协议可以共享，但 benchmark 只读。
 
 | 配置项 | 统一要求 |
 | --- | --- |
-| 配置文件 | 每人分别维护 `terminal-bench-2.0.yaml`、`h0.yaml` 和 `meta-harness.yaml`，存入自己的配置目录。 |
+| 个人根目录 | `reproductions/<成员>/meta-harness/`；服务器上对应 `/data1/users/<成员>/knowledge-guided-harness-evolution/reproductions/<成员>/meta-harness/`。 |
+| 代码与 H0 | `code/` 是个人代码副本；H0 为 `code/agents/baseline_kira.py`，优化循环为 `code/meta_harness.py`。 |
+| 配置文件 | 每人在 `configs/` 维护自己的 `terminal-bench-2.0.yaml`、`h0.yaml` 和 `meta-harness.yaml`。 |
 | Benchmark | `benchmarks/terminal-bench-2.0/`，使用同一 `split-v1.json` 和任务 ID。 |
-| 初始 Harness | 均从 `harness/h0/terminus-kira/` 开始，不直接修改 H0。 |
+| 初始 Harness | 四份个人 H0 从同一参考实现复制；原始复现阶段不修改 H0，后续候选只在本人工作区派生。 |
 | 执行模型 | 四人统一使用 `deepseek-v4-flash`；provider、temperature、最大上下文和最大输出保持一致。 |
 | 优化模型 | Meta-Harness 的优化 Agent 统一使用 `deepseek-v4-flash`。 |
 | 执行预算 | 每题最大 step、tool call、token、墙钟时间和重试次数一致。 |
 | 运行设置 | 每题重复次数、并发数、Docker 环境和超时设置一致。 |
 | 记录字段 | task ID、配置、trace、分数、token、费用、时延、异常和候选 harness 版本一致。 |
+| 运行产物 | 本人的 `runs/`；不得读取或写入其他成员的 `runs/`。 |
 | Meta-Harness 额外成本 | 优化模型、搜索轮数、候选数和优化成本单独记录，不混入执行预算。 |
 | 配置变更 | 每人自行维护和提交；若变更 benchmark、H0、模型或预算等关键条件，须在结果中说明，并在交叉核对时恢复可比条件后重跑。 |
 
@@ -76,7 +79,7 @@ flowchart LR
 | Meta-Harness | 优化模型固定为 `deepseek-v4-flash`；共同确定搜索轮数、每轮候选数、候选选择规则和优化预算 |
 | 凭据 | 只配置环境变量名，不把 API key 或密码写入仓库 |
 
-共同实验协议记录到 `experiments/configs/README.md`，个人取值和运行入口只写入自己的配置目录。四人完成后交叉核对个人配置、trace、分数与成本记录。
+共同实验协议记录到 `experiments/configs/README.md`，个人取值和运行入口只写入 `reproductions/<成员>/meta-harness/configs/`。四人完成后只通过提交的配置、说明和结果摘要交叉核对，不共享可写运行目录。
 
 ## 阶段二与阶段三
 

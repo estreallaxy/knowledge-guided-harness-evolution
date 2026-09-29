@@ -37,7 +37,7 @@
 | [SkillWeaver](https://arxiv.org/abs/2606.18051) | 组合和适配多个 Skill。 | 组合兼容性、任务适配。 | Skill 只是 harness 的一个模块，仍需覆盖工具、上下文、记忆、容错、调度和观测等机制。 |
 | [Anything2Skill](https://arxiv.org/abs/2606.09316) | 把外部材料转化为可使用的 Skill。 | 从材料到结构化知识的转换流程。 | 需要增加论文主张、代码行为、适用边界与本地迁移证据的分别核验。 |
 | [Repo-To-Skill](https://arxiv.org/abs/2609.02749) | 从代码仓库提取可复用 Skill。 | 将实现一并沉淀，减少运行时再次检索。 | 需要处理跨方法依赖、冲突、版本和实验反馈回写。 |
-| [How Well Do Agentic Skills Work in the Wild](https://arxiv.org/abs/2604.04323) · [GitHub](https://github.com/UCSB-NLP-Chang/Skill-Usage) | 研究 Skill 在真实查询中的使用，并提供 query-specific refinement 机制。 | 已作为第一项“指令与 Skill”方法，验证三层披露和随库代码的组织方式。 | 尚未接入共同 H0 并运行 Terminal-Bench 2.0，迁移收益未知。 |
+| [How Well Do Agentic Skills Work in the Wild](https://arxiv.org/abs/2604.04323) · [GitHub](https://github.com/UCSB-NLP-Chang/Skill-Usage) | 研究 Skill 在真实查询中的使用，并提供 query-specific refinement 机制。 | 已作为第一项“指令与 Skill”方法，验证三层披露和随库代码的组织方式。 | 尚未接入 H0 参考实现并运行 Terminal-Bench 2.0，迁移收益未知。 |
 | [Library Drift](https://arxiv.org/abs/2605.19576) | 讨论方法或能力库持续积累后的漂移风险。 | 条目版本、冲突、过时和错误淘汰的管理。 | 需要用本地实验确定推荐范围，不能把一次成功直接推广到新任务。 |
 
 ## 3. Baseline 调研结果
@@ -80,4 +80,4 @@
 | 可以确认 | Meta-Harness 提供了直接可复现的自主 harness 优化起点；外部研究已经覆盖 trace 诊断、模块化优化、任务适配、Skill 转换和经验维护等局部环节；这些机制可以为当前 Method 提供组件和实验对照。 |
 | 暂定判断 | 尚未发现与当前完整闭环同构的工作；“经过核验的外部方法知识 + 任务导向初始化 + trace 持续优化 + 自主探索”具有进一步研究价值。 |
 | 不能提前声称 | 外部方法库一定是独立创新点；一定比 Meta-Harness 更快、更稳或上限更高；论文中的单项收益可以直接迁移或叠加。 |
-| 下一步验证 | 先由四位同学使用统一架构、个人配置和 `deepseek-v4-flash`，在共同 H0 与 Terminal-Bench 2.0 上分别复现 Meta-Harness；核对配置满足共同实验协议后，再比较无知识、原始文献、结构化方法知识和完整闭环。 |
+| 下一步验证 | 先由四位同学在各自隔离的代码、H0、配置与运行目录中使用 `deepseek-v4-flash` 复现 Meta-Harness；核对四份 H0 起点和实验条件一致后，再比较无知识、原始文献、结构化方法知识和完整闭环。 |
