@@ -7,6 +7,6 @@
 | 周梦凡 | `zhouMF/meta-harness/` | `zhouMF/self-evolution-branch` |
 | 赵星源 | `zhaoXY/meta-harness/` | `zhaoXY/self-evolution-branch` |
 | 王懿 | `wangY/meta-harness/` | `wangY/self-evolution-branch` |
-| 永康 | `yongK/meta-harness/` | `yongK/self-evolution-branch` |
+| 李永康 | `liYK/meta-harness/` | `liYK/self-evolution-branch` |
 
 仅以下内容共享：`benchmarks/terminal-bench-2.0/` 的只读数据、评测协议、模型要求和结果字段定义。个人代码修改、依赖环境、配置、缓存、trace 与结果均留在本人的工作区。

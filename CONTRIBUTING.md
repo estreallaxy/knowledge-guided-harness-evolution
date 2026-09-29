@@ -7,7 +7,7 @@
 | 周梦凡 | `zhouMF` | `zhouMF/self-evolution-branch` | `/data1/users/zhouMF` |
 | 赵星源 | `zhaoXY` | `zhaoXY/self-evolution-branch` | `/data1/users/zhaoXY` |
 | 王懿 | `wangY` | `wangY/self-evolution-branch` | `/data1/users/wangY` |
-| 永康 | `yongK` | `yongK/self-evolution-branch` | `/data1/users/yongK` |
+| 李永康 | `liYK` | `liYK/self-evolution-branch` | `/data1/users/liYK` |
 
 每位成员使用独立 Linux 账号和工作区，并通过各自账号进行 SSH 登录。首次克隆私有仓库前，还需为本人配置 GitHub 协作者权限和 GitHub SSH 认证。准备就绪后，在自己的工作区克隆对应分支，例如周梦凡：
 

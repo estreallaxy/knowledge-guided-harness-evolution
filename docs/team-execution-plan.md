@@ -7,7 +7,7 @@ flowchart LR
     A[阶段一：独立复现与知识收集] --> A1[周梦凡：复现 Meta-Harness]
     A --> A2[赵星源：复现 Meta-Harness]
     A --> A3[王懿：复现 Meta-Harness]
-    A --> A4[永康：复现 Meta-Harness]
+    A --> A4[李永康：复现 Meta-Harness]
     A1 --> B{验收一}
     A2 --> B
     A3 --> B
@@ -26,7 +26,7 @@ flowchart LR
 | **周梦凡** | 在个人工作区独立维护代码、H0、配置和运行结果。 | `reproductions/zhouMF/meta-harness/` |
 | **赵星源** | 在个人工作区独立维护代码、H0、配置和运行结果。 | `reproductions/zhaoXY/meta-harness/` |
 | **王懿** | 在个人工作区独立维护代码、H0、配置和运行结果。 | `reproductions/wangY/meta-harness/` |
-| **永康** | 在个人工作区独立维护代码、H0、配置和运行结果。 | `reproductions/yongK/meta-harness/` |
+| **李永康** | 在个人工作区独立维护代码、H0、配置和运行结果。 | `reproductions/liYK/meta-harness/` |
 
 ### 论文收集任务
 
@@ -35,7 +35,7 @@ flowchart LR
 | **周梦凡** | 指令与 Skill；上下文管理与压缩；规划与任务进度管理；模型选择与资源分配 | **每个方向 2 篇** |
 | **赵星源** | 工具与环境交互；容错与故障恢复；执行循环与调度；权限审批与运行隔离 | **每个方向 2 篇** |
 | **王懿** | 子 Agent 与多 Agent 协作；运行观测、Trace 与集成接口；验证、评估与反馈 | **每个方向 2 篇** |
-| **永康** | 长期记忆与经验复用；会话与环境状态管理；扩展机制与生命周期钩子 | **每个方向 2 篇** |
+| **李永康** | 长期记忆与经验复用；会话与环境状态管理；扩展机制与生命周期钩子 | **每个方向 2 篇** |
 
 ### 论文如何入库
 
