@@ -49,16 +49,16 @@
 | 收集方向 | 负责人 | 进度 | 论文、GitHub、方法与代码链接 |
 | --- | --- | --- | --- |
 | 指令与 Skill | 周梦凡 | 1 / 2 | [论文](https://arxiv.org/abs/2604.04323) · [GitHub](https://github.com/UCSB-NLP-Chang/Skill-Usage) · [方法](../knowledge/methods/query-specific-skill-refinement/README.md) · [代码](../knowledge/methods/query-specific-skill-refinement/code/) |
-| 工具与环境交互 | 赵星源 | 0 / 2 | 待补充 |
+| 工具与环境交互 | 赵星源 | 2 / 2 | [ToolSandbox 论文](https://aclanthology.org/2025.findings-naacl.65/) · [ToolSandbox GitHub](https://github.com/apple/ToolSandbox) · [BFCL 论文](https://proceedings.mlr.press/v267/patil25a.html) · [BFCL GitHub](https://github.com/ShishirPatil/gorilla) · [方法](../knowledge/methods/toolsandbox/README.md)、[BFCL 方法](../knowledge/methods/bfcl/README.md) · [代码](../knowledge/methods/toolsandbox/code/)、[BFCL 代码](../knowledge/methods/bfcl/code/) |
 | 上下文管理与压缩 | 周梦凡 | 0 / 2 | 待补充 |
 | 长期记忆与经验复用 | 李永康 | 0 / 2 | 待补充 |
-| 容错与故障恢复 | 赵星源 | 0 / 2 | 待补充 |
-| 执行循环与调度 | 赵星源 | 0 / 2 | 待补充 |
+| 容错与故障恢复 | 赵星源 | 2 / 2 | [MAST 论文](https://proceedings.neurips.cc/paper_files/paper/2025/hash/b1041e52d3be19f0a9bc491657488e4a-Abstract-Datasets_and_Benchmarks_Track.html) · [MAST GitHub](https://github.com/multi-agent-systems-failure-taxonomy/MAST) · [AgentDiagnose 论文](https://aclanthology.org/2025.emnlp-demos.15/) · [AgentDiagnose GitHub](https://github.com/oootttyyy/AgentDiagnose) · [方法](../knowledge/methods/mast/README.md)、[AgentDiagnose 方法](../knowledge/methods/agentdiagnose/README.md) · [MAST 代码](../knowledge/methods/mast/code/)、[AgentDiagnose 代码](../knowledge/methods/agentdiagnose/code/) |
+| 执行循环与调度 | 赵星源 | 2 / 2 | [Open Grounded Planning 论文](https://aclanthology.org/2024.acl-long.272/) · [Open Grounded Planning GitHub](https://github.com/Shiguang-Guo/Open-Grounded-Planning) · [HiAgent 论文](https://aclanthology.org/2025.acl-long.1575/) · [HiAgent GitHub](https://github.com/HiAgent2024/HiAgent) · [方法](../knowledge/methods/open-grounded-planning/README.md)、[HiAgent 方法](../knowledge/methods/hiagent/README.md) · [代码](../knowledge/methods/open-grounded-planning/code/)、[HiAgent 代码](../knowledge/methods/hiagent/code/) |
 | 规划与任务进度管理 | 周梦凡 | 0 / 2 | 待补充 |
 | 模型选择与资源分配 | 周梦凡 | 0 / 2 | 待补充 |
 | 会话与环境状态管理 | 李永康 | 0 / 2 | 待补充 |
 | 子 Agent 与多 Agent 协作 | 王懿 | 0 / 2 | 待补充 |
-| 权限、审批与运行隔离 | 赵星源 | 0 / 2 | 待补充 |
+| 权限、审批与运行隔离 | 赵星源 | 2 / 2 | [R-Judge 论文](https://aclanthology.org/2024.findings-emnlp.79/) · [R-Judge GitHub](https://github.com/Lordog/R-Judge) · [RedCode 论文](https://proceedings.neurips.cc/paper_files/paper/2024/hash/bfd082c452dffb450d5a5202b0419205-Abstract-Datasets_and_Benchmarks_Track.html) · [RedCode GitHub](https://github.com/AI-secure/RedCode) · [方法](../knowledge/methods/r-judge/README.md)、[RedCode 方法](../knowledge/methods/redcode/README.md) · [代码](../knowledge/methods/r-judge/code/)、[RedCode 代码](../knowledge/methods/redcode/code/) |
 | 扩展机制与生命周期钩子 | 李永康 | 0 / 2 | 待补充 |
 | 运行观测、Trace 与集成接口 | 王懿 | 0 / 2 | 待补充 |
 | 验证、评估与反馈 | 王懿 | 0 / 2 | 待补充 |
