@@ -1,0 +1,69 @@
+# Meta-Harness（优化线）配置 —— 王懿
+# 版本：2026-10-08
+#
+# 本文件是运行配置的**记录**，代码不解析它；生效值见 "如何生效"。
+# 记录格式遵循 experiments/configs/README.md 与 experiments/results/README.md。
+
+method:
+  name: meta-harness
+  upstream: Meta-Harness 仓库（vendoring 提交 23b053a）
+  loop: H0 → 候选 Hn → 在 train 上评分 → 更新前沿 → 下一轮候选
+  frontier_source: logs/frontier_val.json
+  candidate_protocol: 优化 Agent 把候选 harness 写入 agents/，并写 logs/pending_eval.json
+
+optimizer:
+  # 团队约定（docs/team-execution-plan.md）：优化模型固定为 deepseek-v4-flash。
+  model: deepseek-v4-flash                # 端点模型 id：deepseek-flash（与执行模型同一个）
+  driver: Claude Code CLI（claude_wrapper.py，`--setting-sources ""`）
+  provider_env: [ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN]   # 见 ../.env.example，值不写入仓库
+  allowed_tools: [Read, Glob, Grep, Agent, Write, Edit, Bash]
+  editable_scope:
+    - agents/**                           # 候选 harness 文件（H0 起点：agents/baseline_kira.py）
+    - logs/pending_eval.json              # 声明待评估的候选
+  # 上游允许优化 Agent 同时改造「任务侧 harness」（research-plan.md 第 3 节允许把
+  # trace 采集与展示作为修改对象）；本轮先只开放 agents/，扩大范围需在结果中说明。
+  forbidden_scope:
+    - benchmarks/terminal-bench-2.0/**    # 判分器与划分清单
+    - …/tb2-split-v1/{dev,test}           # 封存划分，容器不挂载
+
+budget:
+  # ⚠ 待四人共同确定（team-execution-plan.md 第 79 行）：搜索轮数、每轮候选数、
+  #   候选选择规则、优化预算由四人共同确定。下列为上游默认值，先按此复现并在
+  #   交叉核对时统一；若与其他人不同，影响公平性的差异须修正后重跑。
+  search_rounds: 5                        # --iterations 默认值
+  candidates_per_round: null              # 待四人确认；上游每轮由优化 Agent 自行决定候选数
+  selection_rule: 前沿按 train 上的平均得分保留最优（上游实现）
+  trials_per_candidate: 2                 # --trials / DEFAULT_SEARCH_TRIALS
+  propose_timeout_s: 2400                 # --propose-timeout，单轮优化 Agent 墙钟上限
+  harbor_timeout_s: 28800                 # 整轮运行墙钟上限（8h）；run_eval.sh 的 HARBOR_TIMEOUT_SECONDS 默认值
+  concurrency: 50                         # --concurrent / DEFAULT_CONCURRENCY
+
+execution:
+  # 与 H0 线完全一致，否则两条线不可比（见 h0.yaml 的 execution 块）。
+  model: deepseek/deepseek-flash
+  temperature: 0.7
+  environment: docker
+  split: train
+  n_attempts_per_task: 2
+
+records:
+  # 按 experiments/results/README.md 产出；优化器成本单独记录，不混入执行预算。
+  per_task: experiments/results/<benchmark>/<run_id>/per-task.jsonl
+  summary: experiments/results/<benchmark>/<run_id>/summary.json
+  optimizer_block:
+    model: deepseek-v4-flash
+    search_rounds: <int>
+    candidates: [<版本标识 + 各候选的 train 分数>]
+    tokens: <int>                          # 优化器 token，须与执行模型 tokens_* 分开
+    cost: <number>
+  run_id_format: <harness版本>-<方法>-<日期>-<序号>   # 如 meta-harness-tb2-20261008-1
+  config_hash: 变更后两条实验线一起重跑，不混合不同配置的结果（README 第 5 条）
+
+# ── 如何生效 ────────────────────────────────────────────────────────
+#   export HARBOR_DATASET_PATH=/data1/users/wangY/benchmarks/tb2-split-v1/train
+#   export HARBOR_TASK_COUNT=30
+#   cd code/reference_examples/terminal_bench_2
+#   uv run python meta_harness.py --iterations 5 --trials 2
+#
+# 前置检查：propose_claude 会先校验 ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN，
+# 缺失时本轮直接返回失败而不发起调用。改动详见 ../notes/environment.md。

@@ -1,0 +1,73 @@
+# 基准与数据划分配置 —— 王懿
+# 版本：2026-10-08
+#
+# 说明：本文件是运行配置的**记录**，`configs/*.yaml` 不参与自动化解析（代码不读取它）。
+# 实际生效的是 `scripts/run_eval.sh` 与 `meta_harness.py` 中的环境变量，见 "如何生效"。
+# 记录格式遵循 experiments/configs/README.md；适配细节见 ../notes/environment.md。
+
+benchmark:
+  id: terminal-bench@2.0
+  repo: https://github.com/harbor-framework/terminal-bench-2
+  commit: 69671fbaac6d67a7ef0dfec016cc38a64ef7a77c
+  task_count_total: 89
+  runner: harbor 0.18.0
+  judge: 各任务自带 tests（随镜像，不在本仓库修改）
+
+split:
+  manifest: benchmarks/terminal-bench-2.0/split-v1.json   # 仓库内，四人共用同一份
+  seed: kghe-tb2-v1-2026-09-27
+  method: SHA-256 sort of SEED:task_id, then contiguous 30/19/40 assignment
+  sizes:
+    train: 30
+    dev: 19
+    test: 40
+  # 仓库外、本机独立生成的划分目录（不指向任何其他成员的工作区）：
+  #   python3 benchmarks/terminal-bench-2.0/prepare_dataset.py \
+  #     --source benchmarks/terminal-bench-2.0/dataset \
+  #     --output /data1/users/wangY/benchmarks/tb2-split-v1
+  local_dataset: /data1/users/wangY/benchmarks/tb2-split-v1
+
+# 划分在优化循环中的角色（docs/research-plan.md 第 4.1 节：用开发集选候选、封存测试集）。
+#
+# ⚠ 待四人确认后统一实现：上游 meta_harness.py 用同一套任务做搜索与选择，
+#   目前只做到「可以指向任一划分目录」，阶段分离尚未落地。当前实现状态：
+#     - 搜索 + 候选选择：同一次运行内使用 --dataset-path 指向的单一划分
+#     - test：从未被优化循环触碰（只要 DATASET_PATH 不指向 test 目录）
+#   本轮复现先固定 HARBOR_DATASET_PATH 指向 train，避免优化器看到 dev/test。
+roles:
+  train: 优化器可见；搜索与候选选择都在此划分上进行
+  dev: 四人协议确认后再用于候选选择；当前不进入优化循环
+  test: 封存；只用于最终评估，优化器容器不得挂载
+  status: pending-joint-confirmation
+
+# 冒烟题：上游固定 extract-elf，但该题在固定划分里属于 **test** 集。
+# 本地适配（2026-10-08）改为按实际数据集解析，优先取 train 集的同档题目
+# （sanitize-git-repo，medium / 专家 30min）；未配置本地划分时保持上游行为。
+# 环境变量 HARBOR_SMOKE_TASK 可覆盖。
+smoke_test:
+  registry_default: extract-elf        # 上游行为，仅在不使用本地划分时
+  local_split_default: sanitize-git-repo
+  override_env: HARBOR_SMOKE_TASK
+
+judge:
+  # 判分器不改造：直接用各任务镜像内自带的 tests/run-tests.sh，score 取原始输出。
+  modification: none
+  score_range: 0-1
+
+secrecy:
+  # 优化器运行容器只挂载 train/，不挂载完整上游 checkout、dev/ 或 test/
+  # （benchmarks/terminal-bench-2.0/README.md）。
+  optimizer_visible: train
+  sealed: [dev, test]
+
+# ── 如何生效 ────────────────────────────────────────────────────────
+# 密钥与端点只从环境变量读取，不写入仓库。运行前（凭据见 .env.example）：
+#
+#   export HARBOR_DATASET_PATH=/data1/users/wangY/benchmarks/tb2-split-v1/train
+#   export HARBOR_TASK_COUNT=30
+#   cd code/reference_examples/terminal_bench_2
+#   uv run python meta_harness.py --iterations 5 --trials 2
+#
+# run_eval.sh 内部的展开：HARBOR_DATASET_PATH 非空时用 `harbor run -p <path>`，
+# 否则回退上游的 `harbor run -d terminal-bench@2.0`（全量 89 题）。
+# HARBOR_DATASET_PATH 同时决定冒烟题取自哪个划分目录。
