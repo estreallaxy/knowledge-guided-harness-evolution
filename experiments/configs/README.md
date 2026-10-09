@@ -8,5 +8,6 @@
 | 赵星源 | `../../reproductions/zhaoXY/meta-harness/configs/` | `terminal-bench-2.0.yaml`、`h0.yaml`、`meta-harness.yaml` |
 | 王懿 | `../../reproductions/wangY/meta-harness/configs/` | `terminal-bench-2.0.yaml`、`h0.yaml`、`meta-harness.yaml` |
 | 李永康 | `../../reproductions/liYK/meta-harness/configs/` | `terminal-bench-2.0.yaml`、`h0.yaml`、`meta-harness.yaml` |
+| 李嘉旺 | `../../reproductions/liJW/meta-harness/configs/` | `terminal-bench-2.0.yaml`、`h0.yaml`、`meta-harness.yaml` |
 
-四份配置须使用相同的 benchmark 划分、内容一致但路径独立的 H0、`deepseek-v4-flash`、实验预算和记录字段。凭据只通过环境变量提供，不写入仓库。
+五份配置须使用相同的 benchmark 划分、内容一致但路径独立的 H0、`deepseek-v4-flash`、实验预算和记录字段。凭据只通过环境变量提供，不写入仓库。

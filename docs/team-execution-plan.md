@@ -1,6 +1,6 @@
 # 三阶段任务计划
 
-阶段之间串行；每个阶段内四人并行。
+阶段之间串行；每个阶段内五人并行。
 
 ```mermaid
 flowchart LR
@@ -8,10 +8,12 @@ flowchart LR
     A --> A2[赵星源：复现 Meta-Harness]
     A --> A3[王懿：复现 Meta-Harness]
     A --> A4[李永康：复现 Meta-Harness]
+    A --> A5[李嘉旺：复现 Meta-Harness]
     A1 --> B{验收一}
     A2 --> B
     A3 --> B
     A4 --> B
+    A5 --> B
     B --> C[阶段二：优化闭环]
     C --> D{验收二}
     D --> E[阶段三：扩展验证]
@@ -27,15 +29,17 @@ flowchart LR
 | **赵星源** | 在个人工作区独立维护代码、H0、配置和运行结果。 | `reproductions/zhaoXY/meta-harness/` |
 | **王懿** | 在个人工作区独立维护代码、H0、配置和运行结果。 | `reproductions/wangY/meta-harness/` |
 | **李永康** | 在个人工作区独立维护代码、H0、配置和运行结果。 | `reproductions/liYK/meta-harness/` |
+| **李嘉旺** | 在个人工作区独立维护代码、H0、配置和运行结果。 | `reproductions/liJW/meta-harness/` |
 
 ### 论文收集任务
 
 | 负责人 | 收集方向 | 数量 |
 | --- | --- | --- |
-| **周梦凡** | 指令与 Skill；上下文管理与压缩；规划与任务进度管理；模型选择与资源分配 | **每个方向 2 篇** |
-| **赵星源** | 工具与环境交互；容错与故障恢复；执行循环与调度；权限审批与运行隔离 | **每个方向 2 篇** |
-| **王懿** | 子 Agent 与多 Agent 协作；运行观测、Trace 与集成接口；验证、评估与反馈 | **每个方向 2 篇** |
+| **周梦凡** | 指令与 Skill；上下文管理与压缩；模型选择与资源分配 | **每个方向 2 篇** |
+| **赵星源** | 工具与环境交互；容错与故障恢复；执行循环与调度 | **每个方向 2 篇** |
+| **王懿** | 子 Agent 与多 Agent 协作；运行观测、Trace 与集成接口 | **每个方向 2 篇** |
 | **李永康** | 长期记忆与经验复用；会话与环境状态管理；扩展机制与生命周期钩子 | **每个方向 2 篇** |
+| **李嘉旺** | 规划与任务进度管理；权限、审批与运行隔离；验证、评估与反馈 | **每个方向 2 篇** |
 
 ### 论文如何入库
 
@@ -48,7 +52,7 @@ flowchart LR
 
 ### 独立复现工作区与共同协议
 
-四人各自维护从官方仓库完整克隆后导入本仓库的 Meta-Harness 代码副本、H0、配置、依赖环境、trace 和结果。上游 `.git` 已移除，个人修改由本仓库各自分支管理。任何运行时路径都不得指向其他成员的工作区。仓库根目录的 benchmark 与实验协议可以共享，但 benchmark 只读。
+五人各自维护从官方仓库完整克隆后导入本仓库的 Meta-Harness 代码副本、H0、配置、依赖环境、trace 和结果。上游 `.git` 已移除，个人修改由本仓库各自分支管理。任何运行时路径都不得指向其他成员的工作区。仓库根目录的 benchmark 与实验协议可以共享，但 benchmark 只读。
 
 | 配置项 | 统一要求 |
 | --- | --- |
@@ -56,8 +60,8 @@ flowchart LR
 | 代码与 H0 | `code/` 是完整的个人仓库副本；H0 为 `code/reference_examples/terminal_bench_2/agents/baseline_kira.py`，优化循环为 `code/reference_examples/terminal_bench_2/meta_harness.py`。 |
 | 配置文件 | 每人在 `configs/` 维护自己的 `terminal-bench-2.0.yaml`、`h0.yaml` 和 `meta-harness.yaml`。 |
 | Benchmark | `benchmarks/terminal-bench-2.0/`，使用同一 `split-v1.json` 和任务 ID。 |
-| 初始 Harness | 四份个人 H0 从同一参考实现复制；原始复现阶段不修改 H0，后续候选只在本人工作区派生。 |
-| 执行模型 | 四人统一使用 `deepseek-v4-flash`；provider、temperature、最大上下文和最大输出保持一致。 |
+| 初始 Harness | 五份个人 H0 从同一参考实现复制；原始复现阶段不修改 H0，后续候选只在本人工作区派生。 |
+| 执行模型 | 五人统一使用 `deepseek-v4-flash`；provider、temperature、最大上下文和最大输出保持一致。 |
 | 优化模型 | Meta-Harness 的优化 Agent 统一使用 `deepseek-v4-flash`。 |
 | 执行预算 | 每题最大 step、tool call、token、墙钟时间和重试次数一致。 |
 | 运行设置 | 每题重复次数、并发数、Docker 环境和超时设置一致。 |
@@ -79,7 +83,7 @@ flowchart LR
 | Meta-Harness | 优化模型固定为 `deepseek-v4-flash`；共同确定搜索轮数、每轮候选数、候选选择规则和优化预算 |
 | 凭据 | 只配置环境变量名，不把 API key 或密码写入仓库 |
 
-共同实验协议记录到 `experiments/configs/README.md`，个人取值和运行入口只写入 `reproductions/<成员>/meta-harness/configs/`。四人完成后只通过提交的配置、说明和结果摘要交叉核对，不共享可写运行目录。
+共同实验协议记录到 `experiments/configs/README.md`，个人取值和运行入口只写入 `reproductions/<成员>/meta-harness/configs/`。五人完成后只通过提交的配置、说明和结果摘要交叉核对，不共享可写运行目录。
 
 ## 阶段二与阶段三
 
@@ -94,6 +98,6 @@ flowchart LR
 
 | 阶段验收 | 条件 |
 | --- | --- |
-| **验收一** | 四人分别完成 Meta-Harness 独立复现，结果可追溯且满足统一协议；2.1 每个方向登记 2 篇论文，并整理其中的高价值方法与可用代码。 |
+| **验收一** | 五人分别完成 Meta-Harness 独立复现，结果可追溯且满足统一协议；2.1 每个方向登记 2 篇论文，并整理其中的高价值方法与可用代码。 |
 | **验收二** | 从 H0 出发，跑通初始化和至少一轮 trace 优化。 |
 | **最终验收** | 完成同条件 baseline、消融、封存测试、能力保留与成本分析。 |
