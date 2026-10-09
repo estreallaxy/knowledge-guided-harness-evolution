@@ -1,0 +1,36 @@
+# Evaluation-Guided Tree Search
+
+## 什么时候使用
+
+| 判断 | 内容 |
+| --- | --- |
+| 要解决的问题 | 候选改造方案（工作流 / 代码变体）数量大，逐一评估成本高；贪心改进只保留当前最优，容易卡在局部最优。 |
+| 使用前提 | 任务有自动且稳定的评估分数；候选可按变异算子从已有候选演化得到；允许批量执行评估（预算有限但可数百次）。 |
+| 输入 | 种子候选、评估器（候选 → 分数）、变异算子集合、搜索预算。 |
+| 输出 | 搜索树、全树最优候选及其分数、搜索历史（每次扩展的算子与分数）。 |
+| 不使用 | 评估不稳定或不可自动化（主观任务）；变异算子难以定义（改动空间不连续）；单次评估成本极高，评估本身即耗尽预算。 |
+| 主要风险 | 评估噪声误导选择（过拟合到噪声的候选被反复扩展）；探索系数需按评估成本调参；树与历史记录随预算增长，存储与追踪开销上升。 |
+
+## 怎么工作
+
+1. 从种子候选开始（可用人工基线或 LLM 初始生成），评估后建立根节点。
+2. 选择：从根开始按利用/探索权衡下降（论文的选择为 soft mixed-probability selection；本骨架以 UCB1 近似该权衡）；节点未试完全部算子前先就地扩展，试完后再在子节点间选。
+3. 扩展：对被选中的节点按轮转顺序应用变异算子，产生一个新的候选子节点。
+4. 评估与回传：计算新候选的分数，把访问次数与总分沿路径回传到根。
+5. 重复 2–4 直到预算用尽；返回全树内分数最高的候选及其搜索历史。
+
+方法关系：与 [Evaluation-Archive-Guided Search](../evaluation-archive-guided-search/README.md) 都使用评估反馈，但结构不同——本方法在同一棵树上做探索/利用权衡（增量进化），档案搜索把评估过的候选存入档案并用提示生成新候选（无树结构，跨代复用）。本方法可直接在 Pluggable Module Contract（其他方向，未在本分支登记）枚举出的配方空间上工作。与 [SOP Role Pipeline](../sop-role-pipeline/README.md)、[Nested Subagent Delegation](../nested-subagent-delegation/README.md) 正交：搜索决定「用什么结构」，后两者定义「结构内部怎么协作」。以上均为待实验验证的假设，尚无本地证据。
+
+## 直接运行
+
+```bash
+python code/tree_search.py demo --budget 40
+```
+
+| 文件 | 用途 |
+| --- | --- |
+| [`code/tree_search.py`](code/tree_search.py) | 利用/探索选择（UCB1，近似论文的 soft mixed-probability selection）、算子轮转扩展、分数回传与全树最优的机制骨架；评估器与变异算子以回调注入。 |
+| [`code/search_prompt.md`](code/search_prompt.md) | 以模型调用实现变异器时的提示模板（生成种子 / 修改候选）。 |
+| [`code/requirements.txt`](code/requirements.txt) | Python 依赖清单；当前实现仅使用标准库。 |
+
+论文结果、固定版本映射和核验状态保存在 [`evidence/`](evidence/)，仅在审计方法来源或研究结论时读取。
