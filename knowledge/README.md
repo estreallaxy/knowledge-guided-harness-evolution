@@ -1,7 +1,5 @@
-# 方法知识索引
+# Knowledge
 
-本页只用于快速找到可能适用的方法。进入方法页后即可判断是否采用；确定采用后直接运行随方法保存的代码。论文与核验材料不进入默认运行链路。
+`source-packets/` 是五条 Method 共用的论文原始来源层。这里保存论文、官方代码版本和可核对证据；各条 Method 后续读取同一来源包，再分别生成自己的组织、检索和演化对象。
 
-| 方法 | 解决的问题 | Harness 模块 | 使用前提 | 可运行代码 | 证据状态 | 方法页 |
-| --- | --- | --- | --- | --- | --- | --- |
-| Query-specific Skill Refinement | 候选 Skill 部分相关、含噪声或难以直接采用 | Skill 选择、适配与加载 | 候选 Skill 已覆盖核心知识；允许额外探索一次 | 已提供；尚未接入共同 H0 | 论文与固定代码已核对，本地代码待真实 Harbor 运行 | [查看](methods/query-specific-skill-refinement/README.md) |
+当前来源见 [source-packets/README.md](source-packets/README.md)。
