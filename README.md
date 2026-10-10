@@ -15,8 +15,7 @@ Terminal-Bench 2.0 数据、H0 参考快照和第一项方法知识已经完成�
 | `harness/candidates/` | 版本化候选 harness 的代码与配置；大体积运行产物不入库。 |
 | `optimizer/initialization/` | 任务建模、方法选择、适配及 `H0 → H1` 的实现。 |
 | `optimizer/evolution/` | trace 驱动的诊断、提案、验证与经验回写实现。 |
-| `knowledge/sources/` | 外部论文与工程实践的来源索引和核验记录。 |
-| `knowledge/` | 方法索引、方法说明与可运行代码；证据和原始材料独立保存。 |
+| `knowledge/` | 五条 Method 共用的 `SourcePacket` 来源层，保存论文、官方代码、精确锚点、配置和实验结果。 |
 | `benchmarks/` | benchmark 适配器、固定任务划分和评测协议。 |
 | `experiments/` | baseline、消融和最终评估的可复现配置与脚本。 |
 | `reproductions/<成员>/` | 每位成员独立的 Meta-Harness 代码、H0、配置、说明和本地运行路径。 |

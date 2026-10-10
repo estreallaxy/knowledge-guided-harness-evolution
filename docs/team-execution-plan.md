@@ -43,12 +43,14 @@ flowchart LR
 
 ### 论文如何入库
 
-1. 每篇论文建立 `knowledge/sources/<paper-id>/`，保存 PDF、GitHub 链接和来源说明。
-2. 将论文与 GitHub 链接、负责人和进度同步到 `docs/research-plan.md` 的 2.1 表格。
-3. 把各个方向的高价值方法写入 `knowledge/methods/<method>/README.md`。
-4. 把可直接使用的代码放入 `knowledge/methods/<method>/code/`，并在 `knowledge/README.md` 登记。
+| 操作 | 执行位置与检查 |
+| --- | --- |
+| 保存来源 | 每篇论文建立 `knowledge/source-packets/<paper-id>/`，保存论文、官方代码版本、精确锚点、配置和实验结果。 |
+| 填写清单 | 在 `source-packet.json` 填写五项 `SourcePacket` 字段，并在来源包 README 中登记入口。 |
+| 同步进度 | 核对本地路径、论文页码、代码行号和结果数值；同步研究计划 2.1 与 `knowledge/source-packets/README.md`。 |
+| 分路线处理 | 来源包合并后，五条 Method 分别生成各自的组织、检索和演化对象。 |
 
-现有 [`query-specific-skill-refinement`](../knowledge/methods/query-specific-skill-refinement/README.md) 计入“指令与 Skill”的第 1 篇，可继续重构。
+[Skill Usage](../knowledge/source-packets/skill-usage-2604.04323/) 已按共同来源包保存。
 
 ### 独立复现工作区与共同协议
 

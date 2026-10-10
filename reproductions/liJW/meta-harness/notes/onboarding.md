@@ -17,4 +17,4 @@
 | 权限、审批与运行隔离 | CaMeL | 阅读现有材料，再补充一篇；区分信息流控制、审批与环境隔离。 |
 | 验证、评估与反馈 | CRITIC | 阅读现有材料，再补充一篇；区分执行时纠错与 Harness 优化时评测。 |
 
-每方向累计两篇。原文进入 `knowledge/sources/<id>/`，方法描述与证据进入 `knowledge/methods/<id>/`，实现进入该方法的 `implementations/<impl-id>/files/`。按当前知识组织规范校验，链接与进度同步到研究计划 2.1。既有条目由新负责人接续，不重复新建。
+每方向累计两篇。每篇论文建立 `knowledge/source-packets/<paper-id>/`，填写五项 `SourcePacket` 内容，并将论文、GitHub、负责人和进度同步到研究计划 2.1。
