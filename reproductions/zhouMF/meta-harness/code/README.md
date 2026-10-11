@@ -3,10 +3,15 @@
 ![Meta-Harness](assets/repo.png)
 
 Meta-Harness is a framework for automated search over task-specific model harnesses: the code around a fixed base model that decides what to store, retrieve, and show while the model works. This repo contains the framework and two reference experiments from the paper.
-The paper is [Meta-Harness: End-to-End Optimization of Model Harnesses](https://arxiv.org/abs/2603.28052).
+
+[![Paper](https://img.shields.io/badge/arXiv-2603.28052-b31b1b)](https://arxiv.org/abs/2603.28052)
+[![Website](https://img.shields.io/badge/Project-Website-3569a8)](https://yoonholee.com/meta-harness/)
+[![Slides](https://img.shields.io/badge/Slides-PDF-777777)](https://yoonholee.com/assets/pdf/meta-harness-slides.pdf)
+[![TB2 Harness](https://img.shields.io/badge/TB2-Optimized_Harness-3569a8)](https://github.com/stanford-iris-lab/meta-harness-tbench2-artifact)
+[![License](https://img.shields.io/badge/License-MIT-777777)](LICENSE)
 
 If you build with Meta-Harness, please send us a link.
-We may add your repository, artifact, post, or paper to this README.
+We may feature your work here.
 
 ## Contents
 
@@ -16,14 +21,24 @@ We may add your repository, artifact, post, or paper to this README.
   - [`reference_examples/terminal_bench_2/`](reference_examples/terminal_bench_2/README.md): scaffold evolution for Terminal-Bench 2.0.
 - The optimized Terminal-Bench 2 harness from the paper lives in the separate artifact repo: [stanford-iris-lab/meta-harness-tbench2-artifact](https://github.com/stanford-iris-lab/meta-harness-tbench2-artifact).
 
-## Community Projects
+## Built on Meta-Harness
+
+### Projects
 
 - [Don't Train the Model, Evolve the Harness](https://huggingface.co/spaces/joelniklaus/harness-optimization): Applies Meta-Harness to Harvey's Legal Agent Benchmark.
-- [dkhanal/meta-harness](https://huggingface.co/dkhanal/meta-harness): Independent implementation with a Symptom2Disease demo.
 - [SuperagenticAI/metaharness](https://github.com/SuperagenticAI/metaharness): Python library and CLI for harness optimization with Codex.
 - [Harness Forge](https://github.com/001TMF/harness-forge): Reimplements Meta-Harness as a native Claude Code skill.
-- [meta-harness-on-islo](https://github.com/zozo123/meta-harness-on-islo): Applies the optimization loop to Islo sandboxes.
+- [dkhanal/meta-harness](https://huggingface.co/dkhanal/meta-harness): Independent implementation with a Symptom2Disease demo.
+- [meta-harness-on-islo](https://github.com/zozo123/meta-harness-on-islo): Applies the Meta-Harness optimization loop to Islo sandboxes.
 - [VideoHarness-RSI](https://github.com/Tencent/VideoHarness-RSI): Applies Meta-Harness to long-video retrieval and context construction around frozen vision-language models.
+
+### Research
+
+- [RRSI](https://arxiv.org/abs/2609.24972) ([code](https://github.com/google-research/rrsi)): Regularizes harness evolution by constraining candidate edits and filtering benchmark-specific or unnecessary changes.
+- [WHALE](https://arxiv.org/abs/2609.00196) ([code](https://github.com/krafton-ai/WHALE)): Alternates model fine-tuning with harness search using Meta-Harness.
+- [AutoRef](https://arxiv.org/abs/2609.35530) ([code](https://github.com/KuOnoda/AutoRef)): Applies harness optimization to multi-reference image generation.
+- [MetaBench-Harness](https://arxiv.org/abs/2609.33411): Applies harness search over accumulated execution history to benchmark-generation pipelines.
+- [Mixture of Self-Improving Branches](https://arxiv.org/abs/2609.37834): Extends Meta-Harness with adaptive search branches and a router that selects a harness for each input.
 
 ## Quick Start
 
@@ -35,7 +50,7 @@ uv sync
 uv run python meta_harness.py --iterations 1
 ```
 
-Terminal-Bench 2 smoke task:
+Terminal-Bench 2 single-task check:
 
 ```bash
 cd reference_examples/terminal_bench_2
@@ -48,13 +63,13 @@ Use the subdir READMEs for setup details, expected runtime, and additional comma
 ## Applying Meta-Harness To A New Domain
 
 Start by pointing your coding assistant to [`ONBOARDING.md`](ONBOARDING.md) and having a conversation with it.
-This should produce a `domain_spec.md` file with concrete details on how to proceed with implementing Meta-Harness for your domain.
+The conversation should produce a `domain_spec.md` with an implementation and evaluation plan for your domain.
 
-The shipped examples currently assume Claude Code as the proposer agent. To use a different proposer agent, adapt the example `claude_wrapper.py` scripts in [`reference_examples/text_classification/claude_wrapper.py`](reference_examples/text_classification/claude_wrapper.py) or [`reference_examples/terminal_bench_2/claude_wrapper.py`](reference_examples/terminal_bench_2/claude_wrapper.py). The main requirement is a wrapper that cleanly logs proposer interactions.
+The examples use Claude Code as the proposer agent. To use a different proposer agent, adapt the example `claude_wrapper.py` scripts in [`reference_examples/text_classification/claude_wrapper.py`](reference_examples/text_classification/claude_wrapper.py) or [`reference_examples/terminal_bench_2/claude_wrapper.py`](reference_examples/terminal_bench_2/claude_wrapper.py). The wrapper must log proposer interactions.
 
 ## Release Note
 
-This is a cleaned up version of the code we used for the paper. It has not been tested beyond verifying that it runs. Please let us know if anything goes wrong.
+This is a cleaned-up version of the code we used for the paper. It has not been tested beyond verifying that it runs. Please let us know if anything goes wrong.
 
 ## Citation
 

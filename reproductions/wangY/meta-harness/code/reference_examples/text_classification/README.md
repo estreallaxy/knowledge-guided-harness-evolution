@@ -11,7 +11,7 @@ cd reference_examples/text_classification
 uv sync
 ```
 
-Run one evolve iteration:
+Run one search iteration:
 
 ```bash
 uv run python meta_harness.py --iterations 1
@@ -60,12 +60,12 @@ PYTHONPATH=.. uv run python -m unittest discover -s tests -v
 
 ## Layout Notes
 
-- `agents/`: the kept baselines plus the write target for generated candidates.
+- `agents/` contains the baselines and generated candidates.
 - `.claude/skills/meta-harness/SKILL.md`: main proposer prior used by `meta_harness.py`.
 
 ## Runtime And Cost
 
-The release default uses OpenRouter (`openrouter/openai/gpt-oss-120b`). If you want a different provider or your own OpenAI-compatible endpoint, pass `--model` and optionally `--api-base`, or change `config.yaml`. The paper experiments used a local `vllm` deployment of `gpt-oss-120b`, MXFP4 quantized, with `max-model-len=32768`. API-backed runs may differ in quality from that setup and may be better.
+The release default uses OpenRouter (`openrouter/openai/gpt-oss-120b`). If you want a different provider or your own OpenAI-compatible endpoint, pass `--model` and optionally `--api-base`, or change `config.yaml`. The paper experiments used a local `vllm` deployment of `gpt-oss-120b`, MXFP4 quantized, with `max-model-len=32768`. API-backed runs may perform differently from that setup.
 
 ## Release Notes
 

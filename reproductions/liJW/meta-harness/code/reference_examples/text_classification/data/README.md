@@ -8,7 +8,7 @@ Vendored MCE datasets in this directory:
 - `crime_prediction/`: copied from `metaevo-ai/mce-artifact/env/crime_prediction/data`
 - `aegis2/`: copied from `metaevo-ai/mce-artifact/env/aegis2/data`
 
-Kept OOD datasets loaded at runtime from HuggingFace:
+Out-of-distribution datasets loaded at runtime from Hugging Face:
 
 - `AGNews`: `fancyzhx/ag_news`
 - `GoEmotions`: `google-research-datasets/go_emotions`, config `simplified`
