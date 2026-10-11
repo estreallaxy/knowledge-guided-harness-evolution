@@ -87,13 +87,28 @@ uv run harbor run --agent oracle -p "$HARBOR_DATASET_PATH" -i fix-code-vulnerabi
 
 **注意**：`run_eval.sh` 直跑时不会自己读 `RUNS_DIR`，必须显式传 `--jobs-dir`；只有经 `meta_harness.py` 调用时才会自动带上。
 
-## 六、待四人商定的事项
+## 六、待全组商定的事项（2026-10-11 按新结构复核）
 
-1. **沙箱后端统一**：本地 Docker 已验证可用；Runloop / Modal 需各自账号与配额。
-2. **并发数**：本机负载下 50 并发不可行（会因超时产生假失败），建议四人在启动前确认宿主负载再定。
-3. **`SMOKE_TEST_TASK`**：上游默认的 `extract-elf` 在本仓库 `split-v1.json` 中属 **test 集**，与"test 到最终评估才运行"冲突。提案改用 `fix-code-vulnerability`（train 集，实测两次尝试均 1.0、1.1/1.3 分钟）。**四个副本都是同一份硬编码，必须统一。**
-4. **`VerifierTimeoutError` 计分口径**（见第三节）。
-5. **依赖 URL 修复与执行位缺陷**：同一问题在仓库里有 5 处副本（1 处共享 H0 + 4 份个人副本），须四人改成同一份，否则不可比。详见 `personal-notes.md` 第 3、4 条。
+**副本清点**：TB2 复现副本现为 **5 份**（`reproductions/{zhouMF,zhaoXY,wangY,liYK,liJW}/meta-harness/code/reference_examples/terminal_bench_2/`）；原共享 H0（仓库根 `harness/h0/terminus-kira`）已随 2026-10-11 重组移除，改为每人的 `reproductions/<成员>/H0/terminal-bench-2.0/code/terminus-kira/`。
+
+**起点同源已复核 ✅**：五人的 H0 `baseline_kira.py` sha256 **全为 `e06b9273…`**、kira prompt 全为 `adf2d40a…`，逐字节一致（含新成员 liJW）。
+
+| # | 事项 | 新结构下的现状（2026-10-11 实测） | 需要什么 |
+| --- | --- | --- | --- |
+| 1 | `SMOKE_TEST_TASK` 落在 test 集 | **4/5 副本仍硬编码 `extract-elf`**（test 集任务）；仅 zhaoXY 改为环境变量可覆盖 | 全组取同一值（建议 train 集 `fix-code-vulnerability`，实测 1.1/1.3 分钟、两次均 1.0）并同步到各自副本 |
+| 2 | 并发口径（协议默认 50） | 新文档（CONTRIBUTING / docs / benchmarks README）**均无并发规定**；实测高负载下即使 10 并发也产生负载性超时 | 定一个可执行的并发口径（含"启动前看宿主负载"约束） |
+| 3 | `VerifierTimeoutError` 计分口径 | 无任何文档规定 | 定口径（计入 / 单列 / 重跑），否则通过率不可比 |
+| 4 | 依赖 URL 修复 | **4/5 副本仍是坏地址** `harbor-framework/terminal-bench`（`uv sync` 直接失败）；仅 zhaoXY 改为 `laude-institute`（同 rev `1a6ffa96`） | 其余四人应用同一处修复（或由负责人统一改） |
+| 5 | 执行位缺陷 | 全仓库 3269 个被跟踪 `.sh` 为 644（9 个为 755）；副本 `run_eval.sh` **4/5 仍是 644**；**数据集 89 个 `test.sh` 全 644 已实测不影响运行**（本工作区 100+ trial 全跑通，该子问题可结案） | 其余四人补自己副本 `run_eval.sh` 执行位；数据集脚本无需处理 |
+
+**同族的另两项**（不属原 5 项，但同样决定"能否按协议跑起来"）：
+
+| 项 | 现状 | 说明 |
+| --- | --- | --- |
+| 模型来源 | **4/5 副本硬编码 `anthropic/claude-opus-4-6`**；仅 zhaoXY 读 `HARBOR_MODEL` | 不修则无法用环境变量切到协议要求的 `deepseek-v4-flash` |
+| docker 后端白名单 | **4/5 副本只放行 `runloop\|modal`**（脚本开头即 `exit 1`）；仅 zhaoXY 放行 `docker` | 若全组走本地 Docker，需同步放行 |
+
+**后端选型**（原第 1 项）已由 zhaoXY 侧实测收敛为本地 Docker（89 镜像全缓存）；Runloop / Modal 仍需各自账号与配额，是否统一走 Docker 由全组确认。
 
 ## 七、产物位置
 
