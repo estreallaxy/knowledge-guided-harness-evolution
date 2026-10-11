@@ -27,7 +27,7 @@ You are evolving the **AgentHarness** agent scaffold for Terminal-Bench 2. It is
 
 **The search space is arbitrary Python code.** You can override any method, call any library, make raw API calls, add new tools, change how the LLM is called, rewrite command execution, intercept and transform observations -- anything that's expressible in Python is fair game. The only constraint is that the agent must subclass `harbor.agents.terminus_2.terminus_2.Terminus2` in the same way as `baseline_kira.py` does (for compatibility with the eval harness).
 
-**Model: Claude Opus 4.6.** Evaluation uses the full official 89-task TB2 dataset. `meta_harness.py` chooses the trial count; the default path uses 2 trials per task.
+**Model:** the evaluation solver model is fixed by the run configuration (the task prompt states the value in force for this run). Evaluation uses the full official 89-task TB2 dataset. `meta_harness.py` chooses the trial count; the default path uses 2 trials per task.
 
 **Key files to read:**
 
@@ -57,7 +57,8 @@ The agent will be loaded and evaluated through Harbor via `--agent-import-path "
 
 - **CAN**: edit your new `agents/<name>.py` file freely.
 - **CAN**: create a new prompt template at `prompt-templates/<name>.txt` and point `_get_prompt_template_path` to it.
-- **CANNOT**: modify any existing agent file, `meta_harness.py`, or `claude_wrapper.py`.
+- **CANNOT**: modify any existing agent file, `meta_harness.py`, `claude_wrapper.py`, `litellm_proposer.py`, or anything under `tests/`.
+- The baselines are read-only: `agents/baseline_kira.py` is the shared H0 for this reproduction and must never be edited, and neither may `agents/baseline_terminus2.py`. Write only to `agents/<new-name>.py` and `prompt-templates/<new-name>.txt`.
 
 ### Design principles
 
@@ -67,9 +68,11 @@ The agent will be loaded and evaluated through Harbor via `--agent-import-path "
 
 ## WORKFLOW
 
-### Step 1: Analyze (1 subagent)
+### Step 1: Analyze
 
-Launch ONE Agent subagent (subagent_type: "general-purpose"). It should:
+Work through the analysis yourself with the file tools you have been given
+(read/list/grep). If your tool set happens to include a subagent mechanism you
+may delegate this step, but do not assume one exists:
 
 1. Read state files:
    - `frontier_val.json` - current best agent per task (path given in task prompt)
@@ -77,8 +80,12 @@ Launch ONE Agent subagent (subagent_type: "general-purpose"). It should:
 2. **Deep-read failed AND successful trajectories.** Most important step.
    Use the current run outputs under `jobs/` and `logs/` as the primary source of truth.
 
+   **Cold start:** if those files do not exist yet, there is no history to read.
+   Say so, skip this step, and ground your hypothesis in `agents/baseline_kira.py`
+   and `prompt-templates/terminus-kira.txt` instead. Never invent trajectory
+   findings.
 3. Read agent implementations in `agents/*.py`
-4. Return:
+4. Arrive at:
 
 ```
 STATE: <5-line summary: current scores, what's been tried, avg tokens/turns/cost>
@@ -87,16 +94,15 @@ HYPOTHESIS: "<falsifiable claim about what will improve scores>"
 CANDIDATE: name=<snake_case>, changes="<specific changes>", prediction="<expected pass rate improvement AND expected token/turn impact>"
 ```
 
-### Step 2: Implement (1 subagent)
+### Step 2: Implement
 
-Launch **1 Agent subagent** (subagent_type: "general-purpose"). The prompt must include the candidate name, class name, specific changes from Step 1, and the working directory.
-
-The subagent should:
-
-1. Copy over one of the agents in `agents/` as a starting point: `agents/<snake_case_name>.py`. Your final agent should be a subclass of `harbor.agents.terminus_2.terminus_2.Terminus2`.
-2. Make targeted changes according to the agent instructions.
-3. **Smoke test**: validate import (`uv run python -c "from agents.<name> import *; print('OK')"`)
-4. Return: file path, validation status
+1. Read one of the agents in `agents/` as a starting point and write your
+   candidate to `agents/<snake_case_name>.py`. Your final agent must be a
+   subclass of `harbor.agents.terminus_2.terminus_2.Terminus2`.
+   Keep the change targeted: a mechanism swap, not a wholesale rewrite.
+2. Make targeted changes according to the plan from Step 1.
+3. **Smoke test**: validate the import with `run_bash`:
+   `uv run python -c "from agents.<name> import *; print('OK')"`
 
 ### Step 3: Write pending_eval.json
 
