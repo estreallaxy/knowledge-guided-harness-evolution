@@ -9,15 +9,15 @@
 | 指令与 Skill | 周梦凡 | 1 / 2 | [Skill Usage](source-packets/skill-usage-2604.04323/) · [论文](https://arxiv.org/abs/2604.04323v1) · [GitHub](https://github.com/UCSB-NLP-Chang/Skill-Usage) |
 | 工具与环境交互 | 赵星源 | 0 / 2 | 待按 `SourcePacket` 收集。 |
 | 上下文管理与压缩 | 周梦凡 | 0 / 2 | 待按 `SourcePacket` 收集。 |
-| 长期记忆与经验复用 | 李永康 | 0 / 2 | 待按 `SourcePacket` 收集。 |
+| 长期记忆与经验复用 | 李永康 | 2 / 2（材料齐备，待审阅） | [reasoningbank](source-packets/reasoningbank-2509.25140/) · [expel](source-packets/expel-2308.10144/) |
 | 容错与故障恢复 | 赵星源 | 0 / 2 | 待按 `SourcePacket` 收集。 |
 | 执行循环与调度 | 赵星源 | 0 / 2 | 待按 `SourcePacket` 收集。 |
 | 规划与任务进度管理 | 李嘉旺 | 0 / 2 | 待按 `SourcePacket` 收集。 |
 | 模型选择与资源分配 | 周梦凡 | 0 / 2 | 待按 `SourcePacket` 收集。 |
-| 会话与环境状态管理 | 李永康 | 0 / 2 | 待按 `SourcePacket` 收集。 |
+| 会话与环境状态管理 | 李永康 | 2 / 2（材料齐备，待审阅） | [agentrewind](source-packets/agentrewind-2608.14380/) · [statefork](source-packets/statefork-2609.38648/) |
 | 子 Agent 与多 Agent 协作 | 王懿 | 0 / 2 | 待按 `SourcePacket` 收集。 |
 | 权限、审批与运行隔离 | 李嘉旺 | 0 / 2 | 待按 `SourcePacket` 收集。 |
-| 扩展机制与生命周期钩子 | 李永康 | 0 / 2 | 待按 `SourcePacket` 收集。 |
+| 扩展机制与生命周期钩子 | 李永康 | 2 / 2（材料齐备，待审阅） | [agentscope](source-packets/agentscope-2508.16279/) · [nora](source-packets/nora-2605.02092/) |
 | 运行观测、Trace 与集成接口 | 王懿 | 0 / 2 | 待按 `SourcePacket` 收集。 |
 | 验证、评估与反馈 | 李嘉旺 | 0 / 2 | 待按 `SourcePacket` 收集。 |
 

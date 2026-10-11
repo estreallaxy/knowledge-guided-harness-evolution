@@ -37,3 +37,9 @@
 | 论文 | 方向 | 来源包 |
 | --- | --- | --- |
 | How Well Do Agentic Skills Work in the Wild: Benchmarking LLM Skill Usage in Realistic Settings | 指令与 Skill | [skill-usage-2604.04323](skill-usage-2604.04323/) |
+| AgentRewind: Recoverable Execution for Long-Horizon LLM Agents | 会话与环境状态管理 | [agentrewind-2608.14380](agentrewind-2608.14380/) |
+| AgentScope 1.0: A Developer-Centric Framework for Building Agentic Applications | 扩展机制与生命周期钩子 | [agentscope-2508.16279](agentscope-2508.16279/) |
+| ExpeL: LLM Agents Are Experiential Learners | 长期记忆与经验复用 | [expel-2308.10144](expel-2308.10144/) |
+| NORA: A Harness-Engineered Autonomous Research Agent for End-to-End Spatial Data Science | 扩展机制与生命周期钩子 | [nora-2605.02092](nora-2605.02092/) |
+| ReasoningBank: Scaling Agent Self-Evolving with Reasoning Memory | 长期记忆与经验复用 | [reasoningbank-2509.25140](reasoningbank-2509.25140/) |
+| StateFork: Branchable Infrastructure for Agent Exploration | 会话与环境状态管理 | [statefork-2609.38648](statefork-2609.38648/) |
