@@ -8,12 +8,13 @@
 
 ---
 
-## 一、当前状态（2026-10-08）
+## 一、当前状态（2026-10-11）
 
 | 项 | 状态 |
 | --- | --- |
 | H0 在 train 划分上的 baseline | ✅ **已完成**，见第三节 |
-| 独立复现（阶段一验收项） | 进行中，尚需四人交叉核对 |
+| Meta-Harness 首轮 + 定向复验 | ✅ **已完成**（候选 65.0%，判无显著差异），见第四节 |
+| 独立复现（阶段一验收项） | zhaoXY 侧已完成，尚需四人交叉核对 |
 | 沙箱后端 | 本地 Docker（已打通，89 个任务镜像本机全量缓存） |
 | 配置 | `configs/` 三份已就位 |
 
@@ -46,7 +47,19 @@
 > 1. **`VerifierTimeoutError`（3 个）不是 agent 能力失败**——是验证器跑满 900s 被切断，属评测侧开销。直接计入通过率会低估 H0。四人需先统一这类 trial 的计分口径，再比较分数。
 > 2. **本次并发用 10，偏离协议默认的 50**。原因是运行时宿主 load average 达 82（64 核，另有他人 49 个容器在跑）。10 个 `AgentTimeoutError` 中有多少是负载导致的假失败，需在低负载下复跑才能定量。**在这一点澄清前，本分数不宜与另外三人直接比较。**
 
-## 四、可复现的运行方式
+## 四、Meta-Harness 首轮 + 定向复验（2026-10-09 / 10-11）
+
+| 项 | 值 |
+| --- | --- |
+| 首轮 run（`evolve-1`） | 优化器（`deepseek-v4-flash`，`litellm_proposer.py`）产出候选 `kira_context_budget`：超 120k token 时压缩最老终端观测，未超预算逐字节不变 |
+| 首轮通过率 | **65.0%**（同批 H0 66.7%、terminus2 61.7%；相对「两基线逐题最优」68.3% 为 −3.3pp）；候选评估 $11.36 + 优化器 $0.17 |
+| 定向复验（`confirm5`） | 4 题 × 5 次 × 两臂：gcode 0/5 vs 0/5、make-mips 0/5 vs 0/4、mcmc 4/5 vs 5/5、raman 1/5 vs 0/5；合计 $12.01（10-11 低负载补跑收尾） |
+| **结论** | 按 `runs/confirm5/run.sh` 事前写定的标准判定：**该机制对本环境无影响，首轮 −3.3pp 是 n=2 噪声**；gcode / raman 的超时是任务固有（低负载下依旧） |
+| 产物 | `runs/jobs/evolve-1/`、`runs/jobs/confirm5-*/`、`runs/confirm5/{run.sh,resume-candidate.sh,summarize.py,load-trace.log}` |
+
+逐题对照与成本明细见仓库根 `experiments/README.md` 的 zhaoXY 小节。
+
+## 五、可复现的运行方式
 
 环境变量从 shell 传入，**不要写进 `.env`**（`.env` 只放 key，见 `personal-notes.md` 第 2 条）。
 
@@ -64,7 +77,7 @@ export SMOKE_TEST_TASK=fix-code-vulnerability
 bash scripts/run_eval.sh agents.baseline_kira:AgentHarness full 2 10 \
   --job-name h0-train-baseline --jobs-dir "$RUNS_DIR/jobs" -y
 
-# 免 API 回归测试（应 38 项全过）
+# 免 API 回归测试（应 44 项全过）
 uv run python -m unittest tests.test_meta_harness tests.test_litellm_proposer
 
 # 最便宜的链路自检（不调 LLM）
@@ -74,7 +87,7 @@ uv run harbor run --agent oracle -p "$HARBOR_DATASET_PATH" -i fix-code-vulnerabi
 
 **注意**：`run_eval.sh` 直跑时不会自己读 `RUNS_DIR`，必须显式传 `--jobs-dir`；只有经 `meta_harness.py` 调用时才会自动带上。
 
-## 五、待四人商定的事项
+## 六、待四人商定的事项
 
 1. **沙箱后端统一**：本地 Docker 已验证可用；Runloop / Modal 需各自账号与配额。
 2. **并发数**：本机负载下 50 并发不可行（会因超时产生假失败），建议四人在启动前确认宿主负载再定。
@@ -82,7 +95,7 @@ uv run harbor run --agent oracle -p "$HARBOR_DATASET_PATH" -i fix-code-vulnerabi
 4. **`VerifierTimeoutError` 计分口径**（见第三节）。
 5. **依赖 URL 修复与执行位缺陷**：同一问题在仓库里有 5 处副本（1 处共享 H0 + 4 份个人副本），须四人改成同一份，否则不可比。详见 `personal-notes.md` 第 3、4 条。
 
-## 六、产物位置
+## 七、产物位置
 
 | 内容 | 路径 | 是否提交 |
 | --- | --- | --- |
