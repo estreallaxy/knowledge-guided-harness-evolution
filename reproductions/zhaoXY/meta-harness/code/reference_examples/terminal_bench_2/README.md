@@ -2,6 +2,9 @@
 
 Terminal-Bench 2 reference experiment for Meta-Harness. The default search config in this release uses Harbor on the full 89-task TB2 dataset, with 2 search trials per task on Opus 4.6.
 
+To run the paper's optimized harness, use the [artifact repository](https://github.com/stanford-iris-lab/meta-harness-tbench2-artifact).
+This directory contains the search loop for generating and evaluating new harnesses.
+
 ## Quick Start
 
 Install:
@@ -17,7 +20,7 @@ Read setup details first:
 sed -n '1,200p' SETUP.md
 ```
 
-Start with a cheap smoke check:
+Start with a single-task check:
 
 ```bash
 uv run bash scripts/run_eval.sh agents.baseline_kira:AgentHarness full 1 1 -i extract-elf
@@ -37,7 +40,7 @@ When trying a new idea, validate it on the cheaper 30-task `hard` subset before 
 uv run bash scripts/run_eval.sh agents.baseline_kira:AgentHarness hard 1 50
 ```
 
-Run one evolve iteration with the default full-dataset search config:
+Run one search iteration with the default full-dataset configuration:
 
 ```bash
 uv run python meta_harness.py --iterations 1
@@ -63,9 +66,7 @@ Pass `--full-eval` if you also want the optional 5-trial winner pass on the full
 
 ## Runtime And Cost
 
-With Opus 4.6 and a high-tier API key, the default 89x2 search run at concurrency `50` takes about 4-6 hours and costs roughly $500 _per iteration_. The recommended bring-up path is `extract-elf`, then `hard`, then the full default run.
-
-This setup is sensitive to concurrency and Anthropic API throughput. API tier matters, and sharing the same API key with other active projects can make runs much slower. Many failures at higher concurrency are timeout failures caused by insufficient API throughput at the chosen setting.
+With Opus 4.6 and a high-tier API key, the default 89x2 search run at concurrency `50` takes about 4-6 hours and costs roughly $500 _per iteration_.
 
 The Harbor wall-clock timeout defaults to 8 hours. Override it for both the Python and shell layers with `HARBOR_TIMEOUT_SECONDS`.
 

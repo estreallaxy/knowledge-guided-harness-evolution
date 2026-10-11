@@ -8,6 +8,7 @@
 | 赵星源 | `zhaoXY` | `zhaoXY/self-evolution-branch` | `/data1/users/zhaoXY` |
 | 王懿 | `wangY` | `wangY/self-evolution-branch` | `/data1/users/wangY` |
 | 李永康 | `liYK` | `liYK/self-evolution-branch` | `/data1/users/liYK` |
+| 李嘉旺 | `liJW` | `liJW/self-evolution-branch` | `/data1/users/liJW` |
 
 每位成员使用独立 Linux 账号和工作区，并通过各自账号进行 SSH 登录。首次克隆私有仓库前，还需为本人配置 GitHub 协作者权限和 GitHub SSH 认证。准备就绪后，在自己的工作区克隆对应分支，例如周梦凡：
 
@@ -44,7 +45,8 @@ git rebase main
 
 ## 开发和推送
 
-- 复现工作只在 `reproductions/<本人账号>/` 下进行；不得让代码、配置、依赖环境、缓存、trace 或结果路径指向其他成员的工作区。Benchmark 从根目录只读使用。
+- 日常工作范围是共享 `knowledge/` 和 `reproductions/<本人账号>/`；不得修改其他成员的复现目录。Benchmark 从根目录只读使用。
+- 每组 baseline × benchmark 的代码适配、配置、说明、trace、运行状态和实验结果全部放在 `reproductions/<本人账号>/<baseline>/<benchmark>/`。大体积原始产物留在 `runs/` 或 `traces/`，提交 `results/` 中的摘要和必要证据。
 - 一次改动尽量只解决一件事；H0 参考快照、benchmark 划分、评分器接口或预算协议发生变化时，在 PR 中说明对现有实验的影响。
 - 提交代码、轻量配置和必要文档；不要提交密码、密钥、`.env`、测试题答案、原始数据集、大体积 trace 或运行产物。
 - 提交前运行与改动相应的检查，并在 PR 里写清命令和结果；尚未跑通的实验明确标记。
@@ -73,7 +75,7 @@ git push --force-with-lease origin HEAD
 
 `rebase` 会改写自己分支的提交历史，所以已推送过该分支时使用 `--force-with-lease` 更新；**只对本人负责的分支使用，不对 `main` 使用，也不要用普通的 `--force`**。如果别人也在同一分支提交过内容，先沟通并核对远端提交，再决定如何同步。
 
-随后在 GitHub 创建以 `main` 为目标、以自己分支为来源的 PR。PR 至少说明：改动目的、主要文件或机制、验证命令与结果；涉及实验时注明 `H0`、模型、数据划分、预算和结果路径。PR 统一由 `zhangXY` 审阅，通过检查并处理意见后再合并。已有 PR 经 rebase 推送后会自动更新，无需另建 PR。
+随后在 GitHub 创建以 `main` 为目标、以自己分支为来源的 PR。PR 至少说明：改动目的、主要文件或机制、验证命令与结果；涉及实验时注明 baseline、benchmark、H0、模型、数据划分、预算和 `reproductions/<本人账号>/` 下的结果路径。PR 统一由 `zhangXY` 审阅，通过检查并处理意见后再合并。
 
 遇到 rebase 冲突时：
 
