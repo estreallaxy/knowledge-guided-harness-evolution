@@ -37,3 +37,9 @@
 | 论文 | 方向 | 来源包 |
 | --- | --- | --- |
 | How Well Do Agentic Skills Work in the Wild: Benchmarking LLM Skill Usage in Realistic Settings | 指令与 Skill | [skill-usage-2604.04323](skill-usage-2604.04323/) |
+| ToolSandbox: A Stateful, Conversational, Interactive Evaluation Benchmark for LLM Tool Use Capabilities | 工具与环境交互 | [toolsandbox-2025.findings-naacl.65](toolsandbox-2025.findings-naacl.65/) |
+| The Berkeley Function Calling Leaderboard (BFCL): From Tool Use to Agentic Evaluation of Large Language Models | 工具与环境交互 | [bfcl-2025.icml](bfcl-2025.icml/) |
+| Why Do Multi-Agent LLM Systems Fail? | 容错与故障恢复 | [mast-2025.neurips](mast-2025.neurips/) |
+| AgentDiagnose: An Open Toolkit for Diagnosing LLM Agent Trajectories | 容错与故障恢复 | [agentdiagnose-2025.emnlp-demos](agentdiagnose-2025.emnlp-demos/) |
+| Open Grounded Planning: Challenges and Benchmark Construction | 执行循环与调度 | [open-grounded-planning-2024.acl-long.272](open-grounded-planning-2024.acl-long.272/) |
+| HiAgent: Hierarchical Working Memory Management for Solving Long-Horizon Agent Tasks with Large Language Model | 执行循环与调度 | [hiagent-2025.acl-long](hiagent-2025.acl-long/) |
