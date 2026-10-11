@@ -32,6 +32,6 @@ python code/event_stream.py demo
 | --- | --- |
 | [`code/event_stream.py`](code/event_stream.py) | Event 与 EventStream 的机制骨架：追加、过滤、回放、JSONL 导入导出与统计。 |
 | [`code/trace_schema.md`](code/trace_schema.md) | 事件字段规范与记录粒度建议，供接入具体 harness 时作为契约。 |
-| [`code/requirements.txt`](code/requirements.txt) | Python 依赖清单；当前实现仅使用标准库。 |
+代码仅依赖 Python 标准库，无需安装依赖。
 
 论文结果、固定版本映射和核验状态保存在 [`evidence/`](evidence/)，仅在审计方法来源或研究结论时读取。

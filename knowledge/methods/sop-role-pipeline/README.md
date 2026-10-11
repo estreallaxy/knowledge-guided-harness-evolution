@@ -33,6 +33,6 @@ python code/sop_pipeline.py demo
 | --- | --- |
 | [`code/sop_pipeline.py`](code/sop_pipeline.py) | 角色定义、发布-订阅消息池、SOP 流水线与评审打回的机制骨架；模型调用以回调注入。 |
 | [`code/sop_prompt.md`](code/sop_prompt.md) | 角色执行与评审判定的提示模板。 |
-| [`code/requirements.txt`](code/requirements.txt) | Python 依赖清单；当前实现仅使用标准库。 |
+代码仅依赖 Python 标准库，无需安装依赖。
 
 论文结果、固定版本映射和核验状态保存在 [`evidence/`](evidence/)，仅在审计方法来源或研究结论时读取。

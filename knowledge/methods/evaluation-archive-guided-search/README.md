@@ -32,6 +32,6 @@ python code/score_archive.py demo
 | --- | --- |
 | [`code/score_archive.py`](code/score_archive.py) | 候选记录、评分存档、top-k 检索与引导提示生成的机制骨架。 |
 | [`code/archive_prompt.md`](code/archive_prompt.md) | 把存档样例注入下一轮候选生成提示的模板。 |
-| [`code/requirements.txt`](code/requirements.txt) | Python 依赖清单；当前实现仅使用标准库。 |
+代码仅依赖 Python 标准库，无需安装依赖。
 
 论文结果、固定版本映射和核验状态保存在 [`evidence/`](evidence/)，仅在审计方法来源或研究结论时读取。

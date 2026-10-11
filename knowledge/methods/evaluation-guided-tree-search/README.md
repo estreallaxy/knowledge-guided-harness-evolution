@@ -31,6 +31,6 @@ python code/tree_search.py demo --budget 40
 | --- | --- |
 | [`code/tree_search.py`](code/tree_search.py) | 利用/探索选择（UCB1，近似论文的 soft mixed-probability selection）、算子轮转扩展、分数回传与全树最优的机制骨架；评估器与变异算子以回调注入。 |
 | [`code/search_prompt.md`](code/search_prompt.md) | 以模型调用实现变异器时的提示模板（生成种子 / 修改候选）。 |
-| [`code/requirements.txt`](code/requirements.txt) | Python 依赖清单；当前实现仅使用标准库。 |
+代码仅依赖 Python 标准库，无需安装依赖。
 
 论文结果、固定版本映射和核验状态保存在 [`evidence/`](evidence/)，仅在审计方法来源或研究结论时读取。

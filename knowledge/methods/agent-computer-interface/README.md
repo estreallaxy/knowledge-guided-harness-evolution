@@ -31,6 +31,6 @@ python code/aci_toolkit.py demo
 | 文件 | 用途 |
 | --- | --- |
 | [`code/aci_toolkit.py`](code/aci_toolkit.py) | 窗口化查看器、带语法 guardrail 的编辑器与反馈格式化的机制骨架；语法检查器可注入。 |
-| [`code/requirements.txt`](code/requirements.txt) | Python 依赖清单；当前实现仅使用标准库。 |
+代码仅依赖 Python 标准库，无需安装依赖。
 
 论文结果、固定版本映射和核验状态保存在 [`evidence/`](evidence/)，仅在审计方法来源或研究结论时读取。

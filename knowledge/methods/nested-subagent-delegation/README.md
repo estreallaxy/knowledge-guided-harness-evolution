@@ -32,6 +32,6 @@ python code/delegation_orchestrator.py demo
 | --- | --- |
 | [`code/delegation_orchestrator.py`](code/delegation_orchestrator.py) | 协调者循环、agent 注册、嵌套子会话与消息历史的机制骨架；模型调用以回调注入，不绑定 provider。 |
 | [`code/orchestrator_prompt.md`](code/orchestrator_prompt.md) | 协调者选择发言者、发起子会话与输出终止标记的提示模板。 |
-| [`code/requirements.txt`](code/requirements.txt) | Python 依赖清单；当前实现仅使用标准库。 |
+代码仅依赖 Python 标准库，无需安装依赖。
 
 论文结果、固定版本映射和核验状态保存在 [`evidence/`](evidence/)，仅在审计方法来源或研究结论时读取。
