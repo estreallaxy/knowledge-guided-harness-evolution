@@ -1,6 +1,6 @@
 # Meta-Harness KIRA 百炼适配与历史来源
 
-`agents/` 是针对 main `88efe13` 官方 KIRA 快照的独立子类，供应商接线没有修改 `../code/` 中的官方文件。`agents/__init__.py` 从本人的 `meta-harness/code/reference_examples/terminal_bench_2/agents/` 加载官方实现，不依赖其他成员或本机历史副本。
+`agents/` 是针对 main `88efe13` 官方 KIRA 快照的独立子类，供应商接线没有修改 `meta-harness/code/` 中的官方文件。`agents/__init__.py` 从本人的 `meta-harness/code/reference_examples/terminal_bench_2/agents/` 加载官方实现，不依赖其他成员或本机历史副本。
 
 | 入口 | 用途 |
 | --- | --- |
