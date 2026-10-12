@@ -1,3 +1,6 @@
-# Reproduction notes
+# 复现实验说明与证据
 
-Record environment preparation, commands, deviations from the paper, failures, and rerun instructions. Paths must remain inside this member workspace except for the shared read-only benchmark input.
+- [复现报告](reproduction-report.md)：实验条件、失败口径、单轮实现与验收范围。
+- [运行索引](evidence-index.json)：冻结训练证据、原始运行和优化日志的来源哈希。
+
+原始运行在执行机器保留，摘要和来源说明随代码入库。
