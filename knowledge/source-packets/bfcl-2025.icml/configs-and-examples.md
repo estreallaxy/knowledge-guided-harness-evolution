@@ -97,8 +97,8 @@ python -m bfcl_eval.eval_checker.eval_runner --model MODEL_NAME --test-category 
 | `bfcl_eval/model_handler/api_inference/` 其余 26 个适配器（本包只留 `claude.py`、`openai_completion.py` 与 `__init__.py`） | 各家厂商接入样板，属可替换的外围；保留两个代表性实现用于说明接口形态。 |
 | `bfcl_eval/model_handler/local_inference/` 全部 28 个文件 | vLLM/SGLang 本地推理后端，评测机制不依赖。 |
 | `architecture_diagram.png` | 图片（规范要求剔除）。 |
-| `knowledge/methods/bfcl/code/` 中 BFCL 目录以外的 420−69 个文件 | 只保留与 BFCL 机制相关的部分，其余为仓库其他项目。 |
+| 旧快照（整个 gorilla 仓库）中 BFCL 目录以外的 420−69 个文件 | 只保留与 BFCL 机制相关的部分，其余为仓库其他项目。 |
 
 一处需要说明的保留：`bfcl_eval/eval_checker/multi_turn_eval/func_source_code/long_context.py` 有 190 KB，是包内最大文件，但它不含类与方法定义，全部是长上下文类目用的列表数据（`WATCH_LIST_EXTENSION` 等）；`trading_bot.py`、`gorilla_file_system.py`、`vehicle_control.py`、`travel_booking.py` 四个多轮后端都在模块顶部 import 它，删掉会直接破坏 import，故按"够接入与验证的最小核心"保留。
 
-论文正文（PDF/文本）、来源包元数据与旧方法页分别位于 `paper/`、`source-packet.json` 与只读的 `knowledge/methods/bfcl/`。
+论文正文（PDF/文本）与来源包元数据分别位于 `paper/` 与 `source-packet.json`。旧范式下的方法页（整个 gorilla 仓库快照）已随 SourcePacket 重建一并移除，原始内容保留在分支历史 `ca05901a` 中。

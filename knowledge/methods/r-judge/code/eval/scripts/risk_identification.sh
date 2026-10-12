@@ -1,2 +1,0 @@
-python extract_analysis.py
-python risk_identification.py

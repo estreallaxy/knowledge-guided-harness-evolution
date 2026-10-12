@@ -1,1 +1,0 @@
-# Evaluator module for trajectory evaluation 
