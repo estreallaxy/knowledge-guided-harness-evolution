@@ -91,12 +91,54 @@ BASELINES = [
 ]
 BASELINE_AGENT_NAME = BASELINES[0][0]  # primary baseline for frontier comparison
 
-EVAL_TASK_SET = "full"
-N_EVAL_TASKS = 89  # full official TB2 dataset used in the paper runs
+# 数据集来源（王懿，2026-10-08）：上游默认跑 registry 的 terminal-bench@2.0 全量 89 题。
+# 仓库的固定划分（30 train / 19 dev / 40 test，benchmarks/terminal-bench-2.0/split-v1.json）
+# 通过 HARBOR_DATASET_PATH 指向本地划分目录，由 run_eval.sh 用 Harbor `-p` 读取。
+# 未设置时保持上游行为不变。
+DATASET_PATH = os.environ.get("HARBOR_DATASET_PATH", "")
+EVAL_TASK_SET = os.environ.get("HARBOR_TASK_SET", "full")
 
-SMOKE_TEST_TASK = "extract-elf"  # simple task, reliably fast
+# 提示词与汇总里显示的题目数；随数据集来源一起覆盖，避免优化 Agent 读到错误的规模。
+EVAL_TASK_COUNT = os.environ.get("HARBOR_TASK_COUNT", "")
+N_EVAL_TASKS = int(EVAL_TASK_COUNT) if EVAL_TASK_COUNT else 89  # paper runs: full 89
 
-MODEL = "anthropic/claude-opus-4-6"
+# 冒烟题（王懿，2026-10-08）：上游固定用 extract-elf，但该题属于仓库固定划分的 test 集
+# （benchmarks/terminal-bench-2.0/split-v1.json）。在 train/dev/test 分离协议下，
+# 用 test 题跑冒烟既会让优化 Agent 看到测试集轨迹，又会因为 `-p <train>` 目录里
+# 根本没有这道题而直接失败。因此改为按实际数据集解析：
+#   未配置本地划分 → 保持上游行为（registry 全量 89 题）；
+#   配置了本地划分 → 优先用 train 集的同档题目，否则取该目录下实际存在的题。
+SMOKE_TEST_TASK_PREFERRED = "sanitize-git-repo"  # train 集；medium / 专家 30min，与 extract-elf 同档
+
+
+def _resolve_smoke_task():
+    override = os.environ.get("HARBOR_SMOKE_TASK")
+    if override:
+        return override
+    if not DATASET_PATH:
+        return "extract-elf"  # upstream default: registry full 89
+    dataset_dir = Path(DATASET_PATH)
+    if (dataset_dir / SMOKE_TEST_TASK_PREFERRED / "task.toml").is_file():
+        return SMOKE_TEST_TASK_PREFERRED
+    for entry in sorted(dataset_dir.iterdir()):
+        if (entry / "task.toml").is_file():
+            return entry.name
+    return SMOKE_TEST_TASK_PREFERRED
+
+
+SMOKE_TEST_TASK = _resolve_smoke_task()
+
+# ── 模型适配（王懿，2026-10-07）─────────────────────────────────
+# 团队约定：执行模型与优化模型统一使用 deepseek-v4-flash。
+# 上游此处为 MODEL = "anthropic/claude-opus-4-6"，本机改为经 DeepSeek 的
+# OpenAI 兼容端点访问，模型 id 为 deepseek-flash（DeepSeek-V4.1-Flash：
+# 1M 上下文 / 393216 最大输出 / 支持图像输入与 function calling）。
+# 端点与密钥只从环境变量读取，不写入仓库。详见 notes/environment.md。
+MODEL = os.environ.get("HARBOR_MODEL", "deepseek/deepseek-flash")
+API_BASE = os.environ.get("HARBOR_API_BASE", "https://api.deepseek.com/v1")
+# litellm 未登记 deepseek-flash，显式提供上下文档位，避免回退到默认值后误判上下文长度。
+MODEL_INFO = {"max_input_tokens": 1_048_576, "max_output_tokens": 393_216}
+
 DEFAULT_SEARCH_TRIALS = 2
 DEFAULT_CONCURRENCY = 50
 HARBOR_TIMEOUT_SECONDS = int(os.environ.get("HARBOR_TIMEOUT_SECONDS", 8 * 60 * 60))
@@ -124,8 +166,10 @@ def run_cmd(cmd, timeout=HARBOR_TIMEOUT_SECONDS, cwd=None):
     """Run a subprocess; return CompletedProcess (returncode=124 on timeout)."""
     env = os.environ.copy()
     env["HARBOR_MODEL"] = MODEL
+    env["HARBOR_API_BASE"] = API_BASE
+    env["HARBOR_DATASET_PATH"] = DATASET_PATH
     # Ensure dotenv-loaded keys survive through uv run subprocess
-    for key in ("RUNLOOP_API_KEY", "ANTHROPIC_API_KEY"):
+    for key in ("DEEPSEEK_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"):
         val = os.environ.get(key)
         if val:
             env[key] = val
@@ -175,6 +219,8 @@ def harbor_run(import_path, job_name, n_trials=2, n_concurrent=10):
 
     env = os.environ.copy()
     env["HARBOR_MODEL"] = MODEL
+    env["HARBOR_API_BASE"] = API_BASE
+    env["HARBOR_DATASET_PATH"] = DATASET_PATH
     env["HARBOR_TIMEOUT_SECONDS"] = str(HARBOR_TIMEOUT_SECONDS)
     env["HARBOR_EXTERNAL_TIMEOUT"] = "1"
 
@@ -429,10 +475,28 @@ def update_evolution_summary(
 
 
 def propose_claude(task_prompt, iteration, timeout=2400):
-    """Call Claude Code to propose new agent candidates. Returns True if pending_eval.json exists."""
+    """Call Claude Code to propose new agent candidates. Returns True if pending_eval.json exists.
+
+    适配说明（王懿，2026-10-07）：优化 Agent 仍由 Claude Code CLI 驱动，但本机通过
+    ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN 指向 DeepSeek 的 Anthropic 兼容端点，
+    `--model opus` 经 ANTHROPIC_DEFAULT_OPUS_MODEL 解析为 deepseek-flash。
+    claude_wrapper 以 `--setting-sources ""` 启动，settings.json 不生效，
+    因此这两个环境变量必须在进程环境中存在。
+    """
     os.environ.pop("CLAUDECODE", None)
-    # Strip API key so claude CLI uses subscription auth, not API (avoids rate limits)
+    # Strip API key so claude CLI uses subscription auth, not API (avoids rate limits).
+    # 走 DeepSeek 端点时该变量本就未设置，此处保留上游行为，不影响 ANTHROPIC_AUTH_TOKEN。
     saved_key = os.environ.pop("ANTHROPIC_API_KEY", None)
+    if not os.environ.get("ANTHROPIC_BASE_URL") or not os.environ.get(
+        "ANTHROPIC_AUTH_TOKEN"
+    ):
+        print(
+            f"  {_red('proposer 缺少 provider 环境变量')}: 需要 ANTHROPIC_BASE_URL 与 "
+            "ANTHROPIC_AUTH_TOKEN（见 .env.example 与 notes/environment.md）"
+        )
+        if saved_key:
+            os.environ["ANTHROPIC_API_KEY"] = saved_key
+        return False
     result = claude_wrapper.run(
         prompt=task_prompt,
         model="opus",
@@ -527,14 +591,24 @@ def smoke_test(name, import_path, timeout=1800):
     return True
 
 
+def _dataset_line():
+    """Describe the dataset actually being evaluated, so the proposer is not misled."""
+    if DATASET_PATH:
+        return (
+            f"This run evaluates the frozen local split at `{DATASET_PATH}` "
+            f"(30 train / 19 dev / 40 test, see benchmarks/terminal-bench-2.0/split-v1.json)."
+        )
+    return "This reference example uses the full TB2 dataset from the paper runs."
+
+
 def render_task_prompt(iteration, n_trials):
     """Build the prompt for the proposer Claude session."""
     return (
         f"Run iteration {iteration} of the scaffold evolution loop (KIRA track). "
-        f"Model: {MODEL} (Opus). "
+        f"Execution/optimizer model: {MODEL} (via DeepSeek, see notes/environment.md). "
         f"Start from agents/baseline_kira.py as the parent.\n\n"
         f"## Eval split: {N_EVAL_TASKS} official TB2 tasks x {n_trials} trials\n\n"
-        f"This reference example uses the full TB2 dataset from the paper runs. "
+        f"{_dataset_line()}\n\n"
         f"Focus on scaffold changes that help the agent solve complex, long-horizon tasks.\n\n"
         f"## Run directories\n"
         f"All logs and results for this run are under `{LOGS_DIR}/`.\n"

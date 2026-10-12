@@ -22,14 +22,28 @@ if [[ -f "$REPO_DIR/.env" ]]; then
     set +a
 fi
 
-MODEL="${HARBOR_MODEL:-anthropic/claude-opus-4-6}"
+# 适配记录（王懿，2026-10-07）：
+#   上游默认是 anthropic/claude-opus-4-6 + runloop 云沙箱（需 RUNLOOP_API_KEY）。
+#   本机改为 deepseek/deepseek-flash + 本地 Docker（Harbor 自身的默认环境），
+#   端点与密钥只从环境变量读取。详见 ../../../notes/environment.md
+MODEL="${HARBOR_MODEL:-deepseek/deepseek-flash}"
 HARBOR_TIMEOUT_SECONDS="${HARBOR_TIMEOUT_SECONDS:-28800}"
-HARBOR_ENVIRONMENT="${HARBOR_ENVIRONMENT:-runloop}"
+HARBOR_ENVIRONMENT="${HARBOR_ENVIRONMENT:-docker}"
+HARBOR_API_BASE="${HARBOR_API_BASE:-https://api.deepseek.com/v1}"
 
 case "$HARBOR_ENVIRONMENT" in
-    runloop|modal) ;;
-    *) echo "Unknown HARBOR_ENVIRONMENT '$HARBOR_ENVIRONMENT'. Use: runloop | modal" >&2; exit 1 ;;
+    docker|runloop|modal) ;;
+    *) echo "Unknown HARBOR_ENVIRONMENT '$HARBOR_ENVIRONMENT'. Use: docker | runloop | modal" >&2; exit 1 ;;
 esac
+
+# litellm 未登记 deepseek-flash，显式提供上下文档位，避免误判上下文长度。
+MODEL_INFO_JSON='{"max_input_tokens":1048576,"max_output_tokens":393216}'
+
+# 数据集来源（王懿，2026-10-08）：默认走上游 registry 的 terminal-bench@2.0（89 题全量）。
+# 设置 HARBOR_DATASET_PATH 时改用本地固定划分目录（Harbor `-p`），
+# 例如 /data1/users/wangY/benchmarks/tb2-split-v1/train。
+HARBOR_DATASET_PATH="${HARBOR_DATASET_PATH:-}"
+HARBOR_DATASET="${HARBOR_DATASET:-terminal-bench@2.0}"
 
 uv run python "$REPO_DIR/meta_harness.py" --validate-agent "$AGENT_IMPORT_PATH"
 
@@ -59,7 +73,9 @@ esac
 echo "agent:       $AGENT_IMPORT_PATH"
 echo "environment: $HARBOR_ENVIRONMENT"
 echo "task_set:    $TASK_SET"
+echo "dataset:     ${HARBOR_DATASET_PATH:-$HARBOR_DATASET}"
 echo "model:       $MODEL"
+echo "api_base:    ${HARBOR_API_BASE:-<provider default>}"
 echo "concurrent:  $N_CONCURRENT"
 echo "runs:        $RUNS"
 echo "timeout:     ${HARBOR_TIMEOUT_SECONDS}s"
@@ -77,13 +93,21 @@ fi
 CMD=(
     uv run harbor run
     --agent "$AGENT_IMPORT_PATH"
-    -d "terminal-bench@2.0"
     -m "$MODEL"
     -e "$HARBOR_ENVIRONMENT"
     -n "$N_CONCURRENT"
     --n-attempts "$RUNS"
     --ak temperature=0.7
 )
+if [[ -n "$HARBOR_DATASET_PATH" ]]; then
+    CMD+=(-p "$HARBOR_DATASET_PATH")
+else
+    CMD+=(-d "$HARBOR_DATASET")
+fi
+# 仅在使用非 Anthropic 兼容的 OpenAI 端点时透传 api_base 与 model_info。
+if [[ -n "$HARBOR_API_BASE" ]]; then
+    CMD+=(--ak "api_base=$HARBOR_API_BASE" --ak "model_info=$MODEL_INFO_JSON")
+fi
 if [[ ${#TASK_FLAGS[@]} -gt 0 ]]; then
     CMD+=("${TASK_FLAGS[@]}")
 fi
