@@ -41,3 +41,21 @@
 | MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework | 子 Agent 与多 Agent 协作 | [metagpt-2308.00352](metagpt-2308.00352/) |
 | SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering | 运行观测、Trace 与集成接口 | [swe-agent-2405.15793](swe-agent-2405.15793/) |
 | OpenHands: An Open Platform for AI Software Developers as Generalist Agents | 运行观测、Trace 与集成接口 | [openhands-2407.16741](openhands-2407.16741/) |
+| AgentRewind | 会话与环境状态管理 | [agentrewind-2608.14380](agentrewind-2608.14380/) |
+| AgentScope | 扩展机制与生命周期钩子 | [agentscope-2508.16279](agentscope-2508.16279/) |
+| ExpeL | 长期记忆与经验复用 | [expel-2308.10144](expel-2308.10144/) |
+| NORA | 扩展机制与生命周期钩子 | [nora-2605.02092](nora-2605.02092/) |
+| ReasoningBank | 长期记忆与经验复用 | [reasoningbank-2509.25140](reasoningbank-2509.25140/) |
+| StateFork | 会话与环境状态管理 | [statefork-2609.38648](statefork-2609.38648/) |
+
+
+## 李永康来源包机制索引
+
+| 来源 | 提取的机制 | 机制与边界 | 逐条证据 |
+| --- | --- | --- | --- |
+| ReasoningBank | 成败推理经验提取与检索 | [说明](reasoningbank-2509.25140/mechanism-and-boundaries.md) | [映射](reasoningbank-2509.25140/claim-evidence-map.json) |
+| ExpeL | 规则维护与成功示例检索 | [说明](expel-2308.10144/mechanism-and-boundaries.md) | [映射](expel-2308.10144/claim-evidence-map.json) |
+| AgentRewind | 对齐上下文与工作区恢复 | [说明](agentrewind-2608.14380/mechanism-and-boundaries.md) | [映射](agentrewind-2608.14380/claim-evidence-map.json) |
+| StateFork | 逻辑分支与物理状态分离 | [说明](statefork-2609.38648/mechanism-and-boundaries.md) | [映射](statefork-2609.38648/claim-evidence-map.json) |
+| AgentScope | 生命周期回调输入输出合同 | [说明](agentscope-2508.16279/mechanism-and-boundaries.md) | [映射](agentscope-2508.16279/claim-evidence-map.json) |
+| NORA | 宿主事件与结构化交接 | [说明](nora-2605.02092/mechanism-and-boundaries.md) | [映射](nora-2605.02092/claim-evidence-map.json) |

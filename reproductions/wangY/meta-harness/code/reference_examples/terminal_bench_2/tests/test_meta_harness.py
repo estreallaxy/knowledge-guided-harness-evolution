@@ -58,6 +58,7 @@ class TimeoutWiringTests(unittest.TestCase):
         self,
         harbor_environment: str | None = None,
         external_timeout: bool = False,
+        dataset_path: str | None = None,
     ) -> tuple[list[str], str]:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -81,6 +82,9 @@ class TimeoutWiringTests(unittest.TestCase):
             env = os.environ.copy()
             env.pop("HARBOR_ENVIRONMENT", None)
             env.pop("HARBOR_EXTERNAL_TIMEOUT", None)
+            env.pop("HARBOR_API_BASE", None)
+            env.pop("HARBOR_MODEL", None)
+            env.pop("HARBOR_DATASET_PATH", None)
             env.pop("PYTHONPATH", None)
             env.update(
                 {
@@ -94,6 +98,8 @@ class TimeoutWiringTests(unittest.TestCase):
                 env["HARBOR_ENVIRONMENT"] = harbor_environment
             if external_timeout:
                 env["HARBOR_EXTERNAL_TIMEOUT"] = "1"
+            if dataset_path:
+                env["HARBOR_DATASET_PATH"] = dataset_path
 
             result = subprocess.run(
                 [
@@ -151,9 +157,33 @@ class TimeoutWiringTests(unittest.TestCase):
             timeout_args[agent_flag + 1], "agents.baseline_kira:AgentHarness"
         )
         environment_flag = timeout_args.index("-e")
-        self.assertEqual(timeout_args[environment_flag + 1], "runloop")
+        # 本地适配（王懿，2026-10-07）：默认环境由上游的 runloop 改为 Harbor 内置的
+        # docker，避免依赖云沙箱密钥。显式传入 HARBOR_ENVIRONMENT 时仍按传入值运行。
+        self.assertEqual(timeout_args[environment_flag + 1], "docker")
+        self.assertEqual(
+            timeout_args[timeout_args.index("-m") + 1], "deepseek/deepseek-flash"
+        )
         self.assertIn("temperature=0.7", timeout_args)
+        self.assertIn("api_base=https://api.deepseek.com/v1", timeout_args)
+        self.assertIn(
+            'model_info={"max_input_tokens":1048576,"max_output_tokens":393216}',
+            timeout_args,
+        )
         self.assertEqual(Path(pythonpath.split(os.pathsep)[0]), ROOT)
+
+    def test_shell_runner_defaults_to_registry_dataset(self) -> None:
+        timeout_args, _ = self._run_shell()
+
+        dataset_flag = timeout_args.index("-d")
+        self.assertEqual(timeout_args[dataset_flag + 1], "terminal-bench@2.0")
+        self.assertNotIn("-p", timeout_args)
+
+    def test_shell_runner_uses_local_split_when_path_is_set(self) -> None:
+        timeout_args, _ = self._run_shell(dataset_path="/tmp/tb2-split-v1/train")
+
+        path_flag = timeout_args.index("-p")
+        self.assertEqual(timeout_args[path_flag + 1], "/tmp/tb2-split-v1/train")
+        self.assertNotIn("-d", timeout_args)
 
     def test_shell_runner_supports_modal(self) -> None:
         timeout_args, _ = self._run_shell("modal")
@@ -165,6 +195,48 @@ class TimeoutWiringTests(unittest.TestCase):
         command_args, _ = self._run_shell(external_timeout=True)
 
         self.assertEqual(command_args[:3], ["run", "harbor", "run"])
+
+
+class SmokeTaskResolutionTests(unittest.TestCase):
+    """冒烟题必须取自实际挂载的数据集划分（王懿，2026-10-08）。
+
+    上游固定用 extract-elf，而它在固定划分里属于 test 集；train 目录下不存在该题，
+    冒烟会直接失败，同时也会把测试集暴露给优化 Agent。
+    """
+
+    def _resolve(self, dataset_path: str | None, override: str | None = None) -> str:
+        env = os.environ.copy()
+        env.pop("HARBOR_SMOKE_TASK", None)
+        if override:
+            env["HARBOR_SMOKE_TASK"] = override
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(meta_harness, "DATASET_PATH", dataset_path or ""),
+        ):
+            return meta_harness._resolve_smoke_task()
+
+    def test_keeps_upstream_task_on_registry_dataset(self) -> None:
+        self.assertEqual(self._resolve(None), "extract-elf")
+
+    def test_prefers_train_task_when_it_exists_in_split(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for task in (meta_harness.SMOKE_TEST_TASK_PREFERRED, "other-task"):
+                (Path(tmp) / task).mkdir()
+                (Path(tmp) / task / "task.toml").write_text("")
+            self.assertEqual(
+                self._resolve(tmp), meta_harness.SMOKE_TEST_TASK_PREFERRED
+            )
+
+    def test_falls_back_to_a_task_present_in_the_split(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for task in ("zzz-task", "aaa-task"):
+                (Path(tmp) / task).mkdir()
+                (Path(tmp) / task / "task.toml").write_text("")
+            # 该划分里没有首选题，取目录下实际存在的题，而不是上游硬编码的 test 题。
+            self.assertEqual(self._resolve(tmp), "aaa-task")
+
+    def test_env_override_wins(self) -> None:
+        self.assertEqual(self._resolve(None, override="regex-log"), "regex-log")
 
 
 class KiraLoopSignatureTests(unittest.IsolatedAsyncioTestCase):
