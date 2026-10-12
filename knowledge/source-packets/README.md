@@ -37,6 +37,10 @@
 | 论文 | 方向 | 来源包 |
 | --- | --- | --- |
 | How Well Do Agentic Skills Work in the Wild: Benchmarking LLM Skill Usage in Realistic Settings | 指令与 Skill | [skill-usage-2604.04323](skill-usage-2604.04323/) |
+| AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework | 子 Agent 与多 Agent 协作 | [autogen-2308.08155](autogen-2308.08155/) |
+| MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework | 子 Agent 与多 Agent 协作 | [metagpt-2308.00352](metagpt-2308.00352/) |
+| SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering | 运行观测、Trace 与集成接口 | [swe-agent-2405.15793](swe-agent-2405.15793/) |
+| OpenHands: An Open Platform for AI Software Developers as Generalist Agents | 运行观测、Trace 与集成接口 | [openhands-2407.16741](openhands-2407.16741/) |
 | AgentRewind | 会话与环境状态管理 | [agentrewind-2608.14380](agentrewind-2608.14380/) |
 | AgentScope | 扩展机制与生命周期钩子 | [agentscope-2508.16279](agentscope-2508.16279/) |
 | ExpeL | 长期记忆与经验复用 | [expel-2308.10144](expel-2308.10144/) |

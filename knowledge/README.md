@@ -15,10 +15,10 @@
 | 规划与任务进度管理 | 李嘉旺 | 0 / 2 | 待按 `SourcePacket` 收集。 |
 | 模型选择与资源分配 | 周梦凡 | 0 / 2 | 待按 `SourcePacket` 收集。 |
 | 会话与环境状态管理 | 李永康 | 2 / 2（材料齐备，待团队审阅） | [AgentRewind](source-packets/agentrewind-2608.14380/) · [StateFork](source-packets/statefork-2609.38648/) |
-| 子 Agent 与多 Agent 协作 | 王懿 | 0 / 2 | 待按 `SourcePacket` 收集。 |
+| 子 Agent 与多 Agent 协作 | 王懿 | 2 / 2 | [AutoGen](source-packets/autogen-2308.08155/) · [论文](https://arxiv.org/abs/2308.08155v2) · [GitHub](https://github.com/microsoft/autogen)；[MetaGPT](source-packets/metagpt-2308.00352/) · [论文](https://arxiv.org/abs/2308.00352v7) · [GitHub](https://github.com/geekan/MetaGPT) |
 | 权限、审批与运行隔离 | 李嘉旺 | 0 / 2 | 待按 `SourcePacket` 收集。 |
 | 扩展机制与生命周期钩子 | 李永康 | 2 / 2（材料齐备，待团队审阅） | [AgentScope](source-packets/agentscope-2508.16279/) · [NORA](source-packets/nora-2605.02092/) |
-| 运行观测、Trace 与集成接口 | 王懿 | 0 / 2 | 待按 `SourcePacket` 收集。 |
+| 运行观测、Trace 与集成接口 | 王懿 | 2 / 2 | [SWE-agent](source-packets/swe-agent-2405.15793/) · [论文](https://arxiv.org/abs/2405.15793v3) · [GitHub](https://github.com/princeton-nlp/SWE-agent)；[OpenHands](source-packets/openhands-2407.16741/) · [论文](https://arxiv.org/abs/2407.16741v3) · [GitHub](https://github.com/All-Hands-AI/OpenHands) |
 | 验证、评估与反馈 | 李嘉旺 | 0 / 2 | 待按 `SourcePacket` 收集。 |
 
 ## 筛选标准
