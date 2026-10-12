@@ -1,0 +1,1536 @@
+
+
+--- PDF page 1 ---
+
+arXiv:2609.38648v1 [cs.OS] 29 Sep 2026
+StateFork: Branchable Infrastructure
+for Agent Exploration
+Jiakai Xu∗
+Columbia University
+USA
+ax2155@columbia.edu
+Tianle Zhou∗
+Columbia University
+USA
+mz2998@columbia.edu
+Ruizhe Fu
+Google
+USA
+rf2715@columbia.edu
+Patrick Shen
+Columbia University
+USA
+pts2125@columbia.edu
+Abstract
+AI agents improve task success by exploring multiple trajec-
+tories, but for computer-use agents each trajectory modifies
+external environment state. Branching from an intermedi-
+ate point is correct only when restoration is observation-
+equivalent—future actions produce the same observations—
+and practical only when creating, restoring, and discarding
+branch states is physically efficient. We study this problem
+for terminal-using agents, where tasks modify files, shell
+context, running processes, and local services. We intro-
+duce StateFork, a logical control plane that separates explo-
+ration policies from physical state materialization, exposing
+sessions, commands, snapshots, restores, and cleanup over
+multiple execution substrates. We also build Waypoint, a
+checkpoint/restore substrate for terminal execution sessions
+that combines filesystem layering, process checkpointing,
+and a persistent terminal-compatible command session. To-
+gether, StateFork and Waypoint improve terminal-agent ex-
+ploration by combining sample-efficient search with efficient
+restoration of the right execution state. On Terminal-Bench,
+branch-based exploration through StateFork and Waypoint
+improves task completion over pass@20 at the same visited-
+node budget, and using Waypoint achieves 26% higher task
+accuracy than other execution substrates while complet-
+ing exploration up to 70% faster. These results show that
+observation-equivalent, physically efficient execution ses-
+sions are a key systems abstraction for exploratory AI agents.
+1 Introduction
+AI agents increasingly solve tasks by exploring. They test hy-
+potheses, retry failed actions, compare alternative plans, and
+backtrack from unproductive continuations before commit-
+ting to a final answer. For reasoning-only tasks, exploration
+is mostly a logical operation. An agent can branch by copy-
+ing a prompt, a reasoning trace, or a small scratchpad. For
+computer-use agents, however, exploration is also a systems
+problem. Each action changes an external environment, and
+future observations depend on the state created by earlier
+Georgios Liargkovas
+Columbia University
+USA
+g.liargkovas@columbia.edu
+Danielle Gillai
+Columbia University
+USA
+deg2184@barnard.edu
+Eugene Wu
+Columbia University
+USA
+ew2493@columbia.edu
+Kostis Kaffes
+Columbia University
+USA
+kkaffes@cs.columbia.edu
+actions. Branching therefore requires the agent runtime to
+manage not only the model context, but also the environment
+state associated with intermediate points in the trajectory.
+The correctness requirement for such branching is ob-
+servation equivalence. After restoring an intermediate node,
+subsequent actions should produce observations equivalent
+to those produced from the original node. This constraint is
+weaker than bit-for-bit equality of the host machine as the
+execution substrate need not preserve state that no future
+command uses. It is also stronger than restoring only a con-
+venient, albeit incomplete, subset of the necessary state. If
+a branch omits state that affects future observations, or if
+effects from one speculative branch contaminate another, the
+search tree no longer represents valid alternatives. Successful
+exploration also requires physical efficiency. Creating, restor-
+ing, and discarding branches must be cheap enough that
+exploration improves task performance rather than being
+dominated by state-management overhead.
+In this paper, we focus on enabling such exploration for
+terminal-use agents. Terminal interaction is a natural tar-
+get because many practical coding and computer-use agents
+operate through command-line interfaces, including Ope-
+nAI Codex CLI [30] and Claude Code [5]. The terminal is
+text-native, compositional, and already exposes many tools
+needed for software engineering tasks, enabling agents to
+inspect directories, edit files, install dependencies, run tests,
+start services, and debug failures through command out-
+put. At the same time, these actions modify state that is
+not captured by the command transcript alone. Throughout
+the paper, we use Terminal-Bench [46] as a representative
+workload for terminal-use agents because it uses this same
+command–observation interface and consists of a wide vari-
+ety of generic computer-use tasks.
+We call the relevant state an execution session: the agent-
+facing computer environment produced by the command
+prefix leading to a node in the exploration tree. For terminal
+agents, an execution session includes the state that future
+shell commands can observe or depend on. This includes
+∗Both authors contributed equally to this research.
+1
+
+--- PDF page 2 ---
+
+filesystem state such as source files, installed packages, vir-
+tual environments, generated artifacts, logs, and configura-
+tion; terminal-session state such as the working directory,
+exported variables, activated environments, aliases, shell
+functions, job-control state, and PTY-dependent behavior;
+process and memory state such as running programs, RE-
+PLs, servers, background jobs, open file descriptors, and
+in-memory caches; and local service state such as sockets,
+databases, and loopback services. Our manual labeling of
+Terminal-Bench tasks shows that these categories are com-
+mon rather than exceptional. All labeled tasks require filesys-
+tem state, most require terminal-session state, and a nontriv-
+ial fraction require live process and memory state.
+Existing execution substrates do not provide the right com-
+bination of observation equivalence and physical efficiency.
+Replay can reconstruct a node by re-executing the prefix
+from the root, but its cost grows with prefix length and it is
+fragile under nondeterminism. Undo can be efficient when
+every action has a reliable inverse, but terminal actions such
+as installing packages, mutating databases, deleting files, or
+starting services are not generally reversible. Filesystem-only
+checkpoints lose shell and process state; process checkpoints
+assume a compatible filesystem and session boundary; con-
+tainer checkpoints pay deployment-oriented lifecycle and
+image-management costs; VM snapshots preserve too much
+machine state; and branch-oriented APIs provide fast specu-
+lation for single applications but not restorable checkpoints
+over execution sessions. Further, adopting any of these mech-
+anisms requires the agent to understand the implementation
+details and low-level operations in order to save and restore
+state. This limits portability to new execution substrates that
+are faster, more resource efficient, and/or better preserve
+observation equivalence for a class of desired tasks.
+We introduce two layers to address this gap. Figure 1
+shows the resulting stack. At the top, an agent or search
+policy expands a logical exploration tree over command–
+observation trajectories. In the middle, StateFork acts as the
+logical control plane. It exposes branchable session opera-
+tions, tracks logical branch points, decides how those branch
+points should be materialized, and dispatches backend-specific
+operations. At the bottom, execution substrates implement
+the physical restoration mechanism, including replay-to-
+node, filesystem snapshots, container or VM snapshots, and
+our own substrate, Waypoint.
+StateFork separates the logical exploration tree from phys-
+ical state materialization, so the same exploration algorithm
+can run over different execution substrates while the runtime
+optimizes the tradeoff between observation equivalence and
+physical efficiency. Waypoint is the checkpoint/restore sub-
+strate we built for terminal-agent execution sessions. It treats
+the execution session as the native checkpoint boundary.
+Filesystem layering preserves file contents, process check-
+pointing preserves application memory, and a persistent
+LLM Agent / Search Policy
+MCTS, Beam Search, Pass@k, other rollout policies. Reward Logic
+Actions branch resume/checkpoint/restore
+StateFork: Logical Control Plane for Agent Exploration
+Logical
+Exploration
+Tree
+Explored node
+Checkpointed branch point
+Speculative Child
+Session Manager
+track active branch
+run commands
+record observations
+Materialization Policy
+choose replay vs restore
+decide when to chkpt
+evict unused states
+Backend Manager
+map ops to backends
+create/restore chkpts
+clean physical state
+Waypoint Replay Lang
+process+memory state
+Runtime File
+filesystem isolation
+System
+persistent shell
+Process Snapshots
+Snapshot
+Container
+/ VM
+Snapshot
+Execution Substrates: Physical Checkpoint Mechanisms
+Figure 1. Terminal-agent stack (our work in green). An
+agent or search policy expands a logical tree over command–
+observation trajectories. StateFork provides the logical con-
+trol plane: it exposes branchable sessions, chooses whether
+branch points are physical or virtual, and maps logical oper-
+ations to substrate-specific restore mechanisms. Execution
+substrates materialize logical branch points using mecha-
+nisms such as replay-to-node, filesystem snapshots, and con-
+tainer/VM snapshots; Waypoint is our optimized substrate
+for terminal agents, capturing the task-facing execution-
+session state: filesystem, process/memory, and persistent
+terminal-session state.
+terminal-compatible command session preserves shell con-
+text. Waypoint is full-state with respect to the execution-
+session boundary that determines future terminal obser-
+vations, not with respect to the entire host machine or a
+portable deployment artifact.
+Our evaluation shows that StateFork and Waypoint im-
+prove both sides of terminal-agent exploration. First, branch-
+based exploration through StateFork improves sample effi-
+ciency. On Terminal-Bench, Monte Carlo Tree Search achieves
+a higher task completion rate than pass@20 for the same
+visited-node budget, showing that reusing intermediate nodes
+is more effective than repeatedly restarting from the root. Sec-
+ond, StateFork backed by Waypoint improves both sample
+and physical efficiency by efficiently restoring observation-
+equivalent execution sessions. In microbenchmarks, Way-
+point achieves up to 10×lower checkpoint-plus-restore la-
+tency than existing VM and container substrates that cap-
+ture both memory and filesystem state. In macrobenchmarks,
+StateFork with Waypoint achieves 26% higher task comple-
+tion rate than other evaluated platforms while completing
+exploration 70% faster than replaying commands from the
+initial state. Together, StateFork and Waypoint let agents
+2
+
+--- PDF page 3 ---
+
+express exploration as a logical tree while restoring the ter-
+minal execution sessions needed for observation-equivalent
+and physically efficient branching.
+In summary, this paper makes the following contributions:
+•We formalize terminal-agent exploration as the observation-
+equivalent and efficient restoration of intermediate nodes.
+•We define the execution session as the task-facing state
+boundary needed for terminal-agent observation equiv-
+alence, and show that Terminal-Bench tasks commonly
+require filesystem, terminal-session, process, memory, and
+local-service state.
+•We introduce StateFork, a logical control plane that lets
+exploration algorithms execute commands, create branch
+points, restore prior nodes, and optimize how those logical
+nodes are materialized across execution substrates.
+•We design and evaluate Waypoint, an execution substrate
+that captures execution-session state efficiently using file
+system layering, process checkpointing, and a persistent
+terminal-compatible command session.
+•We show that StateFork and Waypoint together improve
+the Terminal-Bench task completion rate by >26% with
+>70% lower latency.
+2 Fundamentals of Agent Exploration
+2.1 Logical Agent Exploration
+Language-model agents increasingly solve tasks by exploring
+multiple possible trajectories before committing to one. We
+use logical agent exploration to mean the search problem
+faced by the agent that decomposes to two subproblems:
+deciding (i) which unfinished trajectory prefixes to expand,
+and (ii) which continuation to pursue. This logical problem
+is independent of the mechanism used to materialize the
+corresponding environment states.
+Formally, let 𝐼 be the task instructions, 𝜏<𝑡 = (𝑎0,𝑜0,...,
+𝑎𝑡−1,𝑜𝑡−1)be the trajectory prefix observed by the agent
+where 𝑎𝑖 and 𝑜𝑖 are the action taken and outcome observed at
+the 𝑖-th step, respectively, and let 𝑀𝑡 denote any framework-
+managed memory included in the model context. At step 𝑡,
+the agent chooses an action
+𝑎𝑡 = LLM(𝐼,𝜏<𝑡 ,𝑀𝑡 ).
+In a terminal environment, 𝑎𝑡 is a command or tool invoca-
+tion. Executing 𝑎𝑡 against the current environment state 𝑆𝑡
+produces an observation and a successor state:
+(𝑜𝑡 ,𝑆𝑡+1)= ⟦𝑎𝑡 ⟧(𝑆𝑡 ).
+The central objective of logical agent exploration is sample
+efficiency. Each LLM call chooses an action, expands a tra-
+jectory prefix, and consumes part of the exploration budget.
+Because long-horizon tasks have many possible continua-
+tions, an effective exploration method should focus on calls
+most likely to change the final outcome rather than repeat-
+edly sample the same uninformative prefixes.
+Figure 2. Terminal-Bench task success as a function of vis-
+ited search nodes, where each node corresponds to an LLM
+call. MCTS achieves higher success than pass@20 at the same
+node budget because it reuses observations and intermediate
+environment states across sibling branches.
+The most naive method is pass@𝑘: run the agent from the
+initial state up to 𝑘independent times, and count the task as
+solved if any rollout succeeds. Pass@𝑘 is simple and often
+improves over a single attempt, but it is not sample efficient.
+Each rollout restarts from the root, so intermediate trajectory
+prefixes are not reused as branch points. Intermediate nodes
+improve sample efficiency in two ways. First, the prefix lead-
+ing to a useful node is sampled once and then reused for
+multiple continuations. Second, observations at that node
+provide evidence about which nearby branches are promis-
+ing, allowing later calls to be allocated adaptively. This is
+why recent exploration methods represent agent search as
+a tree: the root is the initial state, edges are actions, and
+nodes are partial trajectories that can be expanded selec-
+tively. Tree of Thoughts [50], LATS [54], Tree Search for
+Language Model Agents [22], and ExACT[51] all use this
+branch-and-reuse structure to spend LLM calls on promising
+partial trajectories rather than independent restarts.
+Figure 2 provides additional evidence for this distinction
+for Terminal-Bench [46], the most prominent benchmark
+of terminal-based tasks in which agents solve problems by
+issuing shell commands and observing their outputs. At the
+same visited-node budget, Monte Carlo Tree Search (MCTS)
+achieves higher Terminal-Bench task completion rate than
+pass@20. Each additional call can refine an existing search
+tree instead of beginning another isolated rollout, improving
+sample efficiency.
+2.2 Physical Requirements for Agent Exploration
+Logical exploration assumes that the agent can branch from
+an intermediate node in the search tree. For pure reasoning
+tasks, this assumption is almost free. The relevant state is
+usually the prompt, the reasoning trace, and any structured
+scratchpad maintained by the search algorithm. Forking a
+node means copying tokens or a small in-memory object.
+This is one reason tree-based exploration has been effective
+in reasoning settings.
+3
+
+--- PDF page 4 ---
+
+Terminal-use agents are different. A node in the search
+tree is not only a transcript prefix. It is also the computer state
+produced by executing that prefix. To make branch-based ex-
+ploration correct and practical, the execution substrate must
+satisfy two physical requirements: observation equivalence
+and physical efficiency.
+Observation equivalence. The correctness condition for
+revisiting a node is observation equivalence. Fix the agent
+context 𝑥𝑡 = (𝐼,𝜏<𝑡 ,𝑀𝑡 ). Two states 𝑆and 𝑆′are observation-
+equivalent for this context if every future action sequence
+the agent may take from 𝑥𝑡 produces equivalent observations
+from 𝑆 and 𝑆′:
+𝑆 ≡𝑥𝑡 𝑆′ ⇐⇒ ∀𝛼 ∈A(𝑥𝑡 ), Obs(𝑆,𝛼)≃Obs(𝑆′
+,𝛼).
+Observation equivalence is weaker than bit-for-bit equal-
+ity of the host machine. The runtime does not need to pre-
+serve state that no future command can observe. However,
+it is stronger than restoring only a convenient subset of
+state. If omitted state can affect future observations, then
+the restored node is not the same node for purposes of ex-
+ploration. The same requirement also implies containment
+since effects from one speculative branch must not leak into
+another unless they belong to a common ancestor. For exam-
+ple, packages installed, package-manager metadata mutated,
+files generated, or services started in one branch must not
+contaminate observations in a sibling branch.
+For terminal-use agents, the relevant state is an execution
+session: the agent-facing environment created by the com-
+mand prefix leading to a node. This includes the state that
+future shell commands can observe or depend on. Filesys-
+tem state includes source files, installed packages, virtual
+environments, configuration, generated artifacts, logs, and
+task data. Terminal session state includes the working di-
+rectory, exported variables, activated environments, aliases,
+shell functions, job-control state, and PTY-dependent behav-
+ior. Process and memory state includes running programs,
+REPLs, servers, background jobs, open file descriptors, and
+in-memory application state. Local service state includes
+sockets, databases, loopback services, and other service-local
+state inside the task environment. External state, such as
+clocks, package registries, remote APIs, and the public inter-
+net, is not generally restorable by a local runtime; preserv-
+ing equivalence for such effects requires caching, proxying,
+mocking, or treating them as nondeterministic inputs.
+Table 1 shows that these categories are not incidental in
+Terminal-Bench. All labeled tasks require filesystem state,
+most require terminal-session state, and a nontrivial fraction
+require live process, memory, or local-service state. Thus, a
+terminal-agent branch point cannot generally be represented
+by the reasoning trace, nor even a filesystem snapshot alone.
+Physical efficiency. Observation equivalence is neces-
+sary but not sufficient. Exploration also requires physical
+efficiency as creating, restoring, and discarding branch states
+Table 1. Task-relevant state in manually labeled Terminal-
+Bench tasks. Categories are not mutually exclusive.
+State boundary Examples Count Pct.
+File contents /
+Application files, installed
+filesystem
+packages, generated data,
+configuration
+Terminal session Working directory, environ-
+ment variables, activated
+virtual environments, shell-
+local context
+Application mem-
+ory / process state
+Running programs, servers,
+REPLs, background jobs, in-
+memory state
+Local service / net-
+work state
+Sockets, local services,
+network-dependent task
+state
+77 100.00%
+52 67.53%
+13 16.88%
+11 14.29%
+must be cheap relative to the LLM-call budget they are
+meant to support. A perfectly faithful restoration mecha-
+nism is not useful for fine-grained search if every branch
+requires rebuilding the environment from scratch, copying
+a large filesystem, restarting all services, or constructing a
+full deployment artifact. Physical efficiency has several di-
+mensions. Restore latency affects how quickly the search
+algorithm can expand another branch. Storage overhead
+determines how many speculative states can be kept avail-
+able. The substrate should therefore preserve exactly the
+task-facing execution-session state needed for observation
+equivalence, while avoiding unnecessary work for state that
+cannot affect the agent’s future observations.
+These two requirements are coupled. If the preserved state
+is too narrow, restoration is fast but incorrect. If the pre-
+served state is too broad, restoration may be correct but
+too expensive for search. The goal is therefore not whole-
+machine equality, but efficient restoration of the minimal
+practical execution-session state that determines future ob-
+servations for terminal-use agents.
+2.3 Existing Execution Substrates Are Insufficient
+The previous subsection identifies two requirements for
+terminal-agent exploration: restoring intermediate nodes
+must preserve observation equivalence, and doing so must
+be physically efficient. There are three broad ways to imple-
+ment such restoration.
+Replay-to-node. resets to the initial state and re-runs
+the action prefix to the target node. While this provides ob-
+servation equivalence under deterministic execution and
+reproducible external effects, its cost grows with the length
+and cost of the action prefix, and penalizes deeper trajec-
+tories. Sources of non-determinism (e.g., time, randomness,
+network) also affect equivalence. While simple, it is not a
+reliable substrate.
+4
+
+--- PDF page 5 ---
+
+Undo. relies on having inverse or compensating actions [7].
+Terminal actions, however, often do not have faithful in-
+verses: file deletion, package installation, database mutation,
+permission updates, and service creation can all incur side ef-
+fects that are difficult to invert. Undo actions may be partial,
+and fail to restore hidden process state, service-local state,
+or shell context.
+Checkpoint/restore. is a natural primitive for branch-
+based exploration. It directly records and restores the state
+of an intermediate node; it avoids replay and does not re-
+quire invertible actions. The challenge is choosing the right
+checkpoint scope and capturing it efficiently: too narrow
+and restoration is fast but violates observation equivalence,
+too broad and restoration is observation-equivalent but slow.
+For terminal-use agents, the scope is an execution session:
+filesystem state, terminal-session state, process and memory
+state, and relevant local services.
+Existing execution substrates provide pieces of this ab-
+straction, but none provides both observation equivalence
+and physical efficiency at the execution-session boundary.
+Filesystem checkpoints. Filesystem checkpointing cap-
+tures durable file state. Layered filesystems such as ZFS [6],
+Btrfs [37], OverlayFS [27], UnionFS [36], and BranchFS [47]
+provide efficient copy-on-write views and can preserve source
+edits, installed packages, generated artifacts, and configu-
+ration files. Transactional filesystems and storage systems
+such as Warp [15], QuickSilver [39], Stasis [40], and transac-
+tional file access via kernel extensions [43] support atomic
+file commit or rollback. These file-centered mechanisms can
+lose shell-local context, activated environments, running
+servers, REPLs, background jobs, PTYs, and in-memory state,
+so they do not by themselves restore the complete execution
+session.
+Process checkpoints and forks. Process mechanisms cap-
+ture volatile execution state. Zap/CRAK [32, 53], DMTCP [4],
+and Faasm [41] are earlier process-checkpointing systems
+across kernel, userspace, and distributed-function settings
+respectively. More recently introduced, CRIU [9] can dump
+and restore a process tree, including memory, registers, file
+descriptors, and process metadata. Process-forking mecha-
+nisms such as fork() [28] are even cheaper, but they dupli-
+cate only the calling process at the time of the fork. Similarly,
+branch()-style APIs [47] are useful when all relevant work
+is scoped to a particular process or branch context, but they
+do not automatically capture an arbitrary terminal session
+that has accumulated a shell, descendants, PTYs, mounts,
+files, and local services over time. Raw process checkpoint-
+ing is therefore complementary to filesystem checkpointing
+as it preserves important live state, but it assumes that the
+restored process tree sees a compatible filesystem, mount
+layout, runtime filesystems, PTYs, devices, sockets, and com-
+mand interface. It is necessary for observation equivalence,
+but not sufficient as a standalone execution-session check-
+point.
+Checkpointable runtimes and notebooks. A separate
+line of work makes higher-level runtimes checkpointable.
+Notebook systems such as Kishu [24], ElasticNotebook [25],
+Multiverse Notebook [38], and Fork It [48] support time
+travel, live migration, or stateful alternatives by tracking
+notebook variables, cell dependencies, interpreter state, or
+notebook branches. Runtime-integrated systems such as
+OpenJDK CRaC [31] and CheckSync [20] coordinate check-
+pointing with the Java and Go runtimes, while continuation-
+based systems such as Kappa [52] and Stackless Python [45]
+serialize language-level execution state. These systems show
+the value of raising checkpointing above raw OS snapshots,
+but their boundaries are typically a language heap, notebook
+kernel, function continuation, or initialized runtime and are
+therefore too narrow for general terminal-agent exploration.
+VM and container snapshots, commits, and sand-
+boxes. Containers and VMs can capture broader boundaries.
+Container commits preserve filesystem changes, while Docker
+[12] and Podman [33–35] checkpointing can also capture
+CRIU process images. MicroVM snapshots, such as Fire-
+cracker snapshots [2, 3], preserve guest memory and device-
+model state; gVisor [17, 18, 29] strengthens the application-
+kernel boundary under sandbox-specific constraints. MBOX
+[21] and try [23, 26] mediate or selectively apply command
+effects, while Sysfilter [11], SysXCHG [16], and Draco [42]
+prevent unsafe system calls. These mechanisms target de-
+ployment, migration, isolation, effect control, or filtering, not
+arbitrary restore of terminal-session nodes; VM/container
+variants are also too coarse and costly (§ 5.1). Thus, they do
+not expose the terminal execution session—PTY state, shell
+context, local services, and runtime mounts—as the native
+branch/restore boundary.
+This paper. These gaps motivate a separation between
+logical exploration and physical materialization. § 3 presents
+StateFork, the logical control plane that lets agents create
+branch points, restore prior nodes, and clean up speculative
+branches without committing to one restoration mechanism.
+Because logical nodes are explicit, StateFork can run and
+optimize the same exploration policy over different backends.
+§ 4 presents Waypoint, our execution-session substrate for
+terminal agents. Waypoint combines filesystem layering,
+process checkpointing, and a persistent terminal-compatible
+command session to restore the state needed for observation-
+equivalent terminal-agent exploration with high physical
+efficiency.
+3 StateFork: Logical Control Plane for
+Agent Exploration
+StateFork separates the logical search tree used by an agent
+from the physical mechanisms used to restore environment
+5
+
+--- PDF page 6 ---
+
+state. Logical exploration decides which trajectory prefixes
+are worth expanding. Physical materialization decides how
+the environment state for those prefixes is represented, re-
+stored, and eventually discarded. The purpose of StateFork
+is to connect these layers while keeping their concerns sepa-
+rate: the agent or search policy operates over logical branch
+points, while execution substrates implement the physical
+restoration of those branch points.
+How an agent uses StateFork. An agent interacts with
+StateFork through a small set of concrete session operations:
+A search policy calls build_session(backend, config) to
+start a live execution session. It then calls exec_command(cmd)
+to issue an action and receive an observation. At any point,
+snapshot()→id names the current trajectory prefix as a
+logical branch point, restore(id)returns to that prior branch
+point, and cleanup(id) discards a branch or subtree that is
+no longer needed. For example, an MCTS policy can restore
+a parent node, execute a candidate command sequence, score
+the resulting observation, snapshot the child node, restore
+the parent again, and expand a sibling branch. The search
+policy sees these as operations on a logical tree, while the
+runtime may implement each snapshot() or restore(id)
+via replay, filesystem snapshots, a container or VM check-
+point, or Waypoint.
+StateFork in Figure 1 has three components: a session
+manager, a materialization policy, and backend managers.
+3.1 Session Manager
+The session manager owns one live execution session and a
+tree of named logical branch points. It exposes agent-facing
+operations to build an environment, run commands, name
+branch points, restore prior nodes, and clean up discarded
+branches. It also records the metadata common to all sub-
+strates: parent pointers, children, command logs, timing
+measurements, storage usage, the current active node, and
+whether each logical node is physical or virtual.
+This interface gives exploration algorithms a stable tar-
+get. MCTS, beam search, or other exploration policies trans-
+parently use different restoration algorithms and execution
+substrates, including replay-to-node, filesystem snapshots,
+container checkpoints, VM snapshots, hybrid process/filesys-
+tem checkpoints, and our own substrate, Waypoint. State-
+Fork can leverage substrate-specific features—e.g., check-
+point scope, compression, export mode, or physical-versus-
+virtual materialization–on behalf of the agent search policy.
+StateFork also lets us compare substrates and optimizations
+for the same control flows in an apples-to-apples manner.
+The key abstraction is the separation between logical
+branch points and backend materialization. A logical branch
+point is the node that the agent or search algorithm wants
+to revisit. A physical checkpoint is only one possible im-
+plementation of that node. This distinction matters because
+exploration algorithms often create many more logical nodes
+than they eventually revisit. Without this separation, the run-
+time must either materialize every node eagerly or force the
+search algorithm to reason directly about backend-specific
+checkpoint costs.
+3.2 Materialization Policy
+Every call to snapshot() creates a logical branch point in
+the StateFork tree. The branch point may be represented
+physically or virtually. A physical node is backed by a check-
+point in the execution substrate. A virtual node stores no
+new backend checkpoint; instead, it records the ordered com-
+mands needed to reach that node from its nearest physical
+ancestor. Restoring a virtual node first restores the nearest
+physical ancestor and then replays the recorded command
+suffix. Thus, virtual checkpoints shift work from snapshot
+time and storage to restore time while preserving the same
+external snapshot()/restore(id) interface.
+Formally, let 𝑝(𝑣)denote the nearest physical ancestor of
+a virtual node 𝑣, and let log(𝑝(𝑣),𝑣)be the ordered command
+sequence from 𝑝(𝑣)to 𝑣. Then restoring 𝑣 is implemented as
+restore(𝑣)= restore(𝑝(𝑣));
+execute(𝑐).
+𝑐 ∈log(𝑝 (𝑣),𝑣)
+This definition makes materialization an internal runtime
+decision. The search policy receives a checkpoint identifier
+from snapshot() and later calls restore(id) regardless of
+whether the node was represented physically or virtually.
+This physical-virtual split combines checkpoints with re-
+play logs to trade state-copying cost against recovery cost.
+While this rollback/replay classic technique for containers [8,
+14] has been applied across security [13], debugging [10, 44],
+and container replication [55], StateFork applies this to agent
+exploration at a different semantic level: virtual nodes replay
+the agent’s command suffix from an observation-equivalent
+ancestor rather than recording all nondeterministic events
+for exact deterministic replay.
+A policy decides whether each logical node should be
+physical or virtual. Physical nodes pay snapshot latency
+and storage overhead, but make later restores cheap. Vir-
+tual nodes are cheap to create, but restoring them requires
+restoring an ancestor and replaying the suffix, whose cost
+grows with trajectory length. Many terminal commands (e.g.,
+ls, cat, grep, small tests) are lightweight enough to replay
+cheaply, avoiding the runtime and storage costs of physical
+checkpoints, especially for nodes that are never revisited.
+Smart Decider. is a pragmatic and effective online check-
+point/replay policy. It decides when to pay the cost of phys-
+ical checkpoints and when to use a virtual checkpoint and
+replay from a materialized ancestor.
+Let 𝑚𝑡 be the resident memory size of the live session and
+its child processes at snapshot time 𝑡. We use memory as the
+sole predictor because checkpoint latency for our substrate,
+Waypoint (§ 4), is largely independent of filesystem size.
+6
+
+--- PDF page 7 ---
+
+From calibration measurements, StateFork estimates the cost
+of a physical checkpoint with a simple linear model:
+𝐶phys (𝑡)= 𝛼𝑚𝑡 +𝛽.
+Smart Decider supports backend-specific cost estimates that
+may instead depend on e.g., filesystem size, image-layer size,
+compression mode, VM memory, disk snapshot size, and/or
+export/import costs.
+Let 𝐶replay (𝑡)be the cumulative wall-clock command ex-
+ecution time since the nearest physical checkpoint. This
+quantity estimates the cost of restoring the current logical
+node virtually, since the runtime would need to restore the
+nearest physical ancestor and replay that command suffix.
+The Smart Decider applies the following conservative rule:
+physical(𝑡)= 𝐶phys (𝑡)≤𝐶replay (𝑡).
+If the estimated cost of physical checkpointing is no larger
+than the accumulated replay cost, StateFork materializes.
+Otherwise, StateFork records a virtual checkpoint and keeps
+replay anchored at the nearest physical ancestor.
+This policy has two useful properties. First, it preserves
+StateFork semantics: the user receives the same checkpoint
+identifier and uses the same restore(id) call independent
+of materialization. Second, it avoids eagerly checkpointing
+every lightweight state while still creating physical check-
+points once accumulated replay cost becomes large. The
+policy is intentionally simple. It does not try to predict the
+full future search tree, the semantic importance of a state, or
+whether a branch will eventually be selected by the agent.
+Predicting those quantities is a harder optimization problem
+that we leave to future work. The same logical API could sup-
+port richer policies, including caching frequently restored
+ancestors, prefetching likely restores, parallelizing branch
+expansion, tuning backend-specific checkpoint options, or
+choosing dynamically among multiple execution substrates.
+3.3 Backend Managers
+Backend managers translate StateFork’s logical operations
+into substrate-specific commands. A backend manager im-
+plements the small set of physical operations needed by the
+session manager and materialization policy such as create
+and restore a physical checkpoint, execute a command, re-
+port timing and storage metadata, and clean up backend
+resources. All logical tree management, command logging,
+and observability are handled above this backend-specific
+layer. The next section presents Waypoint, our execution-
+session-based backend optimized for terminal agents.
+4 Waypoint: A Checkpoint/Restore
+Substrate for Terminal Agents
+While StateFork provides the logical control plane for branch-
+able exploration, Waypoint is the execution substrate for ter-
+minal agents. Waypoint materializes logical branch points
+as local checkpoint/restore points over terminal-agent ses-
+sions. Its checkpoint scope is the execution session itself: the
+filesystem, process and memory state, terminal state, and rel-
+evant local services visible to future commands. This scope
+preserves the state needed for observation equivalence while
+excluding state unrelated to local agent exploration.
+Design Principles. Motivated by Section 2, Waypoint
+follows two design principles.
+First, to provide observation equivalence for terminal
+agents, it restores the execution session rather than an arbi-
+trary higher or lower-level boundary. For terminal agents, fu-
+ture observations depend on file contents, application mem-
+ory, terminal session state, and relevant local services. This
+includes application source files, installed packages, gener-
+ated artifacts, working directories, environment variables,
+activated virtual environments, aliases, shell functions, back-
+ground jobs, local servers, and the process tree that future
+commands may observe. Waypoint is therefore “full-state”
+with respect to the execution-session boundary, not with
+respect to the entire host machine.
+Second, to make exploration physically efficient, it opti-
+mizes for local containment rather than portability or tenant-
+grade isolation. Branches are speculative continuations of
+a single task on a single host, controlled by the same agent
+framework. They are used to guide search, not to produce
+portable artifacts. Therefore, image export, registry meta-
+data, and container lifecycle management should not be on
+the common checkpoint/restore path. They also need con-
+tainment rather than a VM security boundary. Branches are
+not mutually distrustful tenants, but ordinary branch effects
+should not leak into the host or into sibling branches. For
+example, packages installed, package-manager metadata mu-
+tated, files generated, or services started in one branch must
+not contaminate observations in another branch unless those
+effects belong to a common ancestor.
+High-level design. A Waypoint execution session, check-
+point lineage, and physical checkpoint implement their logi-
+cal counterparts in StateFork. Restore returns an observation-
+equivalent environment for the agent’s next action. A session
+contains three states: a root filesystem view, a long-lived PTY-
+backed shell and its descendant process tree, and checkpoint
+metadata that records filesystem and process-state lineage.
+A tempting design would be to combine existing primitives
+directly by using OverlayFS for files, CRIU for processes,
+and a shell for commands. This is insufficient on its own.
+A filesystem snapshot alone loses shell-local state, running
+services, REPLs, and in-memory application state. A raw
+CRIU checkpoint alone assumes that the restored process
+tree will see the same filesystem, mounts, PTYs, sockets,
+devices, and command interface. Running every branch in
+a fresh container or VM captures a broader boundary, but
+pays for portability, lifecycle management, or machine-level
+state that is not needed for local speculative search. Even the
+7
+
+--- PDF page 8 ---
+
+direct combination of OverlayFS and CRIU is not automatic
+as OverlayFS layer stacks are fixed at mount time, runtime
+filesystems such as /proc and /sys are not ordinary file data,
+and PTYs are kernel objects tied to process-session state.
+Waypoint coordinates these primitives at the execution-
+session boundary. The manager maintains the checkpoint
+tree and active session root. Each live session runs a com-
+mand server attached to a PTY-backed, long-lived shell. The
+shell and its descendants execute over an OverlayFS-backed
+root, so ordinary writes—source edits, generated files, pack-
+age installations, and package-manager metadata—remain
+confined to the session’s writable layer. Local services started
+by the agent, including servers, REPLs, and databases launched
+from the shell, are captured with the shell’s descendant pro-
+cess tree, including memory, descriptors, and local sockets.
+Checkpointing and restoration are coordinated operations.
+At checkpoint time, Waypoint quiesces the command session,
+dumps the shell process tree with CRIU, seals the current
+OverlayFS upper directory as an immutable delta, records
+the checkpoint’s parent pointer, and resumes execution over
+a fresh writable layer. At restore time, Waypoint terminates
+the current branch, rebuilds the OverlayFS lowerdir stack
+from checkpoint ancestry, attaches a fresh writable upperdir
+for the next continuation, remounts runtime filesystems, and
+restores the CRIU process image into the rebuilt root. Branch-
+ing is therefore a local operation over execution-session state,
+rather than the creation of a new container, VM, or image.
+Figure 3 shows this architecture. The important point is
+not that Waypoint invents new kernel mechanisms, but that
+it composes existing Linux mechanisms at the boundary
+needed by terminal-agent exploration.
+4.1 Session-Scoped Containment
+A Waypoint session presents a container-like root to the
+agent without creating a new container object for every
+branch. Commands run with their root changed to the ses-
+sion filesystem view and begin in /. As a result, commands
+such as pwd, package managers, build scripts, and test har-
+nesses observe paths that match the task environment rather
+than the host directories used to store checkpoint metadata.
+This matters because terminal agents often generate absolute
+paths, inspect the current directory, and invoke tools whose
+behavior depends on the visible root.
+Ordinary task writes are confined to the session. When
+the agent installs packages, edits source files, writes logs, or
+changes configuration under the session root, those writes
+go into the session’s writable layer. The host stores session
+metadata outside the agent-visible root, while the agent sees
+only the task environment. This containment model is delib-
+erately weaker than a VM sandbox. Waypoint does not claim
+to isolate malicious tenants or defend against a privileged
+process attempting to escape. It targets controlled agent
+exploration and benchmark execution, where the primary
+requirement is consistent restoration of branch state.
+Command Server
+Waypoint Manager
+Process tree
+PTY
+Session
+Info
+Ancestor
+Tree
+Shell
+Process
+Unix
+domain
+socket
+files
+mem
+Snapshot 1
+Snapshot 1
+metadata
+A’
+B
+Merge view
+chkpt
+Process Tree
+Snapshot
+A’ B
+Current upperdir
+A
+Base rootfs
+(read-only)
+FS layer
+reference
+Figure 3. Waypoint architecture. A live session consists
+of a command server, a PTY-backed long-lived shell, and
+process state (purple) running over an OverlayFS-backed ses-
+sion root. The session root is exposed through the OverlayFS
+merge view (red), backed by the writable current upperdir
+(blue) and read-only lowerdirs (green). At checkpoint time,
+Waypoint stores process state with CRIU, seals the current
+upperdir and records it by reference rather than copying
+file data, and updates checkpoint lineage metadata main-
+tained by the manager. At restore time, Waypoint rebuilds
+the lowerdir stack from checkpoint ancestry, attaches a fresh
+writable upperdir, and restores the process tree.
+4.2 In-Place Filesystem Checkpointing
+Waypoint implements filesystem checkpointing with in-place
+OverlayFS layers. Each session maintains a base root, a check-
+point parent tree, and a distinguished writable directory
+called current. The live session runs on an OverlayFS merge
+view whose writable upper layer is current. When a check-
+point is created, Waypoint seals the current writable direc-
+tory, records it under the checkpoint identifier, and allocates
+a fresh empty current directory for subsequent execution.
+The sealed directory becomes an immutable delta layer.
+Restoring a checkpoint reconstructs the filesystem view
+from checkpoint lineage. Waypoint walks the checkpoint’s
+parent chain, orders the sealed directories as OverlayFS lower
+layers, appends the base root, and mounts a new merge
+view with a fresh writable upper layer. Branching from a
+checkpoint is the same operation: (1) restore the checkpoint
+as the read-only ancestry, (2) attach a new writable layer,
+and (3) continue execution.
+This avoids the expensive path used by image-oriented
+container runtimes. Waypoint does not diff the merged view,
+copy file data, export an image layer, or synchronize a content-
+addressable layer database for each checkpoint. The check-
+point stores a reference to an already-existing upper direc-
+tory and a parent pointer. Thus, installing a large package
+or generating many files does not make checkpoint creation
+proportional to the total filesystem size. The filesystem cost
+8
+
+--- PDF page 9 ---
+
+is dominated by quiescing the session, unmounting and re-
+mounting the overlay, and updating Waypoint metadata.
+The tradeoff is that OverlayFS layer stacks are fixed at
+mount time. To seal one upper directory and attach a new
+one, Waypoint must reconstruct the overlay view. A live
+process tree cannot keep executing while its root filesystem
+mount is torn down and replaced. For this reason, filesystem
+checkpointing and process checkpointing must be coordi-
+nated, as described next.
+4.3 Stateful Shell Sessions
+A filesystem checkpoint alone is insufficient for terminal
+agents. Launching a fresh shell for every command would
+lose shell-local state such as the current directory, exported
+variables, activated virtual environments, aliases, functions,
+and job context. Waypoint therefore makes the shell part of
+the checkpointed session state.
+Each session contains a long-lived shell process and a
+small command server. The command server listens on a
+Unix domain socket associated with the session. For each
+command, the caller sends a complete command payload;
+the server forwards the command to the persistent shell
+and returns the captured output. This gives agents a sim-
+ple command-step interface while preserving the shell state
+accumulated across previous commands.
+The shell is connected through a pseudo-terminal (PTY)
+rather than ordinary pipes. Many command-line tools change
+behavior depending on whether they are attached to a ter-
+minal. A PTY gives the shell terminal-compatible behavior
+while still exposing a programmatic request/response inter-
+face to the agent. Waypoint does not attempt to expose a
+full interactive terminal. It targets the command-step model
+used by terminal-agent benchmarks: the agent submits a
+complete command that runs to completion or times out; the
+observation outputs to the agent. Full-screen terminal appli-
+cations, arbitrary signal delivery, live editing, and complex
+interactive job control are outside this interface.
+The command protocol preserves command boundaries.
+Each request carries one command. The server writes the
+command to the PTY, appends a unique completion marker,
+drains PTY output, and returns output only after the marker
+appears. Before returning, Waypoint removes shell artifacts
+such as echoed commands, prompts, markers, and terminal
+control sequences. Command execution is serialized within a
+session, so two requests cannot interleave on the same PTY.
+4.4 Process and Memory Checkpointing
+Waypoint uses CRIU to capture the process state of the ses-
+sion. When a session starts, Waypoint records the PID of the
+long-lived shell. To create a process checkpoint, Waypoint
+invokes CRIU on that shell PID. Because agent commands
+execute as children of the shell, dumping the shell process
+tree captures the shell, foreground commands, background
+jobs, local servers, REPLs, and other descendant processes
+that are part of the session.
+A checkpoint therefore contains two coordinated compo-
+nents. The filesystem component is the sealed OverlayFS
+upper directory and its checkpoint lineage. The process com-
+ponent is the CRIU image directory for the shell process
+tree. During checkpoint creation, Waypoint first quiesces
+the session and asks CRIU to dump the shell process tree.
+The CRIU images are stored under the checkpoint’s direc-
+tory. While the process tree is stopped, Waypoint seals the
+current filesystem layer, records the checkpoint metadata,
+creates a fresh writable layer, reconstructs the overlay view,
+and restores the shell process tree into that view.
+Restoring an earlier checkpoint follows a similar process.
+Waypoint terminates the currently running shell process
+tree, reconstructs the overlay view corresponding to the tar-
+get checkpoint, and invokes CRIU restore using the process
+images stored with that checkpoint. The restored shell re-
+sumes as the session shell, with its process state, shell-local
+variables, working directory, and child process state restored
+as part of the CRIU image. In normal operation, the session
+shell is either the original shell created at session initializa-
+tion or a CRIU-restored instance of that shell; Waypoint does
+not replace it with a fresh shell after every restore.
+This design makes CRIU useful at the right boundary. Raw
+CRIU does not know how to reconstruct the session filesys-
+tem tree, and filesystem checkpoints do not preserve memory.
+Waypoint combines the two: durable file changes are repre-
+sented as sealed OverlayFS layers, while shell context and
+application memory are represented as process state.
+4.5 Composing Primitives
+The main implementation challenge is that the Linux mech-
+anisms used by Waypoint do not naturally compose into
+one checkpoint abstraction. OverlayFS constructs a merged
+directory tree from upper and lower directories. CRIU re-
+stores a process/resource graph. Runtime filesystems such
+as /proc and /sys are kernel-provided views rather than
+ordinary files. PTYs are stateful kernel objects tied to open
+descriptors, terminal peers, and process-session state. Each
+is useful individually, but their boundaries do not align.
+Runtime mounts. Runtime filesystems cannot simply be
+mounted once inside a lower layer and expected to appear
+correctly through every future overlay merge view. Way-
+point instead treats them as part of the active session root.
+After reconstructing the overlay, it mounts the required run-
+time filesystems under the active root; before tearing down
+the overlay, it detaches them. This keeps ordinary file con-
+tents in OverlayFS layers while keeping kernel-provided
+views tied to the currently active session.
+PTYs and devpts. PTYs introduce a separate composi-
+tion problem. In the Unix PTY model, slave devices are ex-
+posed through /dev/pts, and different devpts mounts can
+9
+
+--- PDF page 10 ---
+
+represent different PTY namespaces. Making devpts part
+of every reconstructed overlay root would make terminal
+identity depend on the changing mount topology that CRIU
+must restore. Waypoint therefore allocates PTYs through the
+host devpts instance while running the child shell inside
+the session root. This preserves terminal-compatible shell
+behavior without introducing a nested devpts mount into
+the overlay layer stack.
+Overlay reconstruction and process state. The filesys-
+tem and process mechanisms also conflict around liveness.
+Waypoint obtains filesystem-size-independent checkpoints
+by sealing the current upper directory and remounting a new
+overlay stack. However, a process cannot continue executing
+normally while its root filesystem view is being unmounted
+and replaced. Consequently, Waypoint cannot simply use
+CRIU’s leave-running style of process checkpointing across
+filesystem snapshots. It prioritizes filesystem consistency
+and stops the session process tree, reconstructs the filesys-
+tem view, remounts runtime filesystems, and restores the
+process tree into the new view.
+5 Evaluation
+We evaluate StateFork and Waypoint using both microbench-
+marks and macrobenchmarks. The microbenchmarks isolate
+the cost of snapshot and restore operations under controlled
+memory and file system state sizes, allowing us to examine
+how efficient different substrates are as the preserved state
+grows. The macrobenchmarks instead evaluate end-to-end
+agent exploration workloads, where restoration cost and
+restoration fidelity together determine whether agents can
+efficiently branch, resume, and continue exploration from
+intermediate execution states.
+5.1 Microbenchmark
+We compare the snapshot and restore latency of StateFork,
+CRIU, Podman+CRIU hybrid, gVisor, and Firecracker under
+different memory and file system sizes. We used a test work-
+load with configurable memory and disk usage, running and
+checkpointing this workload through the StateFork interface
+for a consistent comparison between substrates. To measure
+snapshot latency, for each setting of the memory/disk size,
+we initialized a new environment using StateFork, ran the
+test workload, and then took multiple snapshots back-to-
+back, recording the median elapsed time. To measure restore
+latency, for each setting of the memory/disk size, we ini-
+tialized a new environment using StateFork, took an initial
+snapshot, ran the test workload, and then took another snap-
+shot. Then, we repeatedly restored to the base snapshot and
+then back to the workload snapshot, recording the median
+elapsed time for the workload restores.
+We run the microbenchmarks on a CloudLab c6620 server
+with a 28-core Intel Xeon Gold 5512U CPU at 2.1 GHz, 128 GB
+ECC memory, and an 800 GB Dell DC NVMe ISE 7450 MU
+U.2 SSD. The machine runs Ubuntu 24.04.3 LTS with Linux
+6.8.0-71-generic, and the host filesystem is ext4. The software
+versions are Docker 28.2.2, Podman 4.9.3, runc 1.3.3, runsc
+1.1.0-rc.1, and CRIU 4.2.0.
+We evaluated each substrate on the state supported by its
+checkpointing mechanism. For memory state, we compared
+Firecracker, CRIU, the Podman+CRIU hybrid, gVisor, and
+Waypoint; for file system state, we compared Docker, Pod-
+man, gVisor, and Waypoint. Figures 4(a) and 4(c) compare
+snapshot and restore latency, respectively, as memory usage
+increases, while Figures 4(b) and 4(d) compare latency across
+file system sizes.
+The memory and disk state sizes ranged from 0 MB to 1024
+MB each. Firecracker allows the user to configure the size
+of the microVM memory, so if the user knows in advance
+the maximum workload size, choosing a smaller memory
+will enable faster snapshots. In these experiments, we con-
+figured the microVM memory size to 2 GB, accommodating
+the largest workload tested.
+In the memory microbenchmark, Waypoint’s snapshot
+latency closely follows bare CRIU because memory capture
+is dominated by CRIU’s process dump, while Waypoint adds
+only lightweight file system-layer bookkeeping. Across the
+resident-memory range relevant to our terminal-agent work-
+loads, Waypoint is lower latency than the other substrates
+that capture both memory and file system state. Only at
+very large synthetic resident-memory sizes does Waypoint
+approach or exceed some baselines with mostly fixed snap-
+shot costs. In particular, gVisor, by implementing its own
+userspace kernel, does not need to use CRIU and can be
+more efficient for large memory sizes. We do not observe this
+regime in the relevant benchmarks. For restore, Waypoint is
+slower than bare CRIU because it restores more than process
+memory. It also reconstructs the OverlayFS view, attaches a
+fresh writable layer, remounts runtime filesystems, and re-
+sumes the process tree inside the restored execution session.
+This extra work is necessary for observation equivalence
+because CRIU alone does not restore the file system/session
+boundary seen by future commands. Despite this broader
+state boundary, Waypoint’s restore latency remains consis-
+tently lower than the evaluated container and VM baselines
+across the memory range.
+In the filesystem microbenchmark, Waypoint decouples
+snapshot and restore latency from filesystem size. Other eval-
+uated substrates scale with the amount of filesystem state
+because they copy, diff, package, or reconstruct file data
+on the checkpoint/restore path. Waypoint instead records
+filesystem checkpoints by sealing the current OverlayFS up-
+per directory and later restores by rebuilding the OverlayFS
+mount stack, so the dominant work is remounting meta-
+data rather than moving file contents. Waypoint scales well
+to large filesystems, we find that for any file system size
+evaluated, Waypoint has the lowest latency, with snapshot
+latency 3.6×lower and restore latency 2.1×lower than the
+10
+
+--- PDF page 11 ---
+
+Latency (ms)
+104
+103
+102
+101
+100 101 102 103
+100 101 102 103
+100 101 102 103
+100 101 102 103
+Memory Delta (MB)
+Filesystem Delta (MB)
+Memory Delta (MB)
+Filesystem Delta (MB)
+(a) Snapshot / Memory
+(b) Snapshot / Filesystem
+(c) Restore / Memory
+(d) Restore / Filesystem
+Ours (Waypoint) Docker Podman Podman-Hybrid CRIU gVisor Firecracker
+Figure 4. Snapshot and restore latency under increasing memory and file system sizes.
+best competing substrate. This shows that Waypoint’s advan-
+tage comes both from filesystem-size independence and from
+avoiding container- or VM-level machinery on the common
+checkpoint/restore path.
+which provide 4 vCPUs, 32 GB of memory, and one 937 GB
+local AWS Nitro SSD [1]. Each instance runs Ubuntu 24.04.3
+LTS with Linux 6.17.0-1009-aws.
+5.2 Macrobenchmark
+Workload. We evaluate how different execution substrates
+satisfy the two requirements identified in § 2.2: observation-
+equivalent restoration of intermediate nodes and physical ef-
+ficiency. For our end-to-end test, we use Terminal-Bench [46]
+as the representative workload for terminal-use agents. To
+systematically examine how StateFork-enabled exploration
+contributes to task completion, we instantiate two classes
+of agent strategies: pass@20, and Monte Carlo Tree Search
+(MCTS). To make the methods comparable, we match the
+effective exploration budget across setups. All MCTS vari-
+ants use the same StateFork API and search policy without
+the Smart Decider optimization; they differ only in how a
+logical checkpoint is materialized.
+Baseline Execution Substrates.Prefix Replay implements
+checkpoints virtually; to restore a node, it resets the task
+environment and re-executes the command prefix leading
+to that node. Docker commit snapshots the container file
+system layer. Podman-Hybrid combines CRIU checkpointing
+with filesystem state, capturing a broader boundary than
+Docker commit.The macrobenchmark requires a backend
+to expose a programmatic create/restore/delete interface,
+support repeated branch restoration for Terminal-Bench-
+compatible environments, and preserve the agent-visible task
+interface under identical search control flow. Systems such as
+gVisor and Firecracker are useful points in the broader design
+space, but they are not comparable drop-in macrobenchmark
+baselines for this experiment. gVisor primarily changes the
+sandbox boundary and introduces runtime and networking
+constraints around checkpoint/restore [17, 18, 29], while
+Firecracker snapshots [2, 3] operate at a VM boundary and
+require separate coordination of guest memory, disk state,
+and task setup while leading to higher latencies as shown in
+the previous section.
+Setup.We run the macrobenchmark using gpt4.1mini with
+the substrates hosted on AWS EC2 i4i.xlarge instances,
+Experimental Results. Figure 5(a) shows task comple-
+tion rate as a function of wall-clock exploration time. State-
+Fork with Waypoint reaches the best accuracy–time trade-off
+because it restores the execution-session state needed for
+observation equivalence without replaying long prefixes or
+paying deployment-oriented container overheads. Prefix Re-
+play reaches the same accuracy because it reconstructs the
+necessary state by re-executing commands, but it is much
+slower as restore cost accumulates with trajectory length.
+Docker commit improves over time but wastes search effort
+on nodes whose restored state is incomplete. Podman-Hybrid
+captures more state than Docker commit, but its higher over-
+head and failures around resources such as sockets and local
+services limit progress.
+Figure 5(b) compares sample efficiency in terms of ex-
+plored nodes. Waypoint achieves higher accuracy with fewer
+nodes than Docker commit and Podman-Hybrid, indicating
+that restored nodes more consistently preserve the execu-
+tion context needed for useful continuation. Prefix Replay is
+similar in node efficiency because it can reconstruct the cor-
+rect state, but, as shown in Figure 5(a), it pays substantially
+higher wall-clock time to do so. Docker commit eventually
+improves as more nodes are explored, but its lower accu-
+racy at the same node count suggests that many samples
+are spent from states that are not observation-equivalent to
+the intended search node. Podman-Hybrid saturates earlier
+because some checkpoints fail or become expensive when
+tasks involve resources such as sockets and local services.
+Figure 5(c) reports the cumulative checkpoint sizes. Docker
+stores container-sized artifacts and incurs considerable costs,
+while Podman-hybrid compresses its artifacts which saves
+storage but incurs considerable checkpoint latency—even so,
+they don’t capture the state needed for observation equiv-
+alence, so have low accuracy. In contrast, Waypoint check-
+points execution-session state that incurs modest storage
+but much higher accuracy. Replay only requires storage for
+one docker image, but is penalized in restore time.
+11
+
+--- PDF page 12 ---
+
+Accuracy
+0.3
+0.2
+0.1
+0.0
+0 100 200 300 400
+(a) Time (min)
+0 100 200 300 400 500 600
+(b) Node Count
+Replay Ours (Waypoint) Pass-at-20 Docker Podman Hybrid
+0 300 600 900 1200
+(c) Total Storage Size (GB)
+Task Completion Latency (s)
+104
+103
+102
+101
+100
+Eager
+Smart Decider
+100 101 102 103 104 105
+Storage Size (MB)
+Figure 5. Terminal-Bench task completion rate as a function of wall-clock exploration time, nodes explored, and storage used.
+6 Discussion and Limitations
+Containment, not sandboxing. Waypoint is designed for
+branch isolation within one agent task, not for mutually
+distrustful tenants. Its session-scoped containment prevents
+ordinary task writes from leaking into the host-visible envi-
+ronment or into other branches, but it is deliberately weaker
+than a VM security boundary. A malicious process running
+with sufficient privileges inside the session may still exploit
+kernel interfaces or misconfigured mounts. This is appropri-
+ate for our target setting—controlled agent exploration and
+benchmark execution—but production deployments with
+arbitrary untrusted code should combine Waypoint with
+stronger sandboxing mechanisms.
+External and distributed state. StateFork restores lo-
+cal state but tasks that depend on external services, remote
+APIs, or network peers outside the session root may require
+additional coordination. Some workloads can address this by
+running auxiliary services inside the same session or by us-
+ing task-specific reset hooks, but StateFork does not attempt
+to provide a general distributed snapshot mechanism. This
+limitation is shared by many practical checkpointing systems:
+preserving observation equivalence depends on whether all
+task-relevant state is inside the checkpoint boundary.
+Figure 6. Smart Decider (brown triangles) reduces storage
+size and often task latency as compared to Eager (green
+circles). Each point is a task, and arrows point from Eager to
+Smart Decider.
+Overall, these results show that effective terminal-agent
+exploration requires both sufficient execution-session state
+and low-cost restoration. StateFork provides the branchable
+exploration API, while Waypoint provides the backend that
+restores the right state efficiently.
+Figure 6 uses StateFork with Waypoint to compare Ea-
+ger materialization with Smart Decider, which uses virtual
+branch points and reconstructs via replay from the closest
+materialized ancestor. The task actions are identical, and
+differences reflect how StateFork physically represents the
+same logical exploration tree.
+The Smart Decider reduces physical exploration cost sub-
+stantially. Across tasks, it lowers completion time by 23% on
+average while reducing checkpoint storage by 58% relative
+to eager StateFork +Waypoint materialization. These aggre-
+gate improvements come from avoiding checkpoints that
+are cheap to represent logically but expensive to materialize
+physically. The largest gains occur on tasks where eager ma-
+terialization creates many intermediate checkpoints that are
+never restored or for actions that are very cheap to execute.
+In those cases, selective materialization avoids unnecessary
+snapshot cost and storage growth while preserving the same
+external snapshot/restore semantics.
+GUI. Waypoint currently targets terminal agents through
+a PTY-backed shell and text observations. Adding GUI sup-
+port would mainly require widening the execution-session
+boundary to include a headless display server, window man-
+ager, GUI application processes, screenshot service, as well as
+mouse/keyboard input proxy. These components could run
+inside the same OverlayFS-backed session and be captured as
+part of the checkpointed process tree, leaving the StateFork
+branch, restore, and cleanup API unchanged. Thus, head-
+less software-rendered GUI support is a natural extension of
+Waypoint, while full desktop or hardware-accelerated GUI
+exploration would require broader device and display-server
+checkpointing than the current terminal-focused implemen-
+tation.
+12
+
+--- PDF page 13 ---
+
+7 Conclusion
+Agent exploration is most effective when agents can reuse
+intermediate nodes in a search tree, but doing so for terminal-
+use agents requires restoring the execution-session state that
+determines future observations. This paper introduced State-
+Fork, a logical control plane that separates agent search
+from physical state materialization, and Waypoint, a check-
+point/restore substrate that efficiently captures filesystem,
+process, memory, and terminal-session state. Our results
+show that branch-based exploration improves sample effi-
+ciency, while execution-session checkpointing and selective
+materialization reduce the physical cost of realizing that
+exploration. Together, StateFork and Waypoint provide effi-
+cient infrastructure for exploratory AI agents.
+References
+[1] Amazon Web Services. Amazon ec2 i4i instances. https://aws.amazon.
+com/ec2/instance-types/i4i/. Accessed May 2026.
+[2] Amazon Web Services. Firecracker Snapshotting Documenta-
+tion. https://github.com/firecracker-microvm/firecracker/blob/main/
+docs/snapshotting/snapshot-support.md. Accessed: 2026-04-24.
+[3] Amazon Web Services. Firecracker. https://firecracker-microvm.
+github.io/, 2018. Accessed: 2026-04-24.
+[4] Jason Ansel, Kapil Arya, and Gene Cooperman. DMTCP: Transparent
+checkpointing for cluster computations and the desktop. In Proceedings
+of the 23rd IEEE International Symposium on Parallel and Distributed
+Processing (IPDPS ’09), pages 1–12, Rome, Italy, 2009. IEEE.
+[5] Anthropic. Claude code overview. https://docs.anthropic.com/en/
+docs/claude-code/overview. Accessed: 2026-05-30.
+[6] Jeff Bonwick, Matthew Ahrens, Val Henson, Mark Maybee, and Mark
+Shellenbaum. The zettabyte file system. Technical report, Sun Mi-
+crosystems, 2003. Work-in-progress report presented at the 2nd
+USENIX Conference on File and Storage Technologies (FAST ’03).
+[7] Edward Y. Chang and Longling Geng. Sagallm: Context management,
+validation, and transaction guarantees for multi-agent llm planning,
+2025.
+[8] Yunji Chen, Shijin Zhang, Qi Guo, Ling Li, Ruiyang Wu, and Tianshi
+Chen. Deterministic replay: A survey. ACM Computing Surveys,
+48(2):17:1–17:47, September 2015.
+[9] CRIU Project. Checkpoint/Restore In Userspace (CRIU). https://criu.
+org/, 2012. Accessed: 2026-04-09.
+[10] Daniela A. S. de Oliveira, Jedidiah R. Crandall, Gary Wassermann, Shy-
+htsun Felix Wu, Zhendong Su, and Frederic T. Chong. ExecRecorder:
+VM-based full-system replay for attack analysis and system recovery.
+In Proceedings of the 1st Workshop on Architectural and System Support
+for Improving Software Dependability, ASID ’06, pages 66–71, New
+York, NY, USA, October 2006. Association for Computing Machinery.
+[11] Nicholas DeMarinis, Kent Williams-King, Di Jin, Rodrigo Fonseca, and
+Vasileios P. Kemerlis. Sysfilter: Automated system call filtering for
+commodity software. In RAID, pages 459–474, 2020.
+[12] Docker Project. Docker. https://docker.com, 2013. Accessed: 2026-04-
+24.
+[13] George W. Dunlap, Samuel T. King, Sukru Cinar, Murtaza A. Basrai,
+and Peter M. Chen. ReVirt: Enabling intrusion analysis through Virtual-
+Machine logging and replay. In 5th Symposium on Operating Systems
+Design and Implementation (OSDI 02), pages 211–224, Boston, MA,
+December 2002. USENIX Association.
+[14] E. N. Elnozahy, Lorenzo Alvisi, Yi-Min Wang, and David B. Johnson.
+A survey of rollback-recovery protocols in message-passing systems.
+ACM Computing Surveys, 34(3):375–408, September 2002.
+[15] Robert Escriva and Emin Gun Sirer. The design and implementation
+of the warp transactional filesystem. In NSDI, pages 469–483, 2016.
+[16] Alexander J. Gaidis, Vaggelis Atlidakis, and Vasileios P. Kemerlis. Sysx-
+chg: Refining privilege with adaptive system call filters. In ACM CCS,
+pages 1964–1978, 2023.
+[17] gVisor Project. Issue #6243: checkpoint/restore not supported when us-
+ing hostinet. https://github.com/google/gvisor/issues/6243. Accessed:
+2026-03-29.
+[18] gVisor Project. gVisor. https://gvisor.dev/, 2018. Accessed: 2026-04-24.
+[19] Carlos E Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin
+Pei, Ofir Press, and Karthik R Narasimhan. SWE-bench: Can language
+models resolve real-world github issues? In The Twelfth International
+Conference on Learning Representations, 2024.
+[20] Nicolaas Kaashoek and Robert Morris. Checksync: Using runtime-
+integrated checkpoints to achieve high availability. arXiv preprint
+arXiv:2208.02884, 2022.
+[21] Taesoo Kim and Nickolai Zeldovich. Practical and effective sandboxing
+for non-root users. In USENIX Annual Technical Conference, pages
+139–144, 2013.
+[22] Jing Yu Koh, Stephen McAleer, Daniel Fried, and Ruslan Salakhutdinov.
+Tree search for language model agents, 2026.
+[23] Evangelos Lamprou, Tianyu Zhu, Di Jin, Grigoris Ntousakis, Georgios
+Liargkovas, Calvin Eng, Konstantinos Kallas, Michael Greenberg, and
+Nikos Vasilakis. Controlling opaque-component effects with semiso-
+lates and try. In USENIX Symposium on Operating Systems Design and
+Implementation, 2026.
+[24] Zhaoheng Li, Supawit Chockchowwat, Ribhav Sahu, Areet Sheth, and
+Yongjoo Park. Kishu: Time-traveling for computational notebooks.
+Proceedings of the VLDB Endowment, 18(4):970–985, 2024.
+[25] Zhaoheng Li, Pranav Gor, Rahul Prabhu, Hui Yu, Yuzhou Mao, and
+Yongjoo Park. Elasticnotebook: Enabling live migration for computa-
+tional notebooks. Proceedings of the VLDB Endowment, 17(2):119–133,
+2023.
+[26] Georgios Liargkovas, Konstantinos Kallas, Michael Greenberg, and
+Nikos Vasilakis. Executing shell scripts in the wrong order, correctly.
+In Proceedings of the 19th Workshop on Hot Topics in Operating Systems,
+pages 103–109, 2023.
+[27] Linux Kernel Documentation. Overlay Filesystem. https://docs.kernel.
+org/filesystems/overlayfs.html, n.d. Accessed: 2026-06-09.
+[28] Linux man-pages project. fork(2) — Linux Manual Page. https://man7.
+org/linux/man-pages/man2/fork.2.html, n.d. Accessed: 2026-06-09.
+[29] Moby contributors. Issue #50750: docker checkpoint and gVisor only
+work with –network=host since v28.0. https://github.com/moby/
+moby/issues/50750. Accessed: 2026-03-29.
+[30] OpenAI. Codex cli. https://developers.openai.com/codex/cli. Accessed:
+2026-05-30.
+[31] OpenJDK. Project CRaC: Coordinated Restore at Checkpoint. https:
+//openjdk.org/projects/crac/, n.d. Accessed: 2026-06-09.
+[32] Steven Osman, Dinesh Subhraveti, Gong Su, and Jason Nieh. The
+design and implementation of Zap: A system for migrating computing
+environments. In Proceedings of the 5th Symposium on Operating
+Systems Design and Implementation (OSDI ’02), pages 361–376, Boston,
+MA, 2002. USENIX Association.
+[33] Podman Project. Podman. https://podman.io, 2018. Accessed: 2026-
+04-24.
+[34] Podman Project. podman-container-checkpoint documentation.
+https://docs.podman.io/en/stable/markdown/podman-container-
+checkpoint.1.html, 2018. Accessed: 2026-04-24.
+[35] Podman Project. podman-container-restore documentation.
+https://docs.podman.io/en/latest/markdown/podman-container-
+restore.1.html, 2018. Accessed: 2026-04-24.
+[36] David Quigley, Josef Sipek, Charles P. Wright, and Erez Zadok. Unionfs:
+User- and community-oriented development of a unification filesystem.
+In Linux Symposium, volume 2, pages 349–362, 2006.
+13
+
+--- PDF page 14 ---
+
+[37] Ohad Rodeh, Josef Bacik, and Chris Mason. BTRFS: The Linux B-tree
+filesystem. ACM Transactions on Storage, 9(3):9:1–9:32, August 2013.
+[38] Shigeyuki Sato and Tomoki Nakamaru. Multiverse notebook: Shifting
+data scientists to time travelers. Proceedings of the ACM on Program-
+ming Languages, 8(OOPSLA1):754–783, April 2024.
+[39] Frank Schmuck and Jim Wylie. Experience with transactions in quick-
+silver. In SOSP, pages 239–253, 1991.
+[40] Russell Sears and Eric Brewer. Stasis: Flexible transactional storage.
+In OSDI, pages 29–44, 2006.
+[41] Simon Shillaker and Peter Pietzuch. Faasm: Lightweight isolation
+for efficient stateful serverless computing. In 2020 USENIX Annual
+Technical Conference, pages 419–433, 2020.
+[42] Dimitrios Skarlatos, Qingrong Chen, Jianyan Chen, Tianyin Xu, and
+Josep Torrellas. Draco: Architectural and operating system support
+for system call security. In MICRO, pages 42–57, 2020.
+[43] Richard P. Spillane, Sachin Gaikwad, Manjunath Chinni, Erez Zadok,
+and Charles P. Wright. Enabling transactional file access via light-
+weight kernel extensions. In FAST, pages 29–42, 2009.
+[44] Sudarshan M. Srinivasan, Srikanth Kandula, Christopher R. Andrews,
+and Yuanyuan Zhou. Flashback: A lightweight extension for rollback
+and deterministic replay for software debugging. In 2004 USENIX
+Annual Technical Conference (USENIX ATC 04), pages 29–44, Boston,
+MA, June 2004. USENIX Association.
+[45] Stackless Python. Pickling — serialisation of running tasklets. https:
+//stackless.readthedocs.io/en/3.7-slp/library/stackless/pickling.html,
+2021. Accessed: 2026-06-09.
+[46] The Terminal-Bench Team. Terminal-bench: A benchmark for ai
+agents in terminal environments, Apr 2025.
+[47] Cong Wang and Yusheng Zheng. Fork, explore, commit: Os primitives
+for agentic exploration, 2026.
+[48] Nathaniel Weinman, Steven M. Drucker, Titus Barik, and Robert De-
+Line. Fork it: Supporting stateful alternatives in computational note-
+books. In Proceedings of the 2021 CHI Conference on Human Factors in
+Computing Systems, CHI ’21, pages 1–12, New York, NY, USA, 2021.
+Association for Computing Machinery.
+[49] Tianbao Xie, Danyang Zhang, Jixuan Chen, Xiaochuan Li, Siheng Zhao,
+Ruisheng Cao, Toh Jing Hua, Zhoujun Cheng, Dongchan Shin, Fangyu
+Lei, Yitao Liu, Yiheng Xu, Shuyan Zhou, Silvio Savarese, Caiming
+Xiong, Victor Zhong, and Tao Yu. Osworld: Benchmarking multimodal
+agents for open-ended tasks in real computer environments, 2024.
+[50] Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran, Thomas L. Griffiths,
+Yuan Cao, and Karthik Narasimhan. Tree of thoughts: Deliberate
+problem solving with large language models, 2023.
+[51] Xiao Yu, Baolin Peng, Vineeth Vajipey, Hao Cheng, Michel Galley,
+Jianfeng Gao, and Zhou Yu. Exact: Teaching ai agents to explore with
+reflective-mcts and exploratory learning, 2025.
+[52] Wen Zhang, Vivian Fang, Aurojit Panda, and Scott Shenker. Kappa: A
+programming framework for serverless computing. In Proceedings of
+the ACM Symposium on Cloud Computing, SoCC ’20, pages 328–343,
+New York, NY, USA, 2020. Association for Computing Machinery.
+[53] Hua Zhong and Jason Nieh. CRAK: Linux checkpoint/restart as a ker-
+nel module. Technical Report CUCS-014-01, Department of Computer
+Science, Columbia University, November 2001.
+[54] Andy Zhou, Kai Yan, Michal Shlapentokh-Rothman, Haohan Wang,
+and Yu-Xiong Wang. Language agent tree search unifies reasoning
+acting and planning in language models, 2024.
+[55] Diyu Zhou and Yuval Tamir. HyCoR: Fault-tolerant replicated con-
+tainers based on checkpoint and replay, 2021.
+A Experimental Setup Details
+A.1 Search Algorithms
+Pass@20. The pass@20 baseline relaxes the one-shot con-
+straint by allowing the agent to interact iteratively with the
+system. Specifically, in each trial the agent may issue a se-
+quence of commands, observe the resulting state and out-
+puts, and adapt subsequent actions accordingly. The process
+is repeated for at most 20 independent trials, with success
+recorded if any single trial reaches the target state. This is a
+common baseline in many coding/system agent benchmarks
+[19, 46, 49], where agents are allotted a small budget of re-
+tries. For pass@20, the agent is allowed 𝑛= 30 exploratory
+rounds per trial with a total of two iterations.
+Monte Carlo Tree Search (MCTS).. To capture structured
+exploration beyond simple retries, we model multi-step in-
+teraction using Reflective Monte Carlo Tree Search. At each
+environment step of task execution, the agent initiates a tree
+search simulation with branching factor 𝑤 and depth 𝑑, sim-
+ulating alternative continuations of the current trajectory.
+Each rollout explores a possible command sequence, and
+search nodes are evaluated using the intermediate system
+observations as feedback signals. After the search completes,
+an LLM-based decision module selects the best move to com-
+mit at the current environment step. Execution then proceeds
+to the next environment step, where the process repeats. The
+process terminates when either the agent declares the task
+complete or the overall budget of 𝑘 main steps has been ex-
+hausted. For the MCTS-based methods, we fix the branching
+factor to 𝑤 = 3 and search depth to 𝑑= 2 at each environ-
+ment step.
+Variance and replication. Each configuration is evalu-
+ated in a single experimental run, that run already aggregates
+substantial sampling: every condition involves hundreds of
+stochastic LLM calls (20 independent rollouts per task under
+pass@20, and a matched visited-node budget under MCTS),
+and reported accuracy averages over all 77 Terminal-Bench
+tasks.
+14
