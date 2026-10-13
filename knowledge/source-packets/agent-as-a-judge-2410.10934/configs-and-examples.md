@@ -1,0 +1,23 @@
+# Configs and examples
+
+## 环境与配置入口
+
+| 文件 | 用途 |
+| --- | --- |
+| `agent_as_a_judge/config.py` | 依赖、参数、配置或运行示例入口 |
+| `scripts/README.md` | 依赖、参数、配置或运行示例入口 |
+| `benchmark/devai/README.md` | 依赖、参数、配置或运行示例入口 |
+
+## 执行入口
+
+| 文件 | 使用方式 |
+| --- | --- |
+| `benchmark/workspaces/OpenHands/39_Drug_Response_Prediction_SVM_GDSC_ML/src/train.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `scripts/run_aaaj.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `scripts/run_ask.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `scripts/run_statistics.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `scripts/run_wiki.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+
+## 本地保存范围
+
+`official-code/` 保存官方仓库在固定 revision 下的核心源代码、配置、示例和测试入口。完整数据集、模型权重、缓存和论文实验输出需按官方 README 另行取得。

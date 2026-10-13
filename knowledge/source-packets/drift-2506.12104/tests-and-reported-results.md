@@ -14,9 +14,11 @@
 
 | 文件 | 核对对象 |
 | --- | --- |
-| `ASB_DRIFT/scripts/res_retrieval.py` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `ASB_DRIFT/scripts/res_retrieval_pot.py` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `ASB_DRIFT/pyopenagi/tools/simulated_tools/performance_evaluator.py` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
+| `ASB_DRIFT/data/agent_task_test.jsonl` | 官方评测、测试或结果计算入口 |
+| `ASB_DRIFT/data/attack_tools_test.jsonl` | 官方评测、测试或结果计算入口 |
+| `ASB_DRIFT/scripts/res_retrieval.py` | 官方评测、测试或结果计算入口 |
+| `ASB_DRIFT/scripts/res_retrieval_pot.py` | 官方评测、测试或结果计算入口 |
+| `ASB_DRIFT/pyopenagi/tools/simulated_tools/performance_evaluator.py` | 官方评测、测试或结果计算入口 |
 
 ## 当前核验状态
 

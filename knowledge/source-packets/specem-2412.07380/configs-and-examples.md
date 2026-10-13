@@ -1,0 +1,24 @@
+# Configs and examples
+
+## 环境与配置入口
+
+| 文件 | 用途 |
+| --- | --- |
+| `demo.py` | 依赖、参数、配置或运行示例入口 |
+| `README.md` | 依赖、参数、配置或运行示例入口 |
+| `model_configs/config_map.py` | 依赖、参数、配置或运行示例入口 |
+| `model_configs/model_loader.py` | 依赖、参数、配置或运行示例入口 |
+| `model_configs/__init__.py` | 依赖、参数、配置或运行示例入口 |
+| `utils/logger_config.py` | 依赖、参数、配置或运行示例入口 |
+
+## 执行入口
+
+| 文件 | 使用方式 |
+| --- | --- |
+| `run_script/main.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `demo.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `run_script/run.sh` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+
+## 本地保存范围
+
+`official-code/` 保存官方仓库在固定 revision 下的核心源代码、配置、示例和测试入口。完整数据集、模型权重、缓存和论文实验输出需按官方 README 另行取得。

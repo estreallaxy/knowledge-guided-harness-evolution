@@ -11,19 +11,9 @@
 
 ## 官方代码
 
-| Method 实现 | 核对范围 |
+| 文件 | 核对范围 |
 | --- | --- |
-| `DRIFTLLM.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `DRIFTTaskSuite.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `DRIFTToolsExecutionLoop.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `ASB_DRIFT/main_attacker.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `ASB_DRIFT/requirements.txt` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `ASB_DRIFT/memory_defense/llm_dection.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `ASB_DRIFT/memory_defense/llm_utils.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `ASB_DRIFT/memory_defense/ppl_dection.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `ASB_DRIFT/memory_defense/ppl_utils.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `ASB_DRIFT/memory_defense/threshold.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `ASB_DRIFT/scripts/agent_attack.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `ASB_DRIFT/scripts/agent_attack_pot.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
+| `ASB_DRIFT/scripts/run.sh` | 官方仓库固定 revision 中的实现、接口或配置入口；具体语义以文件内容为准。 |
+| `ASB_DRIFT/main_attacker.py` | 官方仓库固定 revision 中的实现、接口或配置入口；具体语义以文件内容为准。 |
 
-代码位置均以 `source-packet.json` 固定的官方代码 revision 为准；论文页码以本地 PDF 为准。
+代码位置均以 `source-packet.json` 固定的上游 revision 为准；论文页码以本地 PDF 为准。

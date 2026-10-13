@@ -1,0 +1,1263 @@
+===== PDF p.1 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+
+                                                                        Fan Liu 1 Wenshuo Chao 1 Naiqiang Tan 2 Hao Liu 1
+
+
+                                                                Abstract                                        usail-hkust/benchmark_inference_
+                                                                                                                time_computation_LLM
+                                             With the advancement of large language models
+                                             (LLMs), solving complex reasoning tasks has
+arXiv:2502.07191v4 [cs.AI] 17 Feb 2025
+
+
+
+
+                                             gained increasing attention. Inference-time
+                                             computation methods (e.g., Best-of-N, beam                    1. Introduction
+                                             search, et al.) are particularly valuable as they
+                                             can enhance reasoning performance without
+                                             modifying model parameters or requiring                       Large language models (LLMs) have demonstrated remark-
+                                             additional training. However, these techniques                able reasoning capabilities, enabling them to tackle increas-
+                                             come with implementation challenges, and most                 ingly sophisticated tasks in fields such as science, math-
+                                             existing methods remain at the proof-of-concept               ematics, and coding (Zhang et al., 2024a; Chen et al.,
+                                             stage with limited practical adoption due to                  2021). While scaling model size and expanding high-quality
+                                             their computational complexity and varying                    training datasets have significantly driven these advance-
+                                             effectiveness across different tasks. In this                 ments, researchers are actively exploring complementary
+                                             paper, we investigate and benchmark diverse                   approaches to further enhance model performance. Inspired
+                                             inference-time computation strategies across                  by human problem-solving behavior—where individuals
+                                             reasoning tasks of varying complexity. Since                  often dedicate more time deliberating on complex problems
+                                             most current methods rely on a proposer-verifier              to improve their decisions—there is growing interest (Snell
+                                             pipeline that first generates candidate solutions             et al., 2024) in leveraging inference-time computation (e.g.,
+                                             (e.g., reasoning solutions) and then selects the              utilizing additional computation during testing to enhance
+                                             best one based on reward signals (e.g., RLHF                  the performance of reasoning tasks) to strengthen the rea-
+                                             rewards, process rewards), our research focuses               soning abilities of LLMs.
+                                             on optimizing both candidate solution generation              While inference-time computation holds significant po-
+                                             (e.g., instructing prompts, hyperparameters such              tential for enhancing the reasoning performance of
+                                             as temperature and top-p) and reward mechanisms               LLMs (Wang et al., 2022), existing studies reveal mixed
+                                             (e.g., self-evaluation, reward types). Through                results in inference-time computation (e.g., limited self-
+                                             extensive experiments (more than 20,000 A100-                 correction capabilities (Huang et al., 2023)). Its effective-
+                                             80G GPU hours with over 1,000 experiments)                    ness on broader reasoning tasks (e.g., logical reasoning,
+                                             across a variety of models (e.g., Llama, Qwen,                code generation, question answering, and fact verification)
+                                             and Mistral families) of various sizes, our                   remains limited, with most research narrowly focused on
+                                             ablation studies reveal that previously overlooked            domains like math problems. Moreover, inference-time
+                                             strategies can significantly enhance performance              methods are sensitive to hyperparameters, such as tempera-
+                                             (e.g., tuning temperature can improve reasoning               ture and top-p sampling, where small adjustments can lead
+                                             task performance by up to 5%). Furthermore,                   to notable performance differences (e.g., a 5% improvement
+                                             we establish a standardized benchmark for                     in solving math problems by tuning temperature). These
+                                             inference-time computation by systematically                  challenges underscore the critical role of inference-time
+                                             evaluating six representative methods across                  techniques (e.g., instructing prompt, sampling strategies, re-
+                                             eight reasoning tasks. These findings provide                 ward models), as shown in Table 1. Despite recent advance-
+                                             a stronger foundation for future research. The                ments, these gaps indicate that the field remains nascent,
+                                             code is available at https://github.com/                      with many challenges yet to be addressed.
+                                             1
+                                              Hong Kong University of Science and Technology               In this study, we investigate key tricks that influence the
+                                         (Guangzhou); 2 Didichuxing Co. Ltd;. Correspondence to: Hao
+                                         Liu <liuh@ust.hk>.                                                effectiveness of inference-time computation methods in
+                                                                                                           LLM reasoning. Since most current methods rely on a
+                                                                                                           proposer-verifier pipeline that first generates candidate solu-
+
+                                                                                                       1
+
+===== PDF p.2 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+Table 1: Configuration of inference-time computation methods. Inference-time computation involves two main steps:
+generating candidate solutions (e.g., chain-of-thought reasoning) and selecting the optimal solution. These configurations,
+though significant, often receive less attention and lack standardization.
+ Methods                              Domain                                  *N        Prompt       Temperature   Top-p   Trajectory Selection                Verification               Reward Model
+ Q* (Wang et al., 2024)               Math/Code                                6         COT           0.9/0.2       *          Best-of-N            Step-level reward (score value)      Policy model
+ MALT (Motwani et al., 2024)          Math/CommonsenseQA                      27         COT             0.3         *          Best-of-N                Trajectory-level reward          Verify agent
+ GenRM (Zhang et al., 2024a)          Math/Algorithmic                       1-32        COT              *          *          Best-of-N             Step-level reward (yes or no)       Verifier
+ HiAR-ICL (Wu et al., 2024a)          Math/CommonsenseQA                       5     Automatic COT       0.8        0.9           MCTS                      Step-level reward             Self-Verify
+ CPO (Zhang et al., 2024b)            Math/CommonsenseQA/Fact Verification     5         COT           0.9/0.4      0.9       Tree of Search         Step-level reward (score value)      Self-Verify
+ AutoMathCritique (Xi et al., 2024)   Math                                   1-128       COT             0.7         *       Step-level refine    Step-level reward ( correct or wrong)   Critique model
+
+
+
+
+tions (e.g., chain-of-thought candidate solutions) and then                                           2. Related Work
+selects the optimal solution based on specific reward signals
+(e.g., RLHF rewards, process rewards), our research focuses                                             We briefly introduce related work, including reasoning
+on strategies for both candidate solution generation (e.g.,                                           with LLMs, inference-time computation methods for LLM
+instructing prompts, hyperparameters such as temperature                                              reasoning, and benchmarks of LLM reasoning.
+and top-p) and reward mechanisms (e.g., self-evaluation,                                              Reasoning with LLMs. LLMs have demonstrated strong
+reward types) across broader reasoning tasks, including log-                                          reasoning abilities in complex tasks such as code generation,
+ical reasoning, code generation, fact verification, complex                                           mathematical problem-solving, and research ideation (Zhou
+mathematics, and arithmetic. Through ablation studies, we                                             et al., 2022). Existing methods for enhancing LLM rea-
+evaluate simple techniques in inference-time computation                                              soning include: 1) Prompt engineering – Activates latent
+and empirically analyze their impact on reasoning perfor-                                             multi-step reasoning capabilities. For example, Chain
+mance. Our analysis reveals that inference-time computa-                                              of Thought (CoT) (Wei et al., 2022) guides step-by-step
+tion methods are highly sensitive to the experimental setup.                                          problem-solving but relies heavily on high-quality demon-
+With proper configurations, our results demonstrate that                                              strations for analogical learning. 2) Post-training tech-
+previously overlooked techniques can significantly enhance                                            niques(Chen et al., 2024a;b) – Iteratively enrich training
+performance. Furthermore, we emphasize the need for a                                                 datasets to improve model performance. Self-training meth-
+standardized benchmarking framework for inference-time                                                ods(Chen et al., 2024a) curate new high-quality examples to
+computation in LLM reasoning.                                                                         enhance reasoning, but these approaches demand significant
+Our main contributions and observations include the follow-                                           computational resources. 3)Search-based methods(Browne
+ing: 1) Evaluation of Key Tricks: We evaluate the impact                                              et al., 2012; Feng et al., 2023a; Liu et al., 2023) – Optimize
+of a wide range of key tricks (e.g., prompt type, temperature,                                        reasoning paths at inference time using search algorithms.
+top-p, reward model type) on LLMs. Key insights include:                                              For instance, Tree of Thought(Yao et al., 2024) employs
+Instruction prompts significantly influence LLM reasoning,                                            breadth-first search to refine solutions. This work focuses on
+with self-correction often yielding mixed results compared                                            test-time computation, leveraging inference-time optimiza-
+to CoT prompting; Self-evaluation frequently fails to as-                                             tion to enhance LLM reasoning without additional training
+sess solution quality effectively; Reward models can cause                                            overhead.
+performance inflation in LLM reasoning, with inconsistent                                             Inference-Time Computation of LLM Reasoning. Scal-
+effectiveness across tasks due to generalization issues; 2)                                           ing inference-time computation has proven more effective
+Combination of Techniques: We further explore the ef-                                                 than merely increasing model parameters (Snell et al., 2024).
+fects of combining selected useful tricks on inference-time                                           Recently, research has focused on optimizing reasoning effi-
+computation methods. Our empirical results suggest that                                               ciency during inference rather than solely scaling training-
+improvements are not always additive when combining dif-                                              time computation. Best-of-N (Cobbe et al., 2021a) enhances
+ferent techniques, although methods such as prompt design,                                            LLM reasoning by sampling N candidate solutions, eval-
+temperature, and reward models can be effective, as demon-                                            uating them with a learned verifier or reward model, and
+strated in Section 4.2.3. 3) Comprehensive Benchmarks:                                                selecting the highest-scoring one. Similarly, MCTS (Tian
+We conduct extensive experiments, evaluating six repre-                                               et al., 2024) improves inference by actively planning and
+sentative inference-time computation methods across eight                                             selecting higher-quality responses. These advancements
+reasoning tasks, utilizing over 20,000 A100-80G GPU hours                                             highlight inference-time optimization as crucial for enhanc-
+and more than 1,000 individual tests. Our results establish                                           ing LLM reasoning beyond scaling training computation.
+a baseline benchmark for inference-time computation, as
+shown in Table 2.                                                                                     Benchmarks of LLM Reasoning. LLMs have made re-
+                                                                                                      markable progress in solving complex tasks in a zero-shot
+                                                                                                      manner (Hendrycks et al., 2021; Press et al., 2022; Liu
+                                                                                                      et al., 2024a), positioning them as a key milestone toward
+
+
+                                                                                                 2
+
+===== PDF p.3 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+artificial general intelligence. Consequently, benchmark-                  more randomness), while a lower temperature makes the
+ing their reasoning abilities has become a central challenge.              distribution sharper, leading to more deterministic behavior.
+Recent studies have evaluated LLM reasoning across vari-
+                                                                           Top-p. The top-p (Holtzman et al., 2019) controls the LLM
+ous domains, including mathematical reasoning (Hendrycks
+                                                                           output by augmenting the vocabulary size M as only those
+et al., 2021), code generation (Chen et al., 2021), and factual
+                                                                           tokens are considered for which the cumulative probability
+QA (Thorne et al., 2018), etc (Liu et al., 2024c;b). While                         Pk
+these benchmarks enhance our understanding of LLM rea-                     (Ck = i=1 p(i) ) is greater than the Top-p value (the cumu-
+soning, most research has focused on task performance                      lative probability is calculated by sorting the tokens by their
+rather than inference-time computation, leaving key opti-                  probability in a descending order and then adding them
+mization techniques underexplored.                                         up, where: probabilities: {p(1) , p(2) , . . . , p(M ) }, where:
+                                                                           p(1) ≥ p(2) ≥ · · · ≥ p(M ) ). After the tokens are selected,
+Unique to this paper, we are the first to comprehensively                  it would be re-calculated their softmax with reduced vocab
+study how LLM reasoning performance changes with the                       size. The truncated probability
+                                                                                                    ( p(i) distribution can be defined
+incorporation of previously overlooked key techniques. We                                             Pk          , if i ≤ k,
+                                                                           as: πθ (yt | x, y<t ) =       j=1 p(j)             .
+hope that our work will provide valuable insights into the
+role of inference-time computation.                                                                   0,            if i > k.
+3. Preliminares                                                            Inference-Time Computation Methods for LLM Rea-
+                                                                           soning. Inference-time computation methods (Ott et al.,
+LLMs. Given an input context x (e.g., math problem, com-                   2018) typically follows a pipeline comprising two main
+monsense QA, etc.), the LLM aims to autoregressively pre-                  steps: generating candidate solutions (e.g., chain-of-thought
+dict the next token (Dubey et al., 2024),                                  reasoning candidates) and selecting the optimal solution
+                             n
+                             Y                                             based on specific reward signals (e.g., numerical reward,
+                πθ (y|x) =         πθ (yt |x, y<t ),             (1)       self-consistency, process reward, or binary feedback such as
+                             t=1                                           ”Yes” or ”No”). Formally, given a problem x, the inference-
+where πθ (·) is the LLM parameterized by θ, and y =                        time computation methods sample K candidate solutions:
+(y1 , y2 , · · · , yn ) is the output sequence. Here, y<1 = ∅              y (k) ∼ πθ (y | I, x, y<n ),for k = 1, 2, . . . , K, where y (k)
+and y<t = (y1 , y2 , · · · , yt−1 ). For a vocabulary size M ,             represents the k-th candidate solution. After sampling, each
+the probability of predicting the t-th token is determined                 candidate is evaluated using a reward model to produce a
+using a softmax with temperature τ on logit scores z of all                reward signal:r(k) = reward(I, x, y<n−1 , y (k) ), where the
+tokens, combined with top-p (nucleus sampling) to control                  reward model can take various forms. For example, it may
+the randomness and diversity of the sampling process.                      be a general LLM that evaluates solutions using instructions
+                                                                           I (e.g., ”Let’s verify the step-by-step reasoning. Is the an-
+Chain of Thought Prompting.                 Chain-of-thought               swer correct (Yes/No)?”). Alternatively, the reward model
+(CoT) (Wei et al., 2022) is a method that prompts LLMs                     could be specifically trained to output a scalar value between
+to generate a series of reasoning steps leading to the final               0 and 1, with higher values indicating better solutions. The
+answer. These intermediate steps, denoted as y1 , . . . , yn−1 ,           final solution ŷ is then selected based on the reward signals.
+connect the input x to the output y (omit n for simplicity),               For numerical rewards, the solution with the highest reward
+where n represents the total number of steps. For example,                 is chosen:ŷ = arg maxyk rk .
+given an instruction I (e.g., ”Let’s solve this step by step”)             4. Decoding Inference-Time Computation of
+along with demonstration examples and the input question
+x, the final answer is y. Each intermediate thought yi is
+                                                                              LLM Reasoning
+                                                                           In this section, we decode the inference-time computation
+a part of the reasoning process that leads to the final an-
+                                                                           of LLM reasoning. First, we introduce the experimental
+swer. These thoughts are sequentially generated from the
+                                                                           setup, followed by the main bag of tricks for improving
+distribution yi ∼ πθ (· | I, x, y<i−1 ), and the final output is
+                                                                           inference-time computation of LLM reasoning. Finally, we
+sampled from: y ∼ πθ (· | I, x, y<n−1 ).
+                                                                           benchmark various inference-time computation methods.
+Temperature. The temperature (Hinton, 2015) τ of LLM                       The overall framework is illustrated in Figure 1.
+controls the level of randomness in the generated outputs,
+influencing their diversity. Instead of directly calculating the           4.1. Experiments Setup
+softmax, the logits are scaled by the temperature value. The
+conditional probability of generating a token in the sequence              Models. Inference Model. In our experiments, we evaluated
+can be expressed as: πθ (yt | x, y<t ) = PMexp(z        t /τ )
+                                                                 ,         several widely studied LLMs of varying sizes and config-
+                                                      exp(z /τ )
+                                                       i=1   i             urations: 1) LLaMA 3.3 (Dubey et al., 2024): Meta AI’s
+where zt represents the logit score: logitθ (yt | x, y<t ), and            latest iteration in the LLaMA series, available in 8B and
+τ is the temperature parameter. A higher temperature τ                     70B parameters. It is known for its open-source accessibil-
+results in a smoother probability distribution (introducing
+
+                                                                       3
+
+===== PDF p.4 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+
+                                                                                                                        (C) Inference Model              (E) Inference-Time
+                                             Instruction
+                                           (A)           prompt
+                                               Instruction prompt
+                                                                                                                                                            Computation
+                                                                 COT:                                                                  LLMs                     Best-of-N
+                                                                      Answer the
+                                                                 COT: Answer      given question
+                                                                             the given  question step-
+                                                                                                 step-
+                   IO:Answer
+                  IO:        thegiven
+                      Answerthe  givenquestion
+                                      question
+                                                                              by-step
+
+                                                                                                                                                                  MCTS
+                    Reflection: Provide a step-by-step answer to the question, reflecting on                            Qwen       LLaMA Mistral
+                                                  each step
+                                                                                                                                 Model Size
+                                                  (B) Reasoning Task
+                                                                                                                       7b-size    13b-size    70b-size
+                                             Knowledge-based Reasoning                                                  LLM         LLM         LLM
+
+                 Bamboogle: When               Fever: Reg Watson is a               HotPotQA: What film
+              was the author of The        current television producer.              with actor Israel                       Hyper-Parameter
+                Population Bomb          Determine if there is SUPPORT,             Contreras used the
+                     born?               REFUTE, or NOT ENOUGH INFO.              Yucatec Maya language?
+                                                                                                                         temperature          Top-p
+                                                                                                                                                                 Self-refine
+                                                     Complex Reasoning
+                GSM-HARD: A group of friends split a dinner           GSM8K:Emily has 5 apples. She gives
+                bill of $84 equally. If 3 more friends joined,
+                each person's share would decrease by $2.
+                                                                       2 apples to her friend. How many                 (D) Reward Model
+                                                                          apples does Emily have left?
+               How many friends were in the original group?                                                                       LLMs
+
+                                                                         PrOntoQA: Max is a yumpus.                                                                   Select
+                    MATH: A rectangle has a length of 8
+                    units and a width of 5 units. What is               Yumpuses are dumpuses, and                                                                   Selected
+                         the area of the rectangle?                   dumpuses are not sour. Is Max sour?                 InternLM     QwQ                             Node
+                                                                                                                              Reward Type
+                    HumanEval: def max_element(l: list): """ Return the maximum element in the list.                                                                 Candidate
+               >>> max_element([1, 2, 3]) 3 >>> max_element([5, 3, -5, 2, -3, 3, 9, 0, 123, 1, -10]) 123 """            RLHF       Critic       PRM                    Node
+                                                                                                                       Reward     Reward       Reward
+               return max(l)                                                                                                                                         Reflection
+
+
+                                        3 Instruction Prompt 3 Reward Model                                         Key insights on Inference-Time Computation
+                   LLM Reasoning 8 Reasoning Task            4 Types Reward
+                                                                                                               1. Instruction prompts significantly affect LLM reasoning.
+             Inference-Time Computation                                                                        2. Adjusting the Top-p parameter balances diversity and coherence.
+                                        3 Types LLMs         3 Types Model Size                                3. Self-evaluation often fails to assess solution quality effectively.
+                   of LLM Reasoning
+                                        2 Hyper-Parameter 6 Inference-Time Method                              4. Process-based reward models excel in complex tasks like mathematics.
+
+
+
+Figure 1: Overview of Decoding Inference-Time Computation for LLM Reasoning. (A) Instruction Prompt: Includes IO,
+Chain-of-Thought (CoT), and reflection-based CoT prompts. (B) Reasoning Task: Evaluates models on eight datasets:
+Arithmetic (GSM8K, GSM-Hard), Complex Math (MATH), Logical (PrOntoQA), Code Generation (HumanEval), Question
+Answering (Bamboogle), Fact Verification (FEVER), and Common Sense (HotpotQA). (C) Inference Model: Analyzes
+LLMs (LLaMA, Qwen, Mistral) of varying sizes and architectures, with performance assessed via temperature and top-p
+hyperparameters. (D) Reward Model: Explores reward types like RLHF, critic, and process-based models to enhance
+inference performance. (E) Inference-Time Computation: Investigates methods like Best-of-N Sampling, Step-Level
+Best-of-N, Self-Consistency, Monte Carlo Tree Search (MCTS), and Self-Refinement to optimize reasoning.
+ity and strong benchmark performance. 2) Qwen 2.5 (Yang                                                        et al., 2022) datasets to test their arithmetic calculation
+et al., 2024): Developed by Alibaba Cloud, this model offers                                                   skills. 2) Complex mathematical reasoning: Using the
+7B and 72B parameter configurations, showcasing diverse                                                        MATH (Hendrycks et al., 2021) to assess proficiency in
+LLM architectures and training methods. 3) Mistral 7B                                                          solving advanced mathematical problems. 3) Logical Rea-
+Instruct v0.3 (Jiang et al., 2023): A 7B parameter model                                                       soning: measuring logical deduction and inference abili-
+from Mistral AI, recognized for its efficiency and perfor-                                                     ties with the ProntoQA (Saparov & He, 2023) dataset. 4)
+mance rivaling larger models. These models exhibit diverse                                                     Code Generation: Testing code generation skills on the Hu-
+reasoning strengths, providing insights into the impact of dif-                                                manEval (Chen et al., 2021) dataset. 5) Question Answering:
+ferent architectures and training approaches. Reward Model.                                                    Evaluating performance in answering diverse questions us-
+We employ four types of reward models: (1) Process Re-                                                         ing the Bamboogle (Press et al., 2022). 6) Fact Verification:
+ward (Zheng et al., 2024): Evaluates each reasoning step                                                       Assessing factual verification using the FEVER (Thorne
+step-by-step. (2) Result Reward: Assesses only the final                                                       et al., 2018) dataset. 7) Common Sense Reasoning: Testing
+answer’s correctness. (3) RLHF Reward (Cai et al., 2024):                                                      understanding of common sense knowledge and reasoning
+Derived from preference samples (both human-annotated                                                          with the HotpotQA (Yang et al., 2018) dataset.
+and AI-generated). (4) Proof-Critical Reward: Applied
+                                                                                                               Inference-Time Computation Methods. This study ex-
+in formal mathematical proof across multiple benchmarks.
+                                                                                                               amines common inference-time computation methods: 1)
+The details of the setting can be seen in Appendix A.
+                                                                                                               Best-of-N (Cobbe et al., 2021a): Generates multiple out-
+Tasks. Our research focuses on the following reason-                                                           puts (N samples) for a given input and selects the optimal
+ing tasks: 1) Arithmetic Reasoning: Evaluating models                                                          one based on reward model. 2) Step-Level Best-of-N Sam-
+on GSM8K (Cobbe et al., 2021b) and GSM-Hard (Gao                                                               pling (Cobbe et al., 2021a): Applies Best-of-N sampling at
+
+
+                                                                                                      4
+
+===== PDF p.5 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+each generation step, selecting the most promising thoughts.                                                 IO       CoT                   Reflect CoT
+3) Self-Consistency (Wang et al., 2022): Produces multiple                                          GSM8K                                             MATH500
+
+
+
+
+                                                                      Accuracy (N=32)
+
+
+
+
+                                                                                                                          Accuracy (N=32)
+reasoning paths or answers and selects the most consistent                          100%                                                90%
+                                                                                     90%                                                70%
+one. 4) Beam Search (Ott et al., 2018): Explores outputs                             80%                                                50%
+level by level, expanding all nodes at the current depth be-                         70%
+                                                                                     60%                                                30%
+fore proceeding to the next. 5) Monte Carlo Tree Search                                                                                 10%
+                                                                                     50%
+(MCTS) (Feng et al., 2023b): Uses random sampling to                                              7B 7B 8B 0B 2B                                     7B 7B 8B 0B 2B
+                                                                                              tral en ma a7 n7                                   tral Qwen Llama lama7 wen7
+build a search tree and identify the most promising out-                                   Mis Qw Lla Llam Qwe                                Mis               L     Q
+puts. 6) Self-Refine (Madaan et al., 2024): Allows LLMs to                                      HumanEval                                           Bamboogle
+
+
+
+
+                                                                                                                          Accuracy (N=32)
+                                                                                                                                        80%
+
+
+
+
+                                                                      Pass@1 (N=32)
+iteratively refine outputs during inference.                                        90%
+                                                                                                                                        70%
+                                                                                    70%                                                 60%
+Evaluation Metrics. For most reasoning tasks, accuracy                                                                                  50%
+                                                                                    50%
+serves as the primary evaluation metric. For code generation,                                                                           40%
+                                                                                    30%                                                 30%
+we use the pass@k metric (Chen et al., 2021), which con-
+                                                                                                 7B 7B 8B 0B 2B                                      7B 7B 8B 0B 2B
+siders a problem solved if at least one of k generated code                                  tral Qwen Llama lama7 wen7                          tral Qwen Llama lama7 wen7
+                                                                                          Mis               L     Q                           Mis               L     Q
+samples passes all test cases. In our evaluation, we focus on
+pass@1 by generating multiple samples and selecting the               Figure 2: Accuracy (%) across benchmark tasks under dif-
+best one using the reward model.                                      ferent instruction prompts. The results underscore the sub-
+                                                                      stantial influence of prompt design on inference-time com-
+4.2. Bag of Tricks                                                    putation methods. Notably, self-correction mechanisms
+Our goal is to investigate how previously overlooked tricks           produced mixed outcomes.
+can critically affect the performance of inference-time com-
+putation methods, which typically consist of two main steps:          tion prompt types, temperature, and top-p sampling.
+generating candidate solutions (e.g., prompt type, tempera-           Instruction Prompt Type. Different instruction prompts
+ture, top-p, etc.) and selecting the optimal solution based on        can guide an LLM to generate distinct reasoning paths.
+specific reward signals (e.g., self-evaluation, reward type,          Specifically, Input-Output (IO) prompts directly provide the
+reward process). In our default setup, we primarily adopt             answer, whereas Chain-of-Thought (CoT) prompts encour-
+the Best-of-N inference-time computation with the number              age the LLM to reason step by step. Recent research (Huang
+of candidates N = 32, the temperature τ = 0.7, and top-p              et al., 2023) suggests that self-correction or self-reflection
+set to 0.9. Additionally, the instruction prompt type is set          mechanisms are often ineffective when LLMs operate with-
+to Chain-of-Thought (CoT). Without further modifications,             out external feedback under certain prompt types. We fur-
+we conduct ablation studies, varying only the specific tricks         ther explores the impact of various prompt types, including
+under investigation. We focus primarily on complex reason-            IO prompts, standard Chain-of-Thought (CoT) prompts, and
+ing tasks, including math problems, and code generation               reflection-based CoT. As shown in Figure 2, the results il-
+tasks, etc, while additional tasks are detailed in the Ap-            lustrate that different prompts have a significant effect on
+pendix B. All additional details regarding the experimental           LLM reasoning performance. Specifically, we observe that
+implementation settings can be found in the Appendix A.               while CoT prompts generally improve reasoning accuracy,
+Note that our empirical observations and conclusions may              Reflection-based CoT prompts show more mixed results
+not generalize to all datasets and models. However, we                across the datasets. These findings are consistent with the
+emphasize the necessity of using consistent implementation            observations in (Huang et al., 2023), where self-correction
+details to ensure fair comparisons among different inference-         mechanisms failed to show a consistent improvement, with
+time computation methods.                                             the outcomes varying across different tasks.
+                                                                      Temperature. Temperature (Hinton, 2015) τ regulates the
+4.2.1. G ENERATING C ANDIDATE S OLUTIONS                              diversity of candidate solutions in LLMs. A higher τ de-
+Generating candidate solutions is a critical step in inference-       creases prediction confidence but increases output variabil-
+time computation for LLM reasoning, but the inherent ran-             ity. We revisit the previous inference-time computation
+domness in this process significantly influences diversity.           settings in Table 1, where the temperature is set differently
+Hyperparameters such as temperature and top-p, along with             for each case. Figure 3 illustrates its effect. In most reason-
+strategies like instruction prompts, play a vital role in shap-       ing scenarios, the LLM’s performance is optimized at τ =
+ing and guiding the solution trajectory. For example, temper-         0.8, yielding an improvement of approximately 2.32% to
+ature, as a sampling strategy in token generation, increases          4.83% across four datasets. In most cases, both larger and
+diversity at higher values. Therefore, this study focuses on          smaller values of τ result in decreased performance.
+the candidate solution generation process, including instruc-         Top-p. The top-p parameter regulates the output of an LLM
+
+                                                                  5
+
+===== PDF p.6 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+                  Mistral-7B    Qwen-7B    Llama-8B                 Llama-70B   Qwen-72B                         Mistral-7B    Qwen-7B   Llama-8B                     Llama-70B     Qwen-72B
+
+                               GSM8K                                    MATH500                                         GSM8K                                             MATH500
+Accuracy (N=32)
+
+
+
+
+                                              Accuracy (N=32)
+                                                                                                             100%
+
+
+
+
+                                                                                               Accuracy (N=32)
+
+
+
+
+                                                                                                                                             Accuracy (N=32)
+              90%                                           80%                                                                                            80%
+              80%                                           60%                                               90%
+                                                                                                                                                           60%
+                                                                                                              80%
+              70%                                           40%                                                                                            40%
+                                                                                                              70%
+              60%                                           20%                                               60%                                          20%
+                     0.6 0.7 0.8 0.9 1.0                          0.6 0.7 0.8 0.9 1.0                            0.6 0.7 0.8 0.9 1.0                             0.6 0.7 0.8 0.9 1.0
+                           Temperature                                Temperature                                            Top-p                                         Top-p
+                            HumanEval                                  Bamboogle                                           HumanEval                                     Bamboogle
+
+
+
+
+                                                                                                                                              Accuracy (N=32)
+                  90%
+                                               Accuracy (N=32)                                                   90%
+
+
+
+
+                                                                                                Pass@1 (N=32)
+                                                                                                                                                               70%
+ Pass@1 (N=32)
+
+
+
+
+                  80%                                           70%                                              80%
+                  70%                                                                                            70%                                           60%
+                                                                60%
+                  60%                                                                                            60%                                           50%
+                  50%                                           50%                                              50%                                           40%
+                  40%                                           40%0.6 0.7 0.8 0.9 1.0                           40%
+                        0.6 0.7 0.8 0.9 1.0                                                                            0.6 0.7 0.8 0.9 1.0                           0.6 0.7 0.8 0.9 1.0
+                           Temperature                                Temperature                                             Top-p                                         Top-p
+
+Figure 3: Accuracy (%) versus temperature during inference.                                    Figure 4: Accuracy (%) versus Top-p values during infer-
+Temperature varies from 0.6 to 1.0, highlighting its impact                                    ence. Top-p varies from 0.6 to 1.0, highlighting its impact
+on LLM reasoning, with performance stabilizing around the                                      on LLM reasoning, with performance stabilizing around the
+recommended default of 0.8.                                                                    recommended default of 0.9.
+
+by modifying the effective vocabulary size M , considering                                     lecting the optimal candidate solution in the inference phase,
+only those tokens whose cumulative probability exceeds a                                       where the model assesses its own generated solutions using
+predefined threshold. In general, top-p strikes a balance be-                                  fuzzy judgments (e.g., categorizing solutions as ”impossi-
+tween diversity and quality in the model’s generated output.                                   ble,” ”likely,” or ”sure” to solve a problem). These fuzzy
+As p decreases, the model becomes increasingly constrained                                     evaluations are then translated into probabilities, such as
+to a smaller set of high-probability tokens, leading to more                                   mapping ”impossible” to 0.01 and ”sure” to 1. We examine
+focused and deterministic outputs. Conversely, higher val-                                     the effectiveness of self-evaluation approaches, including
+ues of p allow for a broader selection of tokens, which                                        self-process evaluation and self-result evaluation, in com-
+increases diversity but may also result in less coherent out-                                  parison to random selection and majority voting. Figure 5
+puts. Figure 4 demonstrates that the impact of top-p on                                        shows that self-evaluation does not consistently improve per-
+inference-time computation in LLM reasoning is significant,                                    formance; in fact, in some worst-case scenarios, it performs
+with an optimal value of top-p = 0.9 , resulting in an overall                                 worse than random selection.
+improvement of 2.32%–5.88%.
+                                                                                               Reward Type. Recently developed reward models (e.g.,
+                                                                                               reward models, critic models, process reward models) have
+4.2.2. S ELECTING O PTIMAL S OLUTIONS
+                                                                                               become key tools in enhancing the reasoning capabilities of
+Selecting optimal solutions is a critical step in the inference-                               LLMs during the inference-time phase (Zheng et al., 2024;
+time computation of LLM reasoning. This process typically                                      Zhang et al., 2025). We investigate various reward types,
+involves either selection by the inference model itself (e.g.,                                 including RLHF Reward (Cai et al., 2024), Proof-Critical
+voting or prompt-based selection) or the use of external re-                                   Reward, LLM-as-Judge, and majority voting. Figure 6 il-
+ward models (e.g., RLHF, Proof-Critical, or process reward                                     lustrates the significant impact of different reward models
+models). A key question is whether LLMs can effectively                                        on inference-time computation performance. Specifically,
+evaluate their own solutions. However, self-evaluation meth-                                   for knowledge-based reasoning, certain reward models can
+ods often fall short, as LLMs struggle to correct errors with-                                 substantially improve performance. In contrast, for more
+out external guidance. Moreover, reward models frequently                                      complex reasoning tasks such as mathematics and code gen-
+fail to distinguish truly correct answers from superficially                                   eration, the LLM-as-Judge process reward seems to provide
+correct ones, leading to inflated performance evaluations.                                     a greater performance boost.
+This challenge underscores the need for more reliable eval-
+                                                                                               Performance Fluctuation with Reward Model. Scaling
+uation mechanisms. To address these gaps, we study the
+                                                                                               test-time computation with reward models presents complex-
+selection process, focusing on self-evaluation, reward types,
+                                                                                               ities. While one might expect LLM reasoning performance
+and investigating generalization of improved reward models.
+                                                                                               to improve steadily as the reward model is optimized, this
+Self-Evaluation. Previous studies (Zhang et al., 2024b; Yao                                    is not always the case. Figure 7 reports that the reward
+et al., 2024) have explored self-evaluation methods for se-                                    model does not perform consistently across all cases dur-
+
+                                                                                           6
+
+===== PDF p.7 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+Table 2: LLM Reasoning Performance under Inference-Time Computation with Fixed Token Budget. The table shows
+accuracy and token consumption across various reasoning tasks for Llama-3.1-8B and Qwen-2.5-7B models.
+
+                                             Knowledge-based Reasoning                                                                          Complex Reasoning
+       Method                                  Accuracy (%) / #Tokens                                Pass@1 / #Tokens                                  Accuracy (%) / #Tokens
+                                         Bamboogle                 HotPotQA          Fever             HumanEval                          GSM8K        GSM-HARD                       MATH          PrOntoQA
+       Llama-3.1-8B
+       Best-of-N                         48.4 / 1077                48.6 / 876    61.1 / 1191           60.4 / 1244                      83.1 / 976     33.6 / 1174                 44.6 / 1412      94.0 / 969
+       Step-Level Best-of-N              52.4 / 1119                45.7 / 632     60.3 / 581           55.5 / 921                       83.0 / 845     32.9 / 1013                 39.8 / 708       93.8 / 881
+       Beam Search                       33.1 / 1801               31.8 / 2091     57.3 / 917           50.6 / 1019                      78.7 / 1066    25.1 / 1328                 43.2 / 1014     89.6 / 1241
+       MCTS                               49.2 / 896                41.3 / 956     59.9 / 843           48.7 / 1114                      81.3 / 582     31.6 / 627                  31.0 / 1898     93.0 / 1511
+       Self-Consistency                  54.8 / 1077                48.3 / 876    61.9 / 1191           60.3 / 1261                      84.3 / 976     33.2 / 1174                 45.0 / 1412      93.4 / 969
+       Self-Refine                        41.9 / 287                40.5 / 280     19.1 / 265           41.4 / 495                       64.5 / 410     25.1 / 564                  37.8 / 743       62.2 / 525
+       Qwen-2.5-7B
+       Best-of-N                          49.2 / 881               44.6 / 1189     55.6 / 830           78.0 / 1102                      90.5 / 1462    50.1 / 1174                 61.2 / 1827     96.2 / 1271
+       Step-Level Best-of-N               51.6 / 863               43.8 / 1055     50.2 / 995           73.1 / 691                       89.7 / 709     50.7 / 877                  63.0 / 1162      92.8 / 625
+       Beam Search                       29.0 / 1552               44.3 / 1280     55.7 / 997           75.6 / 1019                      88.3 / 1341    50.2 / 1417                 49.2 / 836      90.2 / 1089
+       MCTS                              47.6 / 1467               42.6 / 2585    53.9 / 1442           69.8 / 724                       66.2 / 1416    48.7 / 1114                 26.2/ 1805      70.6 / 2582
+       Self-Consistency                   49.2 / 881               44.5 / 1189     56.7 / 830           79.9 / 1271                      90.9 / 1462    50.0 / 1174                 70.2 / 1878     94.8 / 1271
+       Self-Refine                        48.4 / 232                42.3 / 316     16.8 / 639           41.4 / 496                       86.1 / 601     43.4 / 982                  55.8 / 947      58.4 / 1105
+                  Majority     Random    Self-Process-Evaluation              Self-Result-Evaluation                          Majority       Proof-Critical Reward                RLHF Reward       LLM-as-Judge
+
+                               GSM8K                                         MATH500                                                        GSM8K                                           MATH500
+Accuracy (N=32)
+
+
+
+
+                                                 Accuracy (N=32)
+
+
+
+
+                                                                                                            Accuracy (N=32)
+
+
+
+
+                                                                                                                                                                Accuracy (N=32)
+              100%                                             80%                                                        100%                                                80%
+                                                                                                                           90%
+                  80%                                          60%                                                         80%                                                60%
+                                                                                                                           70%
+                                                               40%                                                         60%                                                40%
+                  60%
+                                                               20%                                                         50%                                                20%
+                  40%                                                                                                      40%
+                                                                0%                                                         30%                                                 0%
+                               7B 7B 8B 0B 2B                               7B 7B 8B 0B 2B                                              7B 7B 8B 0B 2B                                     7B 7B 8B 0B 2B
+                           tral en ma a7 n7                             tral Qwen Llama lama7 wen7                                  tral en ma a7 n7                                   tral Qwen Llama lama7 wen7
+                        Mis Qw Lla Llam Qwe                          Mis               L     Q                                   Mis Qw Lla Llam Qwe                                Mis               L     Q
+                             HumanEval                                     Bamboogle                                                     HumanEval                                        Bamboogle
+                                                 Accuracy (N=32)
+
+
+
+
+                                                                                                                                                                Accuracy (N=32)
+                                                                                                                          90%                                                 70%
+Pass@1 (N=32)
+
+
+
+
+                                                                                                            Pass@1 (N=32)
+
+
+
+
+                                                               70%
+              80%                                                                                                         80%
+                                                               60%                                                        70%                                                 60%
+              60%                                                                                                         60%
+                                                               50%                                                        50%                                                 50%
+              40%                                                                                                         40%
+                                                               40%                                                        30%                                                 40%
+                            7B 7B 8B 0B 2B                                  7B 7B 8B 0B 2B                                             7B 7B 8B 0B 2B                                      7B 7B 8B 0B 2B
+                        tral en ma a7 n7                                tral en ma a7 n7                                           tral en ma a7 n7                                    tral Qwen Llama lama7 wen7
+                     Mis Qw Lla Llam Qwe                             Mis Qw Lla Llam Qwe                                        Mis Qw Lla Llam Qwe                                 Mis               L     Q
+Figure 5: Accuracy (%) across four benchmark tasks with                                                     Figure 6: Comparison of different reward models across
+different evaluation strategies. The results shows that Self-                                               benchmarks showcasing their impact on accuracy and
+evaluation often fails to assess solution quality effectively.                                              pass@1 for multiple LLMs.
+
+                                                                                                            and reward model can be effective. For example, as shown
+                                                                                                            in Table 3, using Reflect COT with a temperature of 0.8
+ing scaling. For example, in the challenging MATH task,                                                     and top-p of 0.9 does not result in an improvement for the
+the Proof-Critical Reward model can lead to a decrease in                                                   Bamboogle and MATH tasks. These results suggest that
+performance rather than a progressive improvement. This                                                     careful selection and combination of techniques can enhance
+fluctuation of LLM reasoning performance can be attributed                                                  performance, though the impact may vary across different
+to the generalization issues of the reward model, as reported                                               models.
+in (Zheng et al., 2024; Zhang et al., 2025). Currently, the
+reward model does not perform well across all tasks.                                                             Takeaways. (1) Instruction prompts significantly influence
+                                                                                                                 LLM reasoning, with self-correction yielding mixed results com-
+4.2.3. C OMBINATION OF I NFERENCE -T IME                                                                         pared to CoT prompting; (2) A recommended temperature of
+       C OMPUTATION T RICKS .                                                                                    τ = 0.8 balances diversity and confidence, optimizing reason-
+                                                                                                                 ing performance, with Top-p performing best at 0.9; (3) LLMs
+  We further investigate the combination of selected useful                                                      are not effective at self-evaluation; (4) Reward models enhance
+techniques, including prompt type, temperature, top-p, and                                                       inference-time computation, with process-based rewards ex-
+the reward model. As demonstrated in Table 4, the improve-                                                       celling in complex tasks like mathematics and code generation;
+                                                                                                                 (5) Reward models can inflate performance evaluations due to
+ments are not always additive when combining different                                                           generalization issues, leading to inconsistent task effectiveness.
+techniques, although methods such as prompt, temperature,
+
+                                                                                                        7
+
+===== PDF p.8 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+           Proof-Critical Reward             RLHF Reward               LLM-as-Judge                     Best-of-N           Step-level Best-of-N         Beam Search
+                                                                                                        Self-Consistency    Self-Refine                  MCTS
+                     GSM8K                           50%
+                                                                 MATH500                                      GSM8K                                 MATH500
+       90%                                                                                       100%                                    80%
+                                                     45%                                                                                 70%
+Accuracy
+
+
+
+
+                                             Accuracy
+       80%                                                                                        90%
+
+
+
+
+                                                                                          Accuracy
+
+
+
+
+                                                                                                                                  Accuracy
+                                                     40%                                                                                 60%
+       70%                                           35%                                          80%                                    50%
+                                                     30%                                          70%                                    40%
+       60%                                           25%                                                                                 30%
+          1.0 2.0 4.0 8.0 16.0                          1.0 2.0 4.0 8.0 16.0                      60%                                    20%
+                     N                                              N                                        1000   2000
+                                                                                                             # Tokens
+                                                                                                                           3000                   2000   4000
+                                                                                                                                                    # Tokens
+                                                                                                                                                                6000
+
+                  HumanEval                                      Bamboogle                                  HumanEval                              Bamboogle
+       65%                                           55%                                         90%                                     60%
+                                                                                                 80%
+                                             Accuracy
+       60%                                                                                                                               50%
+Pass@1
+
+
+
+
+                                                                                          Accuracy
+
+
+
+
+                                                                                                                                  Accuracy
+                                                                                                 70%
+       55%                                           50%                                         60%                                     40%
+       50%                                                                                       50%                                     30%
+                                                     45%                                         40%
+          1.0 2.0 4.0 8.0 16.0                          1.0 2.0 4.0 8.0 16.0                     30%                                     20%102
+                         N                                           N                                        103
+                                                                                                             # Tokens
+                                                                                                                           104                            103
+                                                                                                                                                     # Tokens
+Figure 7: Scaling test-time performance with reward models
+(Proof-Critical, RLHF, LLM-as-Judge) across benchmarks.                                   Figure 8: Performance versus token consumption across
+                                                                                          benchmarks for inference-time computation strategies.
+Table 3: Combination of Inference-Time Tricks on
+Llama3.1-8b. We highlight optimal trick combinations.
+                                                                                          like MATH and GSM-HARD, Qwen-2.5-7B outperforms
+     Prompt               Reward             Temp       Top-p     Bamboogle   MATH        Llama-3.1-8B. (2) Adding more completion tokens does not
+       IO                 Majority             0.7         0.9      42.7      11.8        always improve accuracy. While Beam Search may leverage
+      CoT                 Majority             0.7         0.9      52.4      58.4
+      CoT                 Majority             0.8         0.9      54.8      57.0        higher token counts, the additional tokens often fail to yield
+      CoT                 Majority             0.6         0.9      53.2      58.0
+      CoT                 Majority             0.7         1.0      54.0      55.0
+                                                                                          proportional accuracy gains. (3) The Self-Refine method
+      CoT                 Majority             0.7         0.8      56.4      57.8        generally underperforms compared to Consistency, suggest-
+      CoT                  Random              0.7         0.9      44.4      40.6
+      CoT          Self-Process-Evaluation     0.7         0.9      53.2      40.6        ing that overly restrictive processes may hinder optimal
+      CoT          Self-Result-Evaluation      0.7         0.9      45.1      39.2
+  Reflect CoT             Majority             0.7         0.9      56.4      58.6
+                                                                                          outputs for complex reasoning tasks.
+  Reflect CoT             Majority             0.8         0.9      55.6      57.0
+                                                                                          Figure 15 illustrates how performance varies with increased
+                                                                                          computational consumption. As token usage rises, Self-
+                                                                                          Consistency and Self-Refine achieve higher accuracy than
+4.3. Benchmarking of Inference-time computation of                                        other methods, while Step-level Best-of-N, and MCTS show
+     LLMs reasoning under Computation Budgets                                             slower improvements. In contrast, Beam Search exhibits
+We further examine various inference-time computation                                     minimal gains, indicating lower token efficiency. Notably,
+methods, including Best-of-N, Step-level Best-of-N, Beam                                  the GSM8K task demonstrates a sharper accuracy increase
+Search, MCTS, Self-Consistency, and Self-Refine, under a                                  with higher token consumption compared to MATH500,
+fixed computation budget.                                                                 underscoring the task-specific nature of each method’s per-
+                                                                                          formance. Additionally, we observe some performance infla-
+Setup. We evaluate six inference-time computation meth-                                   tion with increased computational consumption, attributed
+ods under a fixed computation budget (equal-token results                                 to the generalization limitations of the reward model, which
+to standardize computational consumption across tasks) on                                 does not perform well on this task.
+Qwen-2.5-7B and LLaMA-3.3-8B. To ensure fairness, con-
+sistent settings are applied to all methods. For knowledge-                               5. Conclusion
+based reasoning tasks (e.g., Bamboogle, HotpotQA, Fever),
+                                                                                          In this paper, we investigate the role of inference-time com-
+we use the RLHF reward model. For complex reasoning
+                                                                                          putation in enhancing the reasoning capabilities of LLMs.
+tasks (e.g., MATH, code generation), the QwQ-32B model
+                                                                                          Our extensive experimental evaluation reveals that seem-
+provides the process reward. Implementation details are
+                                                                                          ingly simple yet overlooked tricks—such as sampling strate-
+available in Appendix A.
+                                                                                          gies and reward mechanisms—can yield substantial im-
+Table 2 summarizes the results of six inference-time com-                                 provements in reasoning performance. The results demon-
+putation methods across eight reasoning tasks. Key obser-                                 strate that careful tuning of inference parameters, such as
+vations include: (1) Performance varies significantly across                              temperature settings, top-k sampling, reward models, plays
+tasks. Best-of-N and Self-Consistency perform well in                                     a crucial role in optimizing the performance of LLMs during
+knowledge-based reasoning tasks, but for complex tasks                                    inference time.
+
+                                                                                      8
+
+===== PDF p.9 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+Impact Statement                                                              M., Khlaaf, H., Sastry, G., Mishkin, P., Chan, B., Gray,
+                                                                              S., Ryder, N., Pavlov, M., Power, A., Kaiser, L., Bavar-
+This study explores the optimization of inference-time com-                   ian, M., Winter, C., Tillet, P., Such, F. P., Cummings, D.,
+putation strategies to enhance the reasoning abilities of                     Plappert, M., Chantzis, F., Barnes, E., Herbert-Voss, A.,
+LLMs. By addressing the limitations of existing methods,                      Guss, W. H., Nichol, A., Paino, A., Tezak, N., Tang,
+our findings contribute to improving LLM performance                          J., Babuschkin, I., Balaji, S., Jain, S., Saunders, W.,
+across diverse reasoning tasks, including logical reasoning,                  Hesse, C., Carr, A. N., Leike, J., Achiam, J., Misra,
+code generation, and fact verification. Our work estab-                       V., Morikawa, E., Radford, A., Knight, M., Brundage,
+lishes a comprehensive benchmark and demonstrates that                        M., Murati, M., Mayer, K., Welinder, P., McGrew, B.,
+previously overlooked techniques—such as temperature and                      Amodei, D., McCandlish, S., Sutskever, I., and Zaremba,
+top-p sampling adjustments—can significantly enhance rea-                     W. Evaluating large language models trained on code.
+soning accuracy. These advancements provide a critical                        2021.
+foundation for future research and practical applications,
+particularly in resource-constrained settings. Optimizing                   Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun, H.,
+LLMs at inference time without extensive retraining opens                     Kaiser, L., Plappert, M., Tworek, J., Hilton, J., Nakano,
+new possibilities for improving AI systems’ efficiency and                    R., et al. Training verifiers to solve math word problems.
+reliability in real-world use cases.                                          arXiv preprint arXiv:2110.14168, 2021a.
+                                                                            Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun, H.,
+References                                                                    Kaiser, L., Plappert, M., Tworek, J., Hilton, J., Nakano,
+Browne, C. B., Powley, E., Whitehouse, D., Lucas, S. M.,                      R., et al. Training verifiers to solve math word problems.
+  Cowling, P. I., Rohlfshagen, P., Tavener, S., Perez, D.,                    arXiv preprint arXiv:2110.14168, 2021b.
+  Samothrakis, S., and Colton, S. A survey of monte carlo                   Dubey, A., Jauhri, A., Pandey, A., Kadian, A., Al-Dahle,
+  tree search methods. IEEE Transactions on Computa-                         A., Letman, A., Mathur, A., Schelten, A., Yang, A., Fan,
+  tional Intelligence and AI in games, 4(1):1–43, 2012.                      A., et al. The llama 3 herd of models. arXiv preprint
+Cai, Z., Cao, M., Chen, H., Chen, K., Chen, K., Chen, X.,                     arXiv:2407.21783, 2024.
+  Chen, X., Chen, Z., Chen, Z., Chu, P., Dong, X., Duan,                    Feng, X., Wan, Z., Wen, M., McAleer, S. M., Wen, Y.,
+  H., Fan, Q., Fei, Z., Gao, Y., Ge, J., Gu, C., Gu, Y., Gui,                 Zhang, W., and Wang, J. Alphazero-like tree-search can
+  T., Guo, A., Guo, Q., He, C., Hu, Y., Huang, T., Jiang, T.,                 guide large language model decoding and training. arXiv
+  Jiao, P., Jin, Z., Lei, Z., Li, J., Li, J., Li, L., Li, S., Li, W.,         preprint arXiv:2309.17179, 2023a.
+  Li, Y., Liu, H., Liu, J., Hong, J., Liu, K., Liu, K., Liu, X.,
+  Lv, C., Lv, H., Lv, K., Ma, L., Ma, R., Ma, Z., Ning, W.,                 Feng, X., Wan, Z., Wen, M., McAleer, S. M., Wen, Y.,
+  Ouyang, L., Qiu, J., Qu, Y., Shang, F., Shao, Y., Song, D.,                 Zhang, W., and Wang, J. Alphazero-like tree-search can
+  Song, Z., Sui, Z., Sun, P., Sun, Y., Tang, H., Wang, B.,                    guide large language model decoding and training. arXiv
+  Wang, G., Wang, J., Wang, J., Wang, R., Wang, Y., Wang,                     preprint arXiv:2309.17179, 2023b.
+  Z., Wei, X., Weng, Q., Wu, F., Xiong, Y., Xu, C., Xu,
+  R., Yan, H., Yan, Y., Yang, X., Ye, H., Ying, H., Yu, J.,                 Gao, L., Madaan, A., Zhou, S., Alon, U., Liu, P., Yang, Y.,
+  Yu, J., Zang, Y., Zhang, C., Zhang, L., Zhang, P., Zhang,                   Callan, J., and Neubig, G. Pal: Program-aided language
+  P., Zhang, R., Zhang, S., Zhang, S., Zhang, W., Zhang,                      models. arXiv preprint arXiv:2211.10435, 2022.
+  W., Zhang, X., Zhang, X., Zhao, H., Zhao, Q., Zhao, X.,                   Hendrycks, D., Burns, C., Kadavath, S., Arora, A., Basart,
+  Zhou, F., Zhou, Z., Zhuo, J., Zou, Y., Qiu, X., Qiao, Y.,                   S., Tang, E., Song, D., and Steinhardt, J. Measuring math-
+  and Lin, D. Internlm2 technical report, 2024.                               ematical problem solving with the math dataset. arXiv
+                                                                              preprint arXiv:2103.03874, 2021.
+Chen, C., Liu, Z., Du, C., Pang, T., Liu, Q., Sinha,
+  A., Varakantham, P., and Lin, M. Bootstrapping lan-                       Hinton, G. Distilling the knowledge in a neural network.
+  guage models with dpo implicit rewards. arXiv preprint                      arXiv preprint arXiv:1503.02531, 2015.
+  arXiv:2406.09760, 2024a.
+                                                                            Holtzman, A., Buys, J., Du, L., Forbes, M., and Choi, Y. The
+Chen, G., Liao, M., Li, C., and Fan, K. Alphamath almost                      curious case of neural text degeneration. arXiv preprint
+  zero: process supervision without process. arXiv preprint                   arXiv:1904.09751, 2019.
+  arXiv:2405.03553, 2024b.
+                                                                            Huang, J., Chen, X., Mishra, S., Zheng, H. S., Yu,
+Chen, M., Tworek, J., Jun, H., Yuan, Q., de Oliveira Pinto,                  A. W., Song, X., and Zhou, D. Large language mod-
+  H. P., Kaplan, J., Edwards, H., Burda, Y., Joseph, N.,                      els cannot self-correct reasoning yet. arXiv preprint
+  Brockman, G., Ray, A., Puri, R., Krueger, G., Petrov,                       arXiv:2310.01798, 2023.
+
+                                                                        9
+
+===== PDF p.10 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+Jiang, A., Sablayrolles, A., Mensch, A., Bamford, C., Chap-           Snell, C., Lee, J., Xu, K., and Kumar, A. Scaling llm test-
+   lot, D., de las Casas, D., Bressand, F., Lengyel, G., Lam-           time compute optimally can be more effective than scal-
+   ple, G., Saulnier, L., et al. Mistral 7b (2023). arXiv               ing model parameters. arXiv preprint arXiv:2408.03314,
+   preprint arXiv:2310.06825, 2023.                                     2024.
+
+Langley, P. Crafting papers on machine learning. In Langley,          Thorne, J., Vlachos, A., Christodoulopoulos, C., and Mittal,
+  P. (ed.), Proceedings of the 17th International Conference            A. FEVER: a large-scale dataset for fact extraction and
+  on Machine Learning (ICML 2000), pp. 1207–1216, Stan-                 VERification. In NAACL-HLT, 2018.
+  ford, CA, 2000. Morgan Kaufmann.
+                                                                      Tian, Y., Peng, B., Song, L., Jin, L., Yu, D., Mi, H.,
+Liu, F., Feng, Y., Xu, Z., Su, L., Ma, X., Yin, D., and                 and Yu, D. Toward self-improvement of llms via
+  Liu, H. Jailjudge: A comprehensive jailbreak judge                    imagination, searching, and criticizing. arXiv preprint
+  benchmark with multi-agent enhanced explanation eval-                 arXiv:2404.12253, 2024.
+  uation framework, 2024a. URL https://arxiv.                         Wang, C., Deng, Y., Lyu, Z., Zeng, L., He, J., Yan, S., and
+  org/abs/2410.12855.                                                  An, B. Q*: Improving multi-step reasoning for llms with
+                                                                       deliberative planning. arXiv preprint arXiv:2406.14283,
+Liu, F., Xu, Z., and Liu, H. Adversarial tuning: Defend-
+                                                                       2024.
+  ing against jailbreak attacks for llms. arXiv preprint
+  arXiv:2406.06622, 2024b.                                            Wang, X., Wei, J., Schuurmans, D., Le, Q., Chi, E., Narang,
+                                                                       S., Chowdhery, A., and Zhou, D. Self-consistency im-
+Liu, J., Cohen, A., Pasunuru, R., Choi, Y., Hajishirzi, H.,            proves chain of thought reasoning in language models.
+  and Celikyilmaz, A. Making ppo even better: Value-                   arXiv preprint arXiv:2203.11171, 2022.
+  guided monte-carlo tree search decoding. arXiv preprint
+  arXiv:2309.15028, 2023.                                             Wei, J., Wang, X., Schuurmans, D., Bosma, M., Xia, F., Chi,
+                                                                       E., Le, Q. V., Zhou, D., et al. Chain-of-thought prompting
+Liu, Q., Zheng, X., Muennighoff, N., Zeng, G., Dou, L.,                elicits reasoning in large language models. Advances in
+  Pang, T., Jiang, J., and Lin, M. Regmix: Data mixture                neural information processing systems, 35:24824–24837,
+  as regression for language model pre-training. arXiv                 2022.
+  preprint arXiv:2407.01492, 2024c.
+                                                                      Wu, J., Feng, M., Zhang, S., Che, F., Wen, Z., and Tao,
+Madaan, A., Tandon, N., Gupta, P., Hallinan, S., Gao,                  J. Beyond examples: High-level automated reasoning
+ L., Wiegreffe, S., Alon, U., Dziri, N., Prabhumoye, S.,               paradigm in in-context learning via mcts. arXiv preprint
+ Yang, Y., et al. Self-refine: Iterative refinement with self-         arXiv:2411.18478, 2024a.
+ feedback. Advances in Neural Information Processing
+ Systems, 36, 2024.                                                   Wu, Z., Huang, S., Zhou, Z., Ying, H., Wang, J., Lin, D., and
+                                                                       Chen, K. Internlm2.5-stepprover: Advancing automated
+Motwani, S. R., Smith, C., Das, R. J., Rybchuk, M., Torr,              theorem proving via expert iteration on large-scale lean
+ P. H., Laptev, I., Pizzati, F., Clark, R., and de Witt, C. S.         problems, 2024b. URL https://arxiv.org/abs/
+ Malt: Improving reasoning with multi-agent llm training.              2410.15700.
+ arXiv preprint arXiv:2412.01928, 2024.
+                                                                      Xi, Z., Yang, D., Huang, J., Tang, J., Li, G., Ding, Y., He,
+Ott, M., Auli, M., Grangier, D., and Ranzato, M. Analyzing              W., Hong, B., Do, S., Zhan, W., et al. Enhancing llm
+  uncertainty in neural machine translation. In Interna-                reasoning via critique models with test-time and training-
+  tional Conference on Machine Learning, pp. 3956–3965.                 time supervision. arXiv preprint arXiv:2411.16579, 2024.
+  PMLR, 2018.                                                         Yang, A., Yang, B., Zhang, B., Hui, B., Zheng, B., Yu,
+                                                                        B., Li, C., Liu, D., Huang, F., Wei, H., et al. Qwen2. 5
+Press, O., Zhang, M., Min, S., Schmidt, L., Smith, N. A.,
+                                                                        technical report. arXiv preprint arXiv:2412.15115, 2024.
+  and Lewis, M. Measuring and narrowing the com-
+  positionality gap in language models. arXiv preprint                Yang, Z., Qi, P., Zhang, S., Bengio, Y., Cohen, W. W.,
+  arXiv:2210.03350, 2022.                                               Salakhutdinov, R., and Manning, C. D. HotpotQA: A
+                                                                        dataset for diverse, explainable multi-hop question an-
+Saparov, A. and He, H. Language models are greedy rea-                  swering. In Conference on Empirical Methods in Natural
+  soners: A systematic formal analysis of chain-of-thought.             Language Processing (EMNLP), 2018.
+  In The Eleventh International Conference on Learning
+  Representations, 2023. URL https://openreview.                      Yao, S., Yu, D., Zhao, J., Shafran, I., Griffiths, T., Cao, Y.,
+  net/forum?id=qFVVBzXxR2V.                                             and Narasimhan, K. Tree of thoughts: Deliberate problem
+
+                                                                 10
+
+===== PDF p.11 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+  solving with large language models. Advances in Neural
+  Information Processing Systems, 36, 2024.
+Zhang, L., Hosseini, A., Bansal, H., Kazemi, M., Ku-
+  mar, A., and Agarwal, R. Generative verifiers: Re-
+  ward modeling as next-token prediction. arXiv preprint
+  arXiv:2408.15240, 2024a.
+
+Zhang, X., Du, C., Pang, T., Liu, Q., Gao, W., and
+  Lin, M. Chain of preference optimization: Improv-
+  ing chain-of-thought reasoning in llms. arXiv preprint
+  arXiv:2406.09136, 2024b.
+Zhang, Z., Zheng, C., Wu, Y., Zhang, B., Lin, R., Yu, B.,
+  Liu, D., Zhou, J., and Lin, J. The lessons of developing
+  process reward models in mathematical reasoning. arXiv
+  preprint arXiv:2501.07301, 2025.
+Zheng, C., Zhang, Z., Zhang, B., Lin, R., Lu, K., Yu, B.,
+  Liu, D., Zhou, J., and Lin, J. ProcessBench: identifying
+  process errors in mathematical reasoning. arXiv preprint
+  arXiv:2412.06559, 2024.
+Zhou, D., Schärli, N., Hou, L., Wei, J., Scales, N., Wang,
+  X., Schuurmans, D., Cui, C., Bousquet, O., Le, Q., et al.
+  Least-to-most prompting enables complex reasoning in
+  large language models. arXiv preprint arXiv:2205.10625,
+  2022.
+
+
+
+
+                                                              11
+
+===== PDF p.12 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+A. Experiments Setup
+ In this section, we provide a more detailed explanation of the experimental setup. Our objective is to evaluate the impact of
+previously overlooked techniques on the performance of inference-time computation methods. These methods typically
+consist of two primary steps: (1) generating candidate solutions using specified parameters (e.g., prompt type, temperature,
+and top-p), and (2) selecting the optimal solution based on predefined reward signals (e.g., self-evaluation strategies, reward
+types, and processes).
+Default Configuration. In our default setup, we employ the Best-of-N inference-time computation, where: The number
+of candidate solutions N is set to 32. The temperature (τ ) is set to 0.7, which introduces moderate stochasticity during
+candidate generation. The nucleus sampling parameter, top-p, is configured at 0.9, ensuring diversity by sampling from
+the top 90% cumulative probability distribution of the predicted tokens. We utilize a Chain-of-Thought (CoT) instruction
+prompt type to facilitate step-by-step reasoning for more complex tasks. Unless explicitly modified, all experiments adhere
+to this baseline configuration.
+Reward Model. Specifically, for process and result rewards, we employ a prompt-driven approach to guide QwQ-32B,
+a reasoning model, in evaluating candidate solutions. The prompts used are the process evaluation prompt and the result
+evaluation prompt, which refer to the evaluation of step-level solutions and the final results, respectively. For RLHF and
+proof-critical rewards, which are numerical reward models, scores are directly assigned to candidate solutions. RLHF
+Reward: Based on InternLM2-Chat-1.8B-SFT (Cai et al., 2024), trained on over 2.4 million preference samples. It
+balances performance, helpfulness, and alignment. Proof-Critical Reward Derived from the InternLM2-5-Step-Prover-Critic
+model (Wu et al., 2024b), which excels in multiple benchmarks.
+
+   Process-Evaluation.
+   Evaluate whether the language model can decompose the question into relevant sub-questions and assess whether
+   this decomposition aids in answering the original question, either partially or directly. The evaluation result will be
+   classified as ”Sure,” ”Likely,” or ”Impossible” based on the effectiveness of the decomposition.
+   Evaluation Process: 1. Relevance of Sub-Questions: Determine if the sub-questions are directly related to solving the
+   original question. 2. Effectiveness of Decomposition: Assess whether the sub-questions, when answered, lead to a
+   comprehensive response to the original question.
+   Evaluation Outcomes: Sure: The model successfully decomposes the question into relevant sub-questions, each
+   structured to contribute to an accurate final answer.Likely: The model decomposes the question into relevant sub-
+   questions, but minor improvements in structure or relevance may enhance the response. Impossible: The model fails
+   to decompose the question effectively or the sub-questions are not relevant to the original question.
+
+   Result-Evaluation.
+   The Result-Evaluation prompt evaluates the final outcome of the language model’s reasoning process based on the
+   accuracy, clarity, and completeness of its answer. Each evaluation is categorized as ”Sure,” ”Likely,” or ”Impossible.”
+   The result is judged by verifying whether the language model’s final answer is both directly relevant and valid in
+   response to the question posed. The process involves reviewing whether the model’s conclusion is definitive and
+   supported by logical reasoning. If the answer is clear and unambiguous, it is marked as ”Sure.” If there are minor
+   ambiguities, it is categorized as ”Likely.” If the answer is incorrect or irrelevant, it is deemed ”Impossible.”
+
+Tasks. Our research focuses on the following reasoning tasks: (1) Arithmetic Reasoning: GSM8K: A dataset with grade
+school math word problems requiring 2 to 8 calculation steps using basic arithmetic operations. GSM-Hard: A harder
+variant of GSM8K with larger, less common numbers, increasing the challenge of arithmetic reasoning. (2) Complex
+Mathematical Reasoning: MATH Dataset: A dataset covering advanced topics like algebra, geometry, and calculus.
+Each problem includes detailed solutions to evaluate both final answers and problem-solving processes. We use the MATH
+500 to test the complex mathematical reasoning ability of LLM. (3) Logical Reasoning: ProntoQA: Measures logical
+deduction and inference, requiring the application of logical principles to reach correct conclusions. (4) Code Generation:
+HumanEval: A benchmark for generating functional code snippets, with programming problems that include prompts and
+test cases to verify correctness. (5) Question Answering: Bamboogle: Evaluates diverse question-answering performance
+across various topics, testing comprehension and accurate responses. (6) Fact Verification: FEVER: Assesses the ability
+to verify factual claims using a document corpus, promoting fact-checking system development. (7) Common Sense
+
+                                                             12
+
+===== PDF p.13 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+                                                                                   IO        CoT                     Reflect CoT
+                             Ferver                                      GSM-Hard                                             HotpotQA                                              PrOntoQA
+  Accuracy (N=32)
+
+
+
+
+                                              Accuracy (N=32)
+
+
+
+
+                                                                                                   Accuracy (N=32)
+
+
+
+
+                                                                                                                                                       Accuracy (N=32)
+                70%                                         60%                                                  70%                                                 100%
+                65%                                         50%                                                  60%
+                60%                                         40%                                                  50%                                                     80%
+                                                                                                                 40%
+                55%                                         30%                                                  30%
+                50%                                         20%                                                                                                          60%
+                                                                                                                 20%
+                             7B 7B 8B 0B 2B                              7B 7B 8B 0B 2B                                       7B 7B 8B 0B 2B                                          7B 7B 8B 0B 2B
+                         tral en ma a7 n7                            tral Qwen Llama lama7 wen7                           tral Qwen Llama lama7 wen7                              tral en ma a7 n7
+                      Mis Qw Lla Llam Qwe                         Mis               L     Q                            Mis               L     Q                               Mis Qw Lla Llam Qwe
+Figure 9: Comparative accuracy of different models (Mistral7B, Qwen7B, Llama88, Llama70B, and Qwen72B) across four
+datasets (Ferver, GSM-Hard, HotpotQA, and PrOntoQA) using three instruction prompts: Input-Output (IO), Chain-of-
+Thought (CoT), and Reflect Chain-of-Thought (Reflect CoT).
+
+Reasoning: HotpotQA: Features multi-hop questions requiring reasoning across multiple facts, testing common sense
+knowledge and the ability to link disparate information.
+Instruction Prompt Type. Different instruction prompts can guide an LLM to generate distinct reasoning paths. Specifically,
+Input-Output (IO) prompts directly provide the answer, whereas Chain-of-Thought (CoT) prompts encourage the LLM to
+reason step by step. Recent research (Huang et al., 2023) suggests that self-correction or self-reflection mechanisms are
+often ineffective when LLMs operate without external feedback under certain prompt types. We further explores the impact
+of various prompt types, including IO prompts, standard Chain-of-Thought (CoT) prompts, and reflection-based CoT.
+
+    Input-Output (IO) Prompt.
+
+    The Input-Output (IO) Prompt directly answers a given question without intermediate reasoning steps. It is designed
+    to generate concise and accurate responses, ending with the phrase ”so the final answer is:”. This prompt structure is
+    particularly suitable for straightforward queries where minimal context or explanation is required.
+
+    Chain-of-Thought (CoT) Prompt.
+
+    The Chain-of-Thought (CoT) Prompt guides the model to answer questions step-by-step, breaking down the reasoning
+    process into intermediate steps before concluding with the final answer. For instance, when comparing the lifespans of
+    Theodor Haecker and Harry Vaughan Watkins, the CoT prompt explicitly calculates their ages step-by-step before
+    determining the longer-lived individual. This structured approach enhances reasoning transparency and aligns the
+    response with logical steps.
+
+    Reflect CoT.
+    The Reflect Chain-of-Thought (Reflect CoT) prompt introduces a structured reasoning approach where each step in
+    answering a question is followed by a reflection to verify its accuracy and reliability. For example, when comparing
+    the lifespans of Theodor Haecker and Harry Vaughan Watkins, the process involves step-by-step reasoning to establish
+    each individual’s age at death. After each step, a ”Reflection” line is used to ensure the validity of the information,
+    such as verifying directly provided ages or confirming the consistency of the comparison. The final conclusion,
+    supported by reflections, ensures a reliable and transparent reasoning process.
+
+
+B. Other Experiments
+  Instruction Prompt Type. The experimental results on additional datasets reveal a consistent finding: the type of
+instruction prompt significantly influences the inference-time computation of LLM reasoning, as illustrated in Figure 9.
+Tempature. The experimental results on additional datasets reveal a consistent finding: the type of instruction prompt
+significantly influences the inference-time computation of LLM reasoning, as illustrated in Figure 10.
+Top-p. We further present the ablation study on top-p applied to other reasoning tasks. The experimental results are shown in
+Figure 11. The impact of top-p is significant; generally, as top-p increases, the LLM’s reasoning performance also improves,
+with optimal performance observed at 0.9 for most reasoning tasks.
+
+                                                                                                  13
+
+===== PDF p.14 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+                                            Mistral-7B                 Qwen-7B            Llama-8B                        Llama-70B        Qwen-72B
+
+                70%          Fever                                   GSM-Hard                                 70%          HotpotQA                                      PrOntoQA
+  Accuracy (N=32)
+
+
+
+
+                                             Accuracy (N=32)
+
+
+
+
+                                                                                                Accuracy (N=32)
+
+
+
+
+                                                                                                                                               Accuracy (N=32)
+                                                           50%                                                                                               100%
+                60%                                        40%                                                60%                                                90%
+                50%                                        30%                                                50%                                                80%
+                                                           20%                                                                                                   70%
+                40%0.6 0.7 0.8 0.9 1.0                           0.6 0.7 0.8 0.9 1.0                          40%0.6 0.7 0.8 0.9 1.0                                0.6 0.7 0.8 0.9 1.0
+                         Temperature                                Temperature                                           Temperature                                  Temperature
+Figure 10: Accuracy vs. temperature for different models (Mistral7B, Qwen7B, Llama88, Llama70B, and Qwen72B) across
+four datasets (Ferver, GSM-Hard, HotpotQA, and PrOntoQA), with temperature settings ranging from 0.6 to 1.0.
+
+
+
+                             Fever                         60%     GSM-Hard                                                HotpotQA                                      PrOntoQA
+  Accuracy (N=32)
+
+
+
+
+                                             Accuracy (N=32)
+
+
+
+
+                                                                                                Accuracy (N=32)
+
+
+
+
+                                                                                                                                               Accuracy (N=32)
+                70%                                                                                           60%                                            100%
+                65%                                        50%
+                                                                                                                                                                 90%
+                60%                                        40%                                                50%
+                                                                                                                                                                 80%
+                                                           30%
+                55%                                                                                           40%                                                70%
+                      0.6 0.7 0.8 0.9 1.0                  20%0.6 0.7 0.8 0.9 1.0                                   0.6 0.7 0.8 0.9 1.0                             0.6 0.7 0.8 0.9 1.0
+                             Top-p                                       Top-p                                               Top-p                                         Top-p
+Figure 11: Accuracy vs. Top-p for different models (Mistral7B, Qwen7B, Llama88, Llama70B, and Qwen72B) across four
+datasets (Ferver, GSM-Hard, HotpotQA, and PrOntoQA), with Top-p values ranging from 0.6 to 1.0.
+
+
+Self-Evaluation. We further present the self-evaluation conducted on additional datasets. Figure 12 illustrates the
+experimental results, which reveal that the LLM still cannot effectively distinguish the correct solution.
+Reward Type. Figure 13 further reports the impact of reward types on other datasets, confirming the same findings.
+Specifically, for knowledge-based reasoning, certain reward models can substantially improve performance. In contrast,
+for more complex reasoning tasks, such as PrOntoQA, the LLM-as-Judge process reward provides a more significant
+performance boost.
+Performance Inflation with Reward Model. Scaling test-time computation with reward models presents complexities.
+Figure 14 reports that the reward model does not perform consistently across all cases during scaling on other datasets. For
+example, in the challenging MATH task, the proof-critical reward model can lead to a decrease in performance rather than a
+progressive improvement. This inflation of LLM reasoning performance can be attributed to the generalization issues of the
+reward model, as reported in (Zheng et al., 2024; Zhang et al., 2025). Currently, the reward model does not perform well
+across all tasks.
+Combination of Tricks. Table 4 further investigates the combination of selected useful techniques, including prompt type,
+temperature, top-p, and the reward model on Qwen2.5-7B. As demonstrated in Table 4, the improvements are not always
+additive when combining different techniques, although methods such as prompt type, temperature, and reward models can
+be individually effective. For example, as shown in Tables 4 using Reflect CoT with a temperature of 0.8 and a top-p of 0.9
+does not lead to improvements for the Bamboogle and MATH tasks. These results suggest that the careful selection and
+combination of techniques can enhance performance, though the impact may vary across different models and tasks.
+
+                    Table 4: Combination of Inference-Time Tricks on Qwen2.5-7B. We highlight optimal trick combinations.
+
+                                                       Prompt               Reward              Temp              Top-p    Bamboogle   MATH
+                                                       IO                   Majority                0.7             0.9      42.7       23.8
+                                                      CoT                   Majority                0.7             0.9      53.2       72.4
+                                                      CoT                   Majority                0.8             0.9      53.2       73.8
+                                                      CoT                   Majority                0.6             0.9      51.6       74.0
+                                                      CoT                   Majority                0.7             1.0      52.4       73.4
+                                                      CoT                   Majority                0.7             0.8      50.8       73.8
+                                                      CoT                    Random                 0.7             0.9      45.9       63.2
+                                                      CoT            Self-Process-Evaluation        0.7             0.9      45.2       62.8
+                                                      CoT            Self-Result-Evaluation         0.7             0.9      46.7       66.4
+                                                  Reflect CoT               Majority                0.7             0.9      49.2       74.6
+                                                  Reflect CoT               Majority                0.8             0.9      49.2       69.2
+                                                  Reflect CoT               Majority                0.8             0.9      49.2       69.2
+
+
+                                                                                               14
+
+===== PDF p.15 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+                                          Majority                       Random      Self-Process-Evaluation                Self-Result-Evaluation
+
+                             Fever                                         GSM-Hard                                     HotpotQA                                        PrOntoQA
+  Accuracy (N=32)
+
+
+
+
+                                               Accuracy (N=32)
+
+
+
+
+                                                                                               Accuracy (N=32)
+
+
+
+
+                                                                                                                                           Accuracy (N=32)
+                65%                                          60%                                             60%                                         100%
+
+                60%                                          40%                                             50%                                             90%
+                55%                                          20%                                             40%                                             80%
+                50%                                              0%                                          30%                                             70%
+                             7B 7B 8B 0B 2B                                  7B 7B 8B 0B 2B                               7B 7B 8B 0B 2B                                  7B 7B 8B 0B 2B
+                         tral en ma a7 n7                                tral en ma a7 n7                             tral en ma a7 n7                                tral en ma a7 n7
+                      Mis Qw Lla Llam Qwe                             Mis Qw Lla Llam Qwe                          Mis Qw Lla Llam Qwe                             Mis Qw Lla Llam Qwe
+
+
+Figure 12: Accuracy (%) across four benchmark tasks with different evaluation strategies The results shows that Self-
+evaluation often fails to assess solution quality effectively.
+                                              Majority                    Proof-Critical Reward                  RLHF Reward       LLM-as-Judge
+
+                             Fever                                         GSM-Hard                                     HotpotQA                                        PrOntoQA
+  Accuracy (N=32)
+
+
+
+
+                                               Accuracy (N=32)
+
+
+
+
+                                                                                               Accuracy (N=32)
+                70%                                          60%                                             70%
+
+
+
+
+                                                                                                                                           Pass@1 (N=32)
+                                                                                                                                                         100%
+                60%                                          50%                                             60%
+                                                             40%                                                                                             90%
+                50%                                                                                          50%
+                                                             30%                                                                                             80%
+                40%                                          20%                                             40%
+                30%                                          10%                                             30%                                             70%
+                             7B 7B 8B 0B 2B                                  7B 7B 8B 0B 2B                               7B 7B 8B 0B 2B                                  7B 7B 8B 0B 2B
+                         tral en ma a7 n7                                tral en ma a7 n7                             tral en ma a7 n7                                tral en ma a7 n7
+                      Mis Qw Lla Llam Qwe                             Mis Qw Lla Llam Qwe                          Mis Qw Lla Llam Qwe                             Mis Qw Lla Llam Qwe
+
+
+                    Figure 13: Comparison of different reward models across benchmarks showcasing their impact on accuracy.
+
+
+Main experiments of Inference-time computation methods. Figure 15 illustrates how performance varies with increased
+computational consumption. As token usage rises, Self-Consistency and Self-Refine achieve higher accuracy than other
+methods, while Step-level Best-of-N, and MCTS show slower improvements. In contrast, Beam Search exhibits minimal
+gains, indicating lower token efficiency. Notably, the GSM8K task demonstrates a sharper accuracy increase with higher
+token consumption compared to MATH500, underscoring the task-specific nature of each method’s performance. Addition-
+ally, we observe some performance inflation with increased computational consumption, attributed to the generalization
+limitations of the reward model, which does not perform well on this task.
+
+
+
+
+                                                                                              15
+
+===== PDF p.16 =====
+Bag of Tricks for Inference-time Computation of LLM Reasoning
+
+
+
+
+                                            Proof-Critical Reward                          RLHF Reward                LLM-as-Judge
+                      GSM8K                                    MATH500                                   HumanEval                          Bamboogle
+         90%                                        70%                                           80%                                55%
+  Accuracy
+
+
+
+
+                                             Accuracy
+
+
+
+
+                                                                                                                              Accuracy
+                                                                                           Pass@1
+                                                    65%
+                                                                                                  75%                                50%
+                                                    60%
+         85%                                        55%                                           70%                                45%
+            1.0 2.0 4.0 8.0 16.0                       1.0 2.0 4.0 8.0 16.0                          1.0 2.0 4.0 8.0 16.0               1.0 2.0 4.0 8.0 16.0
+                         N                                           N                                           N                               N
+
+Figure 14: Scaling test-time performance with reward models (Proof-Critical, RLHF, LLM-as-Judge) across benchmarks,
+highlighting inconsistent trends and generalization issues, with notable declines in challenging tasks like MATH500 On
+Qwen-2.5-7B.
+
+
+
+
+                                                  Best-of-N                       Step-level Best-of-N               Beam Search
+                                                  Self-Consistency                Self-Refine                        MCTS
+
+         90%         GSM8K                          60%        MATH500                            70%    HumanEval                   60%    Bamboogle
+         85%                                        50%                                           60%                                55%
+                                                                                           Accuracy
+
+
+
+
+                                                                                                                              Accuracy
+  Accuracy
+
+
+
+
+                                             Accuracy
+
+
+
+
+         80%                                        40%                                           50%                                50%
+         75%                                                                                      40%                                45%
+         70%                                        30%                                           30%                                40%
+         65%                                        20%                                           20%                                35%
+         60%   500    1000 1500 2000 2500           10%   1000 2000 3000 4000 5000 6000           10%      103          104          30%        103       104
+                     # Tokens                                  # Tokens                                    # Tokens                          # Tokens
+
+Figure 15: Performance versus token consumption across benchmarks for decoding strategies (Self-Consistency, Self-Refine,
+Best-of-N, Greedy, Beam Search, MCTS), highlighting task-specific trends and token efficiency disparities, with GSM8K
+showing sharp accuracy gains and MCTS lagging in improvement
+
+
+
+
+                                                                                          16
