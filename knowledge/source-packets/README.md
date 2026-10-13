@@ -37,6 +37,11 @@
 | 论文 | 方向 | 来源包 |
 | --- | --- | --- |
 | How Well Do Agentic Skills Work in the Wild: Benchmarking LLM Skill Usage in Realistic Settings | 指令与 Skill | [skill-usage-2604.04323](skill-usage-2604.04323/) |
+| Inducing Programmatic Skills for Agentic Tasks | 指令与 Skill | [agent-skill-induction-2504.06821](agent-skill-induction-2504.06821/) |
+| ACON: Optimizing Context Compression for Long-horizon LLM Agents | 上下文管理与压缩 | [acon-2510.00615](acon-2510.00615/) |
+| AgentFold: Long-Horizon Web Agents with Proactive Context Management | 上下文管理与压缩 | [agentfold-2510.24699](agentfold-2510.24699/) |
+| FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance | 模型选择与资源分配 | [frugalgpt-2305.05176](frugalgpt-2305.05176/) |
+| RouteLLM: Learning to Route LLMs with Preference Data | 模型选择与资源分配 | [routellm-2406.18665](routellm-2406.18665/) |
 | AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework | 子 Agent 与多 Agent 协作 | [autogen-2308.08155](autogen-2308.08155/) |
 | MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework | 子 Agent 与多 Agent 协作 | [metagpt-2308.00352](metagpt-2308.00352/) |
 | SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering | 运行观测、Trace 与集成接口 | [swe-agent-2405.15793](swe-agent-2405.15793/) |
