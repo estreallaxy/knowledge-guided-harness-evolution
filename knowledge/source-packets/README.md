@@ -63,6 +63,48 @@
 | StateFork | 会话与环境状态管理 | [statefork-2609.38648](statefork-2609.38648/) |
 
 
+## 近两年顶会与官方代码来源包
+
+| 论文 | 录用 | 覆盖方向 | 来源包 |
+| --- | --- | --- | --- |
+| MAGIC: Generating Self-Correction Guideline for In-Context Text-to-SQL | AAAI 2025 | 指令与 Skill、长期记忆与经验复用、容错与故障恢复、执行循环与调度、规划与任务进度管理 | [magic-2406.12692](magic-2406.12692/) |
+| ICL-Router: In-Context Learned Model Representations for LLM Routing | AAAI 2026 | 模型选择与资源分配 | [icl-router-2510.09719](icl-router-2510.09719/) |
+| LLM Collaboration with Multi-Agent Reinforcement Learning | AAAI 2026 | 规划与任务进度管理、会话与环境状态管理、子 Agent 与多 Agent 协作 | [comlrl-2508.04652](comlrl-2508.04652/) |
+| 500xCompressor: Generalized Prompt Compression for Large Language Models | ACL 2025 | 指令与 Skill、上下文管理与压缩 | [500xcompressor-2408.03094](500xcompressor-2408.03094/) |
+| Agent-RewardBench: Towards a Unified Benchmark for Reward Modeling across Perception, Planning, and Safety in Real-World Multimodal Agents | ACL 2025 | 权限、审批与运行隔离、验证、评估与反馈 | [agent-rewardbench-2506.21252](agent-rewardbench-2506.21252/) |
+| AgentDropout: Dynamic Agent Elimination for Token-Efficient and High-Performance LLM-Based Multi-Agent Collaboration | ACL 2025 | 指令与 Skill、上下文管理与压缩、执行循环与调度、规划与任务进度管理、模型选择与资源分配、子 Agent 与多 Agent 协作、扩展机制与生命周期钩子 | [agentdropout-2503.18891](agentdropout-2503.18891/) |
+| DAC: A Dynamic Attention-aware Approach for Task-Agnostic Prompt Compression | ACL 2025 | 上下文管理与压缩 | [dac-2507.11942](dac-2507.11942/) |
+| IRT-Router: Effective and Interpretable Multi-LLM Routing via Item Response Theory | ACL 2025 | 模型选择与资源分配 | [irt-router-2506.01048](irt-router-2506.01048/) |
+| LLM Agents Making Agent Tools | ACL 2025 | 指令与 Skill、工具与环境交互、执行循环与调度、扩展机制与生命周期钩子 | [toolmaker-2502.11705](toolmaker-2502.11705/) |
+| MasRouter: Learning to Route LLMs for Multi-Agent Systems | ACL 2025 | 模型选择与资源分配、子 Agent 与多 Agent 协作、扩展机制与生命周期钩子 | [masrouter-2502.11133](masrouter-2502.11133/) |
+| MultiAgentBench : Evaluating the Collaboration and Competition of LLM agents | ACL 2025 | 执行循环与调度、规划与任务进度管理、会话与环境状态管理、子 Agent 与多 Agent 协作、扩展机制与生命周期钩子、运行观测、Trace 与集成接口、验证、评估与反馈 | [multiagentbench-2503.01935](multiagentbench-2503.01935/) |
+| On the Limit of Language Models as Planning Formalizers | ACL 2025 | 规划与任务进度管理 | [llm-planning-formalizers-2412.09879](llm-planning-formalizers-2412.09879/) |
+| INFERENCEDYNAMICS: Efficient Routing Across LLMs through Structured Capability and Knowledge Profiling | ACL 2026 | 指令与 Skill、模型选择与资源分配 | [inference-dynamics-2505.16303](inference-dynamics-2505.16303/) |
+| Interactive Debugging and Steering of Multi-Agent AI Systems | CHI 2025 | 长期记忆与经验复用、容错与故障恢复、会话与环境状态管理、子 Agent 与多 Agent 协作、扩展机制与生命周期钩子、运行观测、Trace 与集成接口 | [agdebugger-2503.02068](agdebugger-2503.02068/) |
+| Collab-Overcooked: Benchmarking and Evaluating Large Language Models as Collaborative Agents | EMNLP 2025 | 长期记忆与经验复用、子 Agent 与多 Agent 协作、验证、评估与反馈 | [collab-overcooked-2502.20073](collab-overcooked-2502.20073/) |
+| GuardAgent: Safeguard LLM Agents via Knowledge-Enabled Reasoning | ICML 2025 | 指令与 Skill、工具与环境交互、长期记忆与经验复用、容错与故障恢复、规划与任务进度管理、权限、审批与运行隔离 | [guardagent-2406.09187](guardagent-2406.09187/) |
+| Advancing Tool-Augmented Large Language Models via Meta-Verification and Reflection Learning | KDD 2025 | 指令与 Skill、工具与环境交互、执行循环与调度、运行观测、Trace 与集成接口 | [tool-mvr-2506.04625](tool-mvr-2506.04625/) |
+| GUI-Robust: A Comprehensive Dataset for Testing GUI Agent Robustness in Real-World Anomalies | KDD 2026 | 工具与环境交互、上下文管理与压缩、容错与故障恢复、会话与环境状态管理、权限、审批与运行隔离、运行观测、Trace 与集成接口 | [gui-robust-2506.14477](gui-robust-2506.14477/) |
+| Thought-Augmented Planning for LLM-Powered Interactive Recommender Agent | KDD 2026 | 长期记忆与经验复用、规划与任务进度管理 | [taira-2506.23485](taira-2506.23485/) |
+| AgentSense: Benchmarking Social Intelligence of Language Agents through Interactive Scenarios | NAACL 2025 | 长期记忆与经验复用、子 Agent 与多 Agent 协作、验证、评估与反馈 | [agentsense-2410.19346](agentsense-2410.19346/) |
+| Benchmarking Failures in Tool-Augmented Language Models | NAACL 2025 | 工具与环境交互、容错与故障恢复、权限、审批与运行隔离、运行观测、Trace 与集成接口、验证、评估与反馈 | [fail-talms-2503.14227](fail-talms-2503.14227/) |
+| EASYTOOL: Enhancing LLM-based Agents with Concise Tool Instruction | NAACL 2025 | 指令与 Skill、工具与环境交互、上下文管理与压缩、扩展机制与生命周期钩子 | [easytool-2401.06201](easytool-2401.06201/) |
+| Hello Again! LLM-powered Personalized Agent for Long-term Dialogue | NAACL 2025 | 上下文管理与压缩、长期记忆与经验复用、会话与环境状态管理 | [hello-again-2406.05925](hello-again-2406.05925/) |
+| Revealing the Barriers of Language Agents in Planning | NAACL 2025 | 规划与任务进度管理 | [agent-planning-barriers-2410.12409](agent-planning-barriers-2410.12409/) |
+| AgentDojo: A Dynamic Environment to Evaluate Prompt Injection Attacks and Defenses for LLM Agents | NeurIPS 2024 | 工具与环境交互、容错与故障恢复、执行循环与调度、会话与环境状态管理、权限、审批与运行隔离、扩展机制与生命周期钩子、运行观测、Trace 与集成接口、验证、评估与反馈 | [agentdojo-2406.13352](agentdojo-2406.13352/) |
+| SGLang: Efficient Execution of Structured Language Model Programs | NeurIPS 2024 | 上下文管理与压缩、执行循环与调度、模型选择与资源分配、扩展机制与生命周期钩子 | [sglang-2312.07104](sglang-2312.07104/) |
+| Smoothie: Label Free Language Model Routing | NeurIPS 2024 | 模型选择与资源分配 | [smoothie-2412.04692](smoothie-2412.04692/) |
+| AgentAuditor: Human-Level Safety and Security Evaluation for LLM Agents | NeurIPS 2025 | 工具与环境交互、长期记忆与经验复用、子 Agent 与多 Agent 协作、权限、审批与运行隔离、运行观测、Trace 与集成接口、验证、评估与反馈 | [agentauditor-2506.00641](agentauditor-2506.00641/) |
+| AgentDAM: Privacy Leakage Evaluation for Autonomous Web Agents | NeurIPS 2025 | 权限、审批与运行隔离、验证、评估与反馈 | [agentdam-2503.09780](agentdam-2503.09780/) |
+| DRIFT: Dynamic Rule-Based Defense with Injection Isolation for Securing LLM Agents | NeurIPS 2025 | 工具与环境交互、容错与故障恢复、会话与环境状态管理、权限、审批与运行隔离 | [drift-2506.12104](drift-2506.12104/) |
+| G-Memory: Tracing Hierarchical Memory for Multi-Agent Systems | NeurIPS 2025 | 指令与 Skill、上下文管理与压缩、长期记忆与经验复用、执行循环与调度、规划与任务进度管理、会话与环境状态管理、子 Agent 与多 Agent 协作、扩展机制与生命周期钩子、运行观测、Trace 与集成接口 | [g-memory-2506.07398](g-memory-2506.07398/) |
+| Lookahead Routing for Large Language Models | NeurIPS 2025 | 模型选择与资源分配 | [lookahead-routing-2510.19506](lookahead-routing-2510.19506/) |
+| MESS+: Dynamically Learned Inference-Time LLM Routing in Model Zoos with Service Level Guarantees | NeurIPS 2025 | 执行循环与调度、模型选择与资源分配 | [mess-plus-2505.19947](mess-plus-2505.19947/) |
+| OS-Harm: A Benchmark for Measuring Safety of Computer Use Agents | NeurIPS 2025 | 容错与故障恢复、权限、审批与运行隔离、验证、评估与反馈 | [os-harm-2506.14866](os-harm-2506.14866/) |
+| RAGRouter: Learning to Route Queries to Multiple Retrieval-Augmented Language Models | NeurIPS 2025 | 上下文管理与压缩、模型选择与资源分配 | [ragrouter-2505.23052](ragrouter-2505.23052/) |
+| SiriuS: Self-improving Multi-agent Systems via Bootstrapped Reasoning | NeurIPS 2025 | 指令与 Skill、上下文管理与压缩、长期记忆与经验复用、容错与故障恢复、执行循环与调度、规划与任务进度管理、会话与环境状态管理、子 Agent 与多 Agent 协作、扩展机制与生命周期钩子、运行观测、Trace 与集成接口 | [sirius-2502.04780](sirius-2502.04780/) |
+| WASP: Benchmarking Web Agent Security Against Prompt Injection Attacks | NeurIPS 2025 | 工具与环境交互、容错与故障恢复、会话与环境状态管理、权限、审批与运行隔离、运行观测、Trace 与集成接口、验证、评估与反馈 | [wasp-2504.18575](wasp-2504.18575/) |
+
 ## 李永康来源包机制索引
 
 | 来源 | 提取的机制 | 机制与边界 | 逐条证据 |
