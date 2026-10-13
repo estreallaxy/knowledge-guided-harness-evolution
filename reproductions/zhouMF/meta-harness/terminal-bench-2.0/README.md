@@ -40,7 +40,10 @@ export RD=$BASE/code/reference_examples/terminal_bench_2
 export WS=$BASE/terminal-bench-2.0
 
 curl -LsSf https://astral.sh/uv/install.sh | sh && source "$HOME/.local/bin/env"
-cd "$RD" && uv sync
+cd "$RD"
+patch --dry-run -p1 < "$WS/code-adaptation/upstream-adaptation.diff"
+patch -p1 < "$WS/code-adaptation/upstream-adaptation.diff"   # 对干净上游副本执行一次
+uv sync
 bash "$WS/code-adaptation/scripts/p1_env_check.sh"      # 环境报告 → notes/p1-env-report.txt
 ```
 

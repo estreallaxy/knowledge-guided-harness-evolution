@@ -32,8 +32,8 @@ code-adaptation/
 ```bash
 BASE=/data1/users/zhouMF/knowledge-guided-harness-evolution/reproductions/zhouMF/meta-harness
 cd "$BASE/code/reference_examples/terminal_bench_2"
-git apply --stat "$BASE/terminal-bench-2.0/code-adaptation/upstream-adaptation.diff"   # 先看改动面
-git apply      "$BASE/terminal-bench-2.0/code-adaptation/upstream-adaptation.diff"
+patch --dry-run -p1 < "$BASE/terminal-bench-2.0/code-adaptation/upstream-adaptation.diff"
+patch -p1 < "$BASE/terminal-bench-2.0/code-adaptation/upstream-adaptation.diff"   # 对干净上游副本执行一次
 ```
 
 上游 revision 见 `../../code/UPSTREAM.md`。补丁只改适配点，不改 H0 harness
