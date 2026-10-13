@@ -1,19 +1,6 @@
-# Result summary
+# 训练结果
 
-| Field | Value |
-| --- | --- |
-| Baseline | |
-| Benchmark | |
-| Code revision | |
-| H0 revision | |
-| Dataset split | |
-| Model and provider | |
-| Random seed | |
-| Score | |
-| Successful / failed / ungraded | |
-| Tokens / calls / cost / elapsed time | |
-| Config path | |
-| Trace path | |
-| Notes | |
+- [H0 对照](h0/summary.json)：13 通过、9 零分、8 未评分，30 题、36 次尝试。
+- [工具参数容错与思考续接候选](summary.json)：17 通过、10 零分、3 未评分，30 题、38 次尝试。
 
-Keep large raw artifacts local under `runs/` or `traces/`; commit the summary and the evidence needed to audit it.
+未评分计入分母，全部尝试计入消耗；不是 pass@2，也不是封存测试结果。实验条件和失败解释见 [复现报告](../notes/reproduction-report.md)。
