@@ -107,7 +107,7 @@ Table 5（PDF p.34），数值为百分数，AG2 列为 6 次重复的均值 ± 
 | PDF 与文本 | 文本文件含 54 个 `===== PDF p.N =====` 标记，与论文版式（正文 10 页、参考文献、附录至 p.54）一致；PDF 为 1,029,891 字节的官方下载件，本机无 PDF 工具，未逐页渲染核对页数，也未与 proceedings 网页版做二进制比对。 |
 | 论文 §3–§5、Appendix A/C/E/H/J/K/N 的关键条目 | 已与本地全文核对（见 `exact-source-anchors.md`）。 |
 | 论文各表数值 | 已按本地全文逐格抄录；未与 proceedings 网页版二次比对。 |
-| 官方代码 revision | 已确定为 `a70542e541b2104ef8fcd785778179e173fb8d70`（2025-07-23），依据是 13 个文件的 git blob 哈希全部相同。 |
+| 官方代码 revision | `a70542e541b2104ef8fcd785778179e173fb8d70`（2025-07-23）。 |
 | 标注 PDF 的内容 | 本地已用自写解码器抽取文本核对：`round_2_trim`、`round3_trim` 为 17 模式中间版，`round1_trim`、`new_benchmarks_trim` 为最终 14 模式且两者文本一致。 |
 | 论文报告与代码行为的关系 | 已发现 FM-3.2/FM-3.3 命名在两处代码与论文之间互相冲突（见 `exact-source-anchors.md` 末节），未做进一步判定。 |
 | LLM-judge notebook 复跑 | 尚未执行；需要 OpenAI 密钥与真实 trace，两者均未纳入来源包。 |

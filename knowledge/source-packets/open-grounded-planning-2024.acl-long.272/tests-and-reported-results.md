@@ -105,7 +105,7 @@
 | Table 3 的列结构 | 已核对。原文抽取文本丢失列对齐，本包用 PDF 文本坐标重建表头与数据行，确认结构为「方法 + 可执行率 + 质量 + 6 个 Pass Rate 列（Average of All Types / APIBank / GPT4Tools / ToolAlpaca / VirtualHome / SayCan）」，并逐格与 Appendix E 的 Table 5–9 交叉验证一致。 |
 | 论文 §3.1、§3.2/Table 1–2、§3.3.1、§3.3.2、§4/Figure 2、§5.1、§5.4/Table 4、§5.5/Figure 3、Appendix B–D、Figure 4、Appendix E–F | 已与本地全文核对。 |
 | 指标自洽性 | 已核对。Table 3 的 15 行 in-domain 数据均满足 Pass Rate = Executability × Quality（四舍五入误差 ≤ 0.01）。 |
-| 官方代码 revision | 已固定为 `c9d3cd5e98d82498a544da81fc090b6fc72b0e4b`（2024-06-11）。本地 22 个文件与远端该 commit 的 blob 哈希逐一相同。 |
+| 官方代码 revision | `c9d3cd5e98d82498a544da81fc090b6fc72b0e4b`（2024-06-11）。 |
 | 官方端到端生成复跑 | **尚未执行**。缺上游 `datasets/`（任务与动作库）、缺 `actions_emb.npy`，且需要 OpenAI 兼容端点与密钥。 |
 | 官方评测复跑 | **尚未执行**。静态阅读发现评测侧以 `model="1106"` 调用 `get_ans`，而该快照的 `get_ans` 只接受 `vicuna` / `sft` / 含 `chatgpt` 的字符串，按原样运行会在评分阶段抛 `ValueError` 并被吞掉（详见 `exact-source-anchors.md`）。未运行验证该推断。 |
 | SFT 模型的训练流程 | **未知**。论文 §5.1 说明用 FastChat、每子类 200 条、与 Alpaca 混合、3 epoch，但上游仓库不含训练脚本或训练数据。 |

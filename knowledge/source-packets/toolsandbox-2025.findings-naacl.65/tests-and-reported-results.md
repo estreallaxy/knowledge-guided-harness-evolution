@@ -87,7 +87,7 @@
 | 论文全文可解析 | 已通过：`paper/paper-v1.txt` 含 `PDF p.1`–`p.24` 共 24 页标记，与会议页码 1160–1183 对应 | 本地运行（文本层） |
 | 官方 PDF | 未纳入本包（原文件 20.2 MB，超出仓库体积约定）；获取地址 <https://aclanthology.org/2025.findings-naacl.65.pdf> | 未知（未做 PDF 解析复核） |
 | 论文 §2–§4、§7、Appendix A.7、Table 2–9 与本地全文 | 已逐段与 `paper/paper-v1.txt` 核对 | 本地运行 |
-| 官方代码版本 | 已按内容比对固定为 `c8571d7`（77 个上游文件全部哈希一致） | 本地运行 |
+| 官方代码版本 | 固定为 upstream revision `c8571d7` | 本地运行 |
 | 官方单元测试 | 已执行：69 通过、2 失败、1 跳过（62 秒） | 本地运行 |
 | 其中 2 项失败 | `tests/roles/execution_environment_test.py::test_execution_environment_syntax_error` 与 `::test_invalid_parallel_tool_call`，详见下节 | 本地运行 |
 | 官方端到端评测复跑（模型 × 1032 场景） | 尚未执行；需 OpenAI / Anthropic / RapidAPI 凭据与较长时间预算 | 尚未执行 |

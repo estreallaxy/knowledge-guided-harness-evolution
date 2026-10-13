@@ -28,14 +28,14 @@
 | **优化器重写** | `propose_claude()`（绑死 Claude Code CLI）→ `litellm_proposer.py`（进程内 litellm 直调） | 要求的优化模型是 `deepseek-v4-flash`，CLI 路径无法指向任意 provider |
 | **工程便利** | `RUNS_DIR` 改为环境变量可覆盖；冒烟题可用环境变量显式覆盖 | `RUNS_DIR` 未设置时行为不变 |
 
-**未改动**：`agents/baseline_kira.py`（H0）、`agents/baseline_terminus2.py`、`prompt-templates/terminus-kira.txt`、`claude_wrapper.py` —— 均与上游 HEAD 逐字节一致（sha256 核对过）。`tests/test_meta_harness.py` 只在末尾新增 `SmokeTaskResolutionTests`（7 项，覆盖冒烟题解析），原有测试未改。
+**未改动**：`agents/baseline_kira.py`（H0）、`agents/baseline_terminus2.py`、`prompt-templates/terminus-kira.txt`、`claude_wrapper.py`。`tests/test_meta_harness.py` 只在末尾新增 `SmokeTaskResolutionTests`（7 项，覆盖冒烟题解析），原有测试未改。
 
 ## 三、H0 baseline 结果（train 划分）
 
 | 项 | 值 |
 | --- | --- |
 | 规模 | 30 题 × 2 次 = 60 trial |
-| **通过率** | **40/60 = 66.7%** |
+| **trial-level micro pass rate** | **40/60 = 66.7%** |
 | 逐题 | 18 题两次全过 / 4 题部分 / 8 题两次全败 |
 | 墙钟 / 费用 | 113 分钟 / **$10.13** |
 | tokens | 281.8M in / 6.04M out |
@@ -91,7 +91,7 @@ uv run harbor run --agent oracle -p "$HARBOR_DATASET_PATH" -i fix-code-vulnerabi
 
 **副本清点**：TB2 复现副本现为 **5 份**（`reproductions/{zhouMF,zhaoXY,wangY,liYK,liJW}/meta-harness/code/reference_examples/terminal_bench_2/`）；原共享 H0（仓库根 `harness/h0/terminus-kira`）已随 2026-10-11 重组移除，H0 改为每人的 `reproductions/<成员>/H0/terminal-bench-2.0/code/terminus-kira/`。
 
-**起点同源已复核 ✅**：五份 H0 `baseline_kira.py` 的 sha256 **全为 `e06b9273…`**，逐字节一致（2026-10-13 复测）。
+**起点同源已复核 ✅**：五份 H0 均来自 Meta-Harness 的同一 upstream revision；各线路的适配差异见下表。
 
 阶段二起五条线路独立复现，副本之间的适配差异属预期（各线路自行选择修法）。下表是本副本与另外四份副本的实测差异（共 5 份），供复核时定位：
 

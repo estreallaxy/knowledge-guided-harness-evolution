@@ -38,7 +38,7 @@
 
 ## 官方代码
 
-行号以 `source-packet.json` 固定的 upstream revision `c9d3cd5` 为准（本地 22/22 文件与该 commit 的 blob 哈希逐一相同）。核心目录为 `official-code/generate/`（计划生成循环）、`official-code/evaluate/`（自动评价）、`official-code/generate/dataset_settings/`（数据集适配与配置）。
+行号以 `source-packet.json` 固定的 upstream revision `c9d3cd5` 为准。核心目录为 `official-code/generate/`（计划生成循环）、`official-code/evaluate/`（自动评价）、`official-code/generate/dataset_settings/`（数据集适配与配置）。
 
 | 机制或证据 | 文件与行号 | 作用 |
 | --- | --- | --- |

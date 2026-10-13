@@ -62,7 +62,7 @@
 | --- | --- |
 | PDF 可解析 | 已通过，9 页（demo 论文）。 |
 | 论文 §3–§5、Table 1、Figure 3–6、附录 A 评分细则 | 已与本地全文逐条核对。 |
-| 官方代码版本 | 已固定为 `6ac7bedd`（2025-07-03）；本地快照 44/44 文件与上游该 commit 的 blob 哈希逐一比对一致。 |
+| 官方代码版本 | upstream revision `6ac7bedd`（2025-07-03）。 |
 | 论文 Listing 1 与代码 CLI 参数的一致性 | 已核对：`--input` / `--scorers` / `--output-json` 三个参数与论文一致。 |
 | 五个维度的评分细则 | 论文附录 A（PDF p.9）与 `scorers/prompts/prompt.py` 的 system prompt 已比对，分档文字一致。 |
 | 示例轨迹数据 | 未纳入（12MB，9 个文件全部 >100KB）。 |

@@ -71,7 +71,7 @@ BFCL 目录内没有单元测试目录、`pytest.ini`/`tox.ini`，`pyproject.tom
 | PDF 可解析 | 已通过：`paper/paper-v1.pdf` 1 200 643 字节，`/Type /Page` 计数 22，与 22 个 `===== PDF p.N =====` 标记一致。 |
 | 论文页码与锚点 | 已通过：`exact-source-anchors.md` 中每一处章节/图表页码均回到 `paper/paper-v1.txt` 的 p.N 标记核对。 |
 | 论文 Table 1 | 已部分核对：上表与统计中引用的数值逐字取自 txt；列位置用三处可独立验证的位置交叉验证（见上），其余列未逐列反查。 |
-| 官方代码 revision | 已固定：`6ea57973c7a6097fd7c5915698c54c17c5b1b6c8`（2026-03-23，branch `main`），依据为旧快照全部 420 个文件与本包保留的每个文件都和该 commit 的 git blob SHA-1 逐一相同（`git hash-object` vs `git rev-parse <commit>:<path>`）。 |
+| 官方代码 revision | `6ea57973c7a6097fd7c5915698c54c17c5b1b6c8`（2026-03-23，branch `main`）。 |
 | official-code 体积 | 已通过：69 个文件、979 896 字节（约 0.93 MiB），无单文件 >1 MB；最大文件 `long_context.py` 190 330 字节。 |
 | Python 语法可解析 | 已通过：59 个 `.py` 全部 `ast.parse` 通过（本地以 `python3 -I` 运行解析脚本，未执行快照代码）。 |
 | 数据集与模型输出 | 未纳入来源包（`bfcl_eval/data/**` 与 `result/`）；无 `possible_answer` 真值。 |

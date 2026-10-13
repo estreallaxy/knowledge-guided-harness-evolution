@@ -79,4 +79,4 @@ mast_annotation["summary"], mast_annotation["task_completion"], mast_annotation[
 | 根 `LICENSE` | 上游根目录没有该文件（已核对 HEAD 的树）。 |
 | 实验输出、API 密钥 | 仓库内不存在；notebook 中密钥为占位符。 |
 
-快照与上游的一致性已按内容核对：`official-code/` 中 13 个文件的 git blob 哈希与上游 `a70542e541b2104ef8fcd785778179e173fb8d70` 逐一相同，仅剔除了上述 logo。
+快照固定到上游 revision `a70542e541b2104ef8fcd785778179e173fb8d70`，仅剔除了上述 logo。
