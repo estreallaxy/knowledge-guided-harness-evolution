@@ -26,7 +26,7 @@
 | --- | --- | --- |
 | **运行条件适配** | 依赖源修复、执行位补齐、模型改由 `HARBOR_MODEL` 指定、数据集改由 `HARBOR_DATASET_PATH` 指定、沙箱白名单放行 `docker`、冒烟题改按挂载划分解析 | 为把参考实现接到本线的冻结运行条件所必需，不是实现选择 |
 | **优化器重写** | `propose_claude()`（绑死 Claude Code CLI）→ `litellm_proposer.py`（进程内 litellm 直调） | 要求的优化模型是 `deepseek-v4-flash`，CLI 路径无法指向任意 provider |
-| **工程便利** | `RUNS_DIR` 改为环境变量可覆盖；冒烟题可用环境变量显式覆盖 | 未设置时行为不变 |
+| **工程便利** | `RUNS_DIR` 改为环境变量可覆盖；冒烟题可用环境变量显式覆盖 | `RUNS_DIR` 未设置时行为不变 |
 
 **未改动**：`agents/baseline_kira.py`（H0）、`agents/baseline_terminus2.py`、`prompt-templates/terminus-kira.txt`、`claude_wrapper.py` —— 均与上游 HEAD 逐字节一致（sha256 核对过）。`tests/test_meta_harness.py` 只在末尾新增 `SmokeTaskResolutionTests`（7 项，覆盖冒烟题解析），原有测试未改。
 

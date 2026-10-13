@@ -112,8 +112,11 @@ def _resolve_smoke_task():
         return override
     dataset_path = os.environ.get("HARBOR_DATASET_PATH")
     if not dataset_path:
-        # No local split mounted (upstream registry mode, full 89 tasks).
-        return "extract-elf"
+        # No local split mounted (upstream registry mode). Still never default to
+        # upstream's extract-elf: split-v1.json seals it as a test task, and an
+        # operator who set nothing would hand a test task to the optimizer. The
+        # preferred task exists in the full 89-task registry too.
+        return SMOKE_TEST_TASK_PREFERRED
     dataset_dir = Path(dataset_path)
     if not dataset_dir.is_dir():
         raise RuntimeError(f"HARBOR_DATASET_PATH is not a directory: {dataset_dir}")

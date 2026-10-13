@@ -185,8 +185,21 @@ class SmokeTaskResolutionTests(unittest.TestCase):
         with mock.patch.dict(os.environ, env, clear=True):
             return meta_harness._resolve_smoke_task()
 
-    def test_registry_mode_keeps_upstream_task(self) -> None:
-        self.assertEqual(self._resolve(None), "extract-elf")
+    def test_registry_mode_uses_the_train_task_not_upstream_test_task(self) -> None:
+        # Even with nothing configured, the default must not be a sealed test
+        # task; fix-code-vulnerability also exists in the full 89-task registry.
+        self.assertEqual(
+            self._resolve(None), meta_harness.SMOKE_TEST_TASK_PREFERRED
+        )
+
+    def test_default_is_never_the_upstream_test_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp) / "some-task"
+            task_dir.mkdir()
+            (task_dir / "task.toml").write_text("")
+            for dataset in (None, tmp, str(task_dir)):
+                with self.subTest(dataset=dataset):
+                    self.assertNotEqual(self._resolve(dataset), "extract-elf")
 
     def test_prefers_declared_train_task_when_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
