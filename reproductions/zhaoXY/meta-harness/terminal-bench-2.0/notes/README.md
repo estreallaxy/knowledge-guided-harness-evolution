@@ -93,9 +93,9 @@ uv run harbor run --agent oracle -p "$HARBOR_DATASET_PATH" -i fix-code-vulnerabi
 
 **起点同源已复核 ✅**：五份 H0 `baseline_kira.py` 的 sha256 **全为 `e06b9273…`**，逐字节一致（2026-10-13 复测）。
 
-阶段二起五条线路独立复现，副本之间的适配差异属预期（各线路自行选择修法）。下表是本副本与其余四份的实测差异，供复核时定位：
+阶段二起五条线路独立复现，副本之间的适配差异属预期（各线路自行选择修法）。下表是本副本与另外四份副本的实测差异（共 5 份），供复核时定位：
 
-| 项 | 本副本 | 其余四份（2026-10-13 实测） |
+| 项 | 本副本 | 另外四份副本（2026-10-13 实测） |
 | --- | --- | --- |
 | 依赖安装 | `laude-institute`（同 rev `1a6ffa96`） | zhouMF / liYK / liJW 仍指向 `harbor-framework`（该远端已无此 ref，`uv sync` 直接失败）；wangY 改走 PyPI pin `terminal-bench==0.2.18` |
 | `run_eval.sh` 执行位 | 755 | zhouMF / liYK / liJW 为 644 |
