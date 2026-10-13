@@ -6,14 +6,14 @@
 
 | 收集方向 | 负责人 | 进度 | 论文、GitHub 与来源包 |
 | --- | --- | --- | --- |
-| 指令与 Skill | 周梦凡 | 1 / 2 | [Skill Usage](source-packets/skill-usage-2604.04323/) · [论文](https://arxiv.org/abs/2604.04323v1) · [GitHub](https://github.com/UCSB-NLP-Chang/Skill-Usage) |
+| 指令与 Skill | 周梦凡 | 2 / 2 | [Skill Usage](source-packets/skill-usage-2604.04323/) · [论文](https://arxiv.org/abs/2604.04323v1) · [GitHub](https://github.com/UCSB-NLP-Chang/Skill-Usage)；[Agent Skill Induction](source-packets/agent-skill-induction-2504.06821/) · [论文](https://arxiv.org/abs/2504.06821v2) · [GitHub](https://github.com/zorazrw/agent-skill-induction) |
 | 工具与环境交互 | 赵星源 | 2 / 2 | [ToolSandbox](source-packets/toolsandbox-2025.findings-naacl.65/) · [论文](https://aclanthology.org/2025.findings-naacl.65/) · [GitHub](https://github.com/apple/ToolSandbox) · [BFCL](source-packets/bfcl-2025.icml/) · [论文](https://proceedings.mlr.press/v267/patil25a.html) · [GitHub](https://github.com/ShishirPatil/gorilla) |
-| 上下文管理与压缩 | 周梦凡 | 0 / 2 | 待按 `SourcePacket` 收集。 |
+| 上下文管理与压缩 | 周梦凡 | 2 / 2 | [ACON](source-packets/acon-2510.00615/) · [论文](https://arxiv.org/abs/2510.00615v3) · [GitHub](https://github.com/microsoft/acon)；[AgentFold](source-packets/agentfold-2510.24699/) · [论文](https://arxiv.org/abs/2510.24699v1) · [GitHub](https://github.com/Alibaba-NLP/DeepResearch) |
 | 长期记忆与经验复用 | 李永康 | 2 / 2（材料齐备，待团队审阅） | [ExpeL](source-packets/expel-2308.10144/) · [ReasoningBank](source-packets/reasoningbank-2509.25140/) |
 | 容错与故障恢复 | 赵星源 | 2 / 2 | [MAST](source-packets/mast-2025.neurips/) · [论文](https://proceedings.neurips.cc/paper_files/paper/2025/hash/b1041e52d3be19f0a9bc491657488e4a-Abstract-Datasets_and_Benchmarks_Track.html) · [GitHub](https://github.com/multi-agent-systems-failure-taxonomy/MAST) · [AgentDiagnose](source-packets/agentdiagnose-2025.emnlp-demos/) · [论文](https://aclanthology.org/2025.emnlp-demos.15/) · [GitHub](https://github.com/oootttyyy/AgentDiagnose) |
 | 执行循环与调度 | 赵星源 | 2 / 2 | [Open Grounded Planning](source-packets/open-grounded-planning-2024.acl-long.272/) · [论文](https://aclanthology.org/2024.acl-long.272/) · [GitHub](https://github.com/Shiguang-Guo/Open-Grounded-Planning) · [HiAgent](source-packets/hiagent-2025.acl-long/) · [论文](https://aclanthology.org/2025.acl-long.1575/) · [GitHub](https://github.com/HiAgent2024/HiAgent) |
 | 规划与任务进度管理 | 李嘉旺 | 0 / 2 | 待按 `SourcePacket` 收集。 |
-| 模型选择与资源分配 | 周梦凡 | 0 / 2 | 待按 `SourcePacket` 收集。 |
+| 模型选择与资源分配 | 周梦凡 | 2 / 2 | [FrugalGPT](source-packets/frugalgpt-2305.05176/) · [论文](https://arxiv.org/abs/2305.05176) · [GitHub](https://github.com/stanford-futuredata/FrugalGPT)；[RouteLLM](source-packets/routellm-2406.18665/) · [论文](https://arxiv.org/abs/2406.18665) · [GitHub](https://github.com/lm-sys/RouteLLM) |
 | 会话与环境状态管理 | 李永康 | 2 / 2（材料齐备，待团队审阅） | [AgentRewind](source-packets/agentrewind-2608.14380/) · [StateFork](source-packets/statefork-2609.38648/) |
 | 子 Agent 与多 Agent 协作 | 王懿 | 2 / 2 | [AutoGen](source-packets/autogen-2308.08155/) · [论文](https://arxiv.org/abs/2308.08155v2) · [GitHub](https://github.com/microsoft/autogen)；[MetaGPT](source-packets/metagpt-2308.00352/) · [论文](https://arxiv.org/abs/2308.00352v7) · [GitHub](https://github.com/geekan/MetaGPT) |
 | 权限、审批与运行隔离 | 李嘉旺 | 0 / 2 | 待按 `SourcePacket` 收集。 |
