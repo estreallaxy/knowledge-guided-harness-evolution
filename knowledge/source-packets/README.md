@@ -31,8 +31,8 @@
 3. 论文报告、代码实际行为和本地运行结果分别记录，缺失信息写明未知。
 4. 不提交密钥、运行缓存、大型外部数据集或由 benchmark 泄露的测试答案。
 5. 同一论文目录由提交者在合并前负责消解冲突；不同论文目录可以并行新增。
-6. `official-code/` 只保存理解和复现机制所需的源码与轻量配置；排除 benchmark 任务实例、split、含参考答案或评分规则的测试配置、登录状态及原始数据。
-7. `benchmark_leakage_check` 必须依据来源包实际包含的文件填写；未逐文件核对时写“未知”，不能直接声明无泄漏。
+6. `official-code/` 围绕论文方法选择材料；允许保留机制所需的 evaluator、scorer、测试、配置和示例，不要求仅因文件属于评测流程就删除。不得纳入密钥、登录状态或直接暴露 benchmark 隐藏答案的材料。
+7. 任务实例、split 或原始数据确实属于论文方法且有助于理解或复现时可以纳入；在 `snapshot_scope` 中如实说明保留内容、用途与范围。`benchmark_leakage_check` 如存在，也必须依据实际文件填写。
 8. 不在来源包文档中记录对本地文件计算的 MD5、SHA 或 checksum；`official_code_version.upstream_revision` 记录的官方 Git revision 不受此限制。
 
 ## 已收录来源
