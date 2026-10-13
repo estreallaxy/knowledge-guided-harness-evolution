@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 import claude_wrapper
+import litellm_proposer
 from dotenv import load_dotenv
 
 # ── ANSI colors ──────────────────────────────────────────────
@@ -78,8 +79,12 @@ def _rate_str(rate):
 load_dotenv(override=True)
 
 EVOLVE_DIR = Path(__file__).parent
-LOGS_DIR = EVOLVE_DIR / "logs"
-JOBS_DIR = EVOLVE_DIR / "jobs"
+# Run artifacts root. Defaults to EVOLVE_DIR, preserving the original layout
+# (EVOLVE_DIR/logs, EVOLVE_DIR/jobs). Set RUNS_DIR to keep artifacts in a
+# separate tree, e.g. reproductions/<member>/meta-harness/runs/.
+RUNS_DIR = Path(os.environ.get("RUNS_DIR", EVOLVE_DIR))
+LOGS_DIR = RUNS_DIR / "logs"
+JOBS_DIR = RUNS_DIR / "jobs"
 PENDING_EVAL = LOGS_DIR / "pending_eval.json"
 FRONTIER_VAL = LOGS_DIR / "frontier_val.json"
 EVOLUTION_SUMMARY = LOGS_DIR / "evolution_summary.jsonl"
@@ -94,9 +99,40 @@ BASELINE_AGENT_NAME = BASELINES[0][0]  # primary baseline for frontier compariso
 EVAL_TASK_SET = "full"
 N_EVAL_TASKS = 89  # full official TB2 dataset used in the paper runs
 
-SMOKE_TEST_TASK = "extract-elf"  # simple task, reliably fast
+# Smoke task. Upstream hardcodes extract-elf, but split-v1.json assigns it to the
+# sealed test set: any smoke trial on it would touch test data, and the optimizer
+# reads smoke traces. Resolve from the split actually mounted for the run instead.
+SMOKE_TEST_TASK_PREFERRED = "fix-code-vulnerability"  # train; measured 1.1/1.3 min, 2/2 pass
 
-MODEL = "anthropic/claude-opus-4-6"
+
+def _resolve_smoke_task():
+    """Pick the smoke task from the mounted split, never from the test set."""
+    override = os.environ.get("HARBOR_SMOKE_TASK") or os.environ.get("SMOKE_TEST_TASK")
+    if override:
+        return override
+    dataset_path = os.environ.get("HARBOR_DATASET_PATH")
+    if not dataset_path:
+        # No local split mounted (upstream registry mode). Still never default to
+        # upstream's extract-elf: split-v1.json seals it as a test task, and an
+        # operator who set nothing would hand a test task to the optimizer. The
+        # preferred task exists in the full 89-task registry too.
+        return SMOKE_TEST_TASK_PREFERRED
+    dataset_dir = Path(dataset_path)
+    if not dataset_dir.is_dir():
+        raise RuntimeError(f"HARBOR_DATASET_PATH is not a directory: {dataset_dir}")
+    if (dataset_dir / "task.toml").is_file():
+        return dataset_dir.name  # a single task directory was mounted
+    if (dataset_dir / SMOKE_TEST_TASK_PREFERRED / "task.toml").is_file():
+        return SMOKE_TEST_TASK_PREFERRED
+    for entry in sorted(dataset_dir.iterdir()):
+        if (entry / "task.toml").is_file():
+            return entry.name
+    raise RuntimeError(f"no task with task.toml found under {dataset_dir}")
+
+
+SMOKE_TEST_TASK = _resolve_smoke_task()
+
+MODEL = os.environ.get("HARBOR_MODEL", "anthropic/claude-opus-4-6")
 DEFAULT_SEARCH_TRIALS = 2
 DEFAULT_CONCURRENCY = 50
 HARBOR_TIMEOUT_SECONDS = int(os.environ.get("HARBOR_TIMEOUT_SECONDS", 8 * 60 * 60))
@@ -125,7 +161,14 @@ def run_cmd(cmd, timeout=HARBOR_TIMEOUT_SECONDS, cwd=None):
     env = os.environ.copy()
     env["HARBOR_MODEL"] = MODEL
     # Ensure dotenv-loaded keys survive through uv run subprocess
-    for key in ("RUNLOOP_API_KEY", "ANTHROPIC_API_KEY"):
+    for key in (
+        "RUNLOOP_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENAI_API_BASE",
+        "OPENAI_BASE_URL",
+    ):
         val = os.environ.get(key)
         if val:
             env[key] = val
@@ -456,6 +499,43 @@ def propose_claude(task_prompt, iteration, timeout=2400):
     return PENDING_EVAL.exists()
 
 
+PROPOSER_BACKEND = os.environ.get("PROPOSER_BACKEND", "litellm")
+
+
+def propose_litellm(task_prompt, iteration, timeout=2400):
+    """Same contract as propose_claude, but drives an in-process litellm loop.
+
+    Used because the team protocol fixes the optimisation model to a litellm
+    provider that the Claude Code CLI cannot reach.
+    """
+    result = litellm_proposer.run(
+        prompt=task_prompt,
+        cwd=str(EVOLVE_DIR),
+        log_dir=str(LOGS_DIR / "claude_sessions"),
+        name=f"iter{iteration}",
+        skills=[str(EVOLVE_DIR / ".claude/skills/meta-harness-terminal-bench-2")],
+        timeout_seconds=timeout,
+        pending_eval_path=str(PENDING_EVAL),
+    )
+    if result.exit_code != 0:
+        print(f"  {_red('proposer failed')} exit={result.exit_code}")
+        if result.stderr:
+            print(f"  {_dim(result.stderr[:500])}")
+    result.show()
+    return PENDING_EVAL.exists()
+
+
+def propose(task_prompt, iteration, timeout=2400):
+    """Dispatch to the configured proposer backend.
+
+    PROPOSER_BACKEND=claude restores the original Claude Code CLI path; the
+    default is the litellm loop.
+    """
+    if PROPOSER_BACKEND == "claude":
+        return propose_claude(task_prompt, iteration, timeout=timeout)
+    return propose_litellm(task_prompt, iteration, timeout=timeout)
+
+
 def validate_candidate(name, import_path):
     """Import-check a candidate agent. Returns True if valid."""
     result = run_cmd(
@@ -531,7 +611,7 @@ def render_task_prompt(iteration, n_trials):
     """Build the prompt for the proposer Claude session."""
     return (
         f"Run iteration {iteration} of the scaffold evolution loop (KIRA track). "
-        f"Model: {MODEL} (Opus). "
+        f"Evaluation solver model: {MODEL}. "
         f"Start from agents/baseline_kira.py as the parent.\n\n"
         f"## Eval split: {N_EVAL_TASKS} official TB2 tasks x {n_trials} trials\n\n"
         f"This reference example uses the full TB2 dataset from the paper runs. "
@@ -570,6 +650,21 @@ def fresh_start():
     print("  Fresh start: cleared generated agents/ files and log files")
 
 
+def _cached_model_name(cfg):
+    """Model recorded in a harbor job's config.json.
+
+    Upstream looked only at a top-level "model" or a singular "agent.model",
+    but harbor writes {"agents": [{"model_name": ...}]}. Real job dirs
+    therefore always read as a model mismatch and were silently re-run.
+    """
+    model = cfg.get("model") or cfg.get("agent", {}).get("model", "")
+    if not model:
+        agents = cfg.get("agents") or []
+        if agents and isinstance(agents, list):
+            model = agents[0].get("model_name") or agents[0].get("model", "")
+    return model or ""
+
+
 def run_evolve(args):
     global JOBS_DIR, LOGS_DIR, PENDING_EVAL, FRONTIER_VAL, EVOLUTION_SUMMARY
 
@@ -578,8 +673,10 @@ def run_evolve(args):
         run_name = args.run_name
     else:
         run_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-    JOBS_DIR = EVOLVE_DIR / "jobs" / run_name
-    LOGS_DIR = EVOLVE_DIR / "logs" / run_name
+    # Derive from RUNS_DIR (which defaults to EVOLVE_DIR), so setting RUNS_DIR
+    # relocates the whole artifact tree, not just the module-level defaults.
+    JOBS_DIR = RUNS_DIR / "jobs" / run_name
+    LOGS_DIR = RUNS_DIR / "logs" / run_name
     PENDING_EVAL = LOGS_DIR / "pending_eval.json"
     FRONTIER_VAL = LOGS_DIR / "frontier_val.json"
     EVOLUTION_SUMMARY = LOGS_DIR / "evolution_summary.jsonl"
@@ -616,9 +713,7 @@ def run_evolve(args):
                 if cfg_file.exists():
                     try:
                         cfg = json.loads(cfg_file.read_text())
-                        cfg_model = cfg.get("model") or cfg.get("agent", {}).get(
-                            "model", ""
-                        )
+                        cfg_model = _cached_model_name(cfg)
                         cfg_attempts = cfg.get("n_attempts", 0)
                         if MODEL not in str(cfg_model):
                             print(
@@ -694,7 +789,7 @@ def run_evolve(args):
         propose_start = time.time()
         task_prompt = render_task_prompt(iteration, args.trials)
         print(f"  {_ts()} {_cyan('proposing')} new candidates...", flush=True)
-        ok = propose_claude(task_prompt, iteration, timeout=args.propose_timeout)
+        ok = propose(task_prompt, iteration, timeout=args.propose_timeout)
         propose_time = time.time() - propose_start
 
         if not ok:
@@ -746,6 +841,13 @@ def run_evolve(args):
             )
             continue
         print(f"  {_green(f'{len(valid)} valid')} out of {len(candidates)} candidates")
+
+        if args.propose_only:
+            print(
+                f"\n{_ts()} {_bold('--propose-only')}: stopping before benchmarking. "
+                f"Proposer output is at {PENDING_EVAL}"
+            )
+            return
 
         # Benchmark
         bench_start = time.time()
@@ -939,11 +1041,25 @@ def main():
         help="Max concurrent trials (default: 50)",
     )
     parser.add_argument(
+        "--propose-only",
+        action="store_true",
+        help=(
+            "Run only the proposer (plus import validation) and stop before "
+            "benchmarking. Needs no sandbox backend, so it is how the proposer "
+            "is verified on its own."
+        ),
+    )
+    parser.add_argument(
         "--validate-agent",
         metavar="MODULE:CLASS",
         help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
+
+    if args.propose_only:
+        # Phase 0 shells out to harbor; the point of --propose-only is to avoid
+        # needing a sandbox at all.
+        args.skip_baseline = True
 
     if args.validate_agent:
         try:

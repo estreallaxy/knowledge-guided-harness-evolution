@@ -1,0 +1,90 @@
+# Meta-Harness 优化循环配置 —— 赵星源（zhaoXY）
+#
+# 依据：docs/team-execution-plan.md 阶段二「Baseline 链」（Meta-Harness 是四个
+#       baseline 之一）与 CONTRIBUTING.md 的工作区规范。
+#
+# 与 terminal-bench-2.0.yaml 的关系：
+#   terminal-bench-2.0.yaml 管**执行**（solver 与 benchmark）；
+#   本文件管**优化**（proposer 与搜索）。两者的成本分开记录。
+# 标注约定同 terminal-bench-2.0.yaml。
+
+optimization_model:                                        # [固定] 与执行模型同为 deepseek-v4-flash
+  model: deepseek/deepseek-v4-flash
+  provider: deepseek                                       # [实测]
+  api_base: null                                           # [实测] litellm 原生 deepseek 路由即可
+  api_key_env: DEEPSEEK_API_KEY                            # [固定] 只写变量名
+  temperature: 0.7                                         # [实测] 代码默认
+  via: PROPOSER_MODEL / PROPOSER_TEMPERATURE
+
+backend:
+  implementation: litellm                                  # [实测] 2026-10-08 由 Claude Code CLI 改写而来
+  via: PROPOSER_BACKEND
+  fallback: claude                                         # 设为 claude 回退到原 CLI 路径（需 Claude Code CLI）
+  note: >-
+    原实现 propose_claude() 硬绑 Claude Code CLI，无法指向任意 provider，
+    在「优化模型统一为 deepseek-v4-flash」的前提下不可用；现为进程内 litellm
+    直调 + 自实现工具循环，详见 adaptation-record.md 第七节。
+
+search:                                                    # [待定] 尚未确定；当前值仅为提案
+  iterations: null                                         # [待定] CLI 默认 5
+  candidates_per_iteration: null                           # [待定] 论文实现为每轮 1 个候选
+  trials_per_task: 2                                       # [固定] 论文 TB2 配置每题 2 次搜索试次
+  selection_rule: null                                     # [待定] 候选保留/修订/撤销的判据与晋升门槛
+  concurrency: 50                                          # [固定] 与执行侧一致
+  full_eval_trials: 5                                      # [固定] --full-eval 的 5-trial winner pass
+  baseline_phase: true                                     # [实测] Phase 0 先跑两个 baseline
+  smoke_gate: true                                         # [实测] 每轮候选先过 smoke 再进 benchmark
+
+proposer_budget:                                           # 与执行预算分开记账
+  timeout_sec: 2400                                        # [实测] 代码默认；CLI --propose-timeout 可覆盖
+  max_turns: 40                                            # [实测] 代码默认；建议下轮提到 60~80（见下）
+  num_retries: 3                                           # [实测] 代码默认
+  bash_timeout_sec: 120                                    # [实测] 工具内单次 bash 默认；上限 300
+  via: PROPOSER_MAX_TURNS / PROPOSER_NUM_RETRIES
+  note: >-
+    实测 3/5 迭代在 max_turns=40 用尽（reached max_turns=40 without
+    pending_eval.json），其中 2 次是候选含语法错误。提高上限可能改善产出率，
+    但会同时抬高优化成本；提高前先记录基线产出率以便对比。
+
+cost_ledger:                                               # 单独记录，不混入执行预算
+  record_separately_from_solver: true                      # [固定]
+  fields: [proposer_model, iterations, n_candidates, proposer_tokens, proposer_cost_usd, propose_wall_clock]
+  measured_solver_cost_per_task_usd: 0.168                 # [实测] extract-elf，2.88M in / 104k out
+  measured_proposer_cost_per_iteration_usd: [0.076, 0.091] # [实测] 3 次历史运行的区间
+  measured_proposer_wall_clock_sec: [256, 380]             # [实测] 同上
+
+runs:                                                      # 与执行侧共用同一个产物根
+  dir: /data1/users/zhaoXY/knowledge-guided-harness-evolution/reproductions/zhaoXY/meta-harness/runs
+  via: RUNS_DIR
+  proposer_sessions: <RUNS_DIR>/logs/claude_sessions/<ts>_iterN/
+  pending_eval: <RUNS_DIR>/logs/pending_eval.json
+  frontier_validation: <RUNS_DIR>/logs/frontier_val.json
+  evolution_summary: <RUNS_DIR>/logs/evolution_summary.jsonl
+  benchmark_jobs: <RUNS_DIR>/jobs/<run-name>/
+  # 目录名沿用上游实现（claude_sessions 是历史命名，litellm 后端写的是同一 schema）
+
+proposer_tool_scope:                                       # [实测] 全部锁定在工作区内
+  tools: [read_file, write_file, list_dir, grep, run_bash]
+  write_whitelist: [agents/<新名>.py, prompt-templates/<新名>.txt, logs/pending_eval.json]
+  run_bash:
+    cwd: <code_dir>
+    timeout_cap_sec: 300
+    output_truncate_bytes: 30000
+    strips_api_keys: true                                  # 子进程环境剥离所有 API key
+
+entrypoints:                                               # 本次用到的命令（实测）
+  proposer_only_offline: >-
+    PROPOSER_MAX_TURNS=80 uv run python meta_harness.py
+    --propose-only --skip-smoke --run-name proposer-check3
+  proposer_only_live_smoke: >-
+    uv run python meta_harness.py --propose-only --run-name proposer-check3
+  validate_candidate: uv run python meta_harness.py --validate-agent agents.<新名>:AgentHarness
+  full_loop: uv run python meta_harness.py --iterations 1 --run-name evo-r1
+  regression: uv run python -m unittest tests.test_meta_harness tests.test_litellm_proposer
+
+open_items:                                                # 下次运行前需处理
+  - 搜索轮数、每轮候选数、候选选择规则、优化预算：尚未确定，当前值仅为提案
+  - PROPOSER_MAX_TURNS 是否提高（当前 40，实测偏紧）
+  - 正式搜索的 HARBOR_DATASET_PATH 必须指向 train 划分，不能用完整快照
+  - 阶段分离（train 搜索 / dev 选择 / test 最终评估）上游未实现，
+    当前靠固定 HARBOR_DATASET_PATH=train 保证 test 不被触碰

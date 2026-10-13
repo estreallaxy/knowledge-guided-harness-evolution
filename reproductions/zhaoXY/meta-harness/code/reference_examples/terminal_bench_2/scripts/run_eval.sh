@@ -27,8 +27,8 @@ HARBOR_TIMEOUT_SECONDS="${HARBOR_TIMEOUT_SECONDS:-28800}"
 HARBOR_ENVIRONMENT="${HARBOR_ENVIRONMENT:-runloop}"
 
 case "$HARBOR_ENVIRONMENT" in
-    runloop|modal) ;;
-    *) echo "Unknown HARBOR_ENVIRONMENT '$HARBOR_ENVIRONMENT'. Use: runloop | modal" >&2; exit 1 ;;
+    runloop|modal|docker) ;;
+    *) echo "Unknown HARBOR_ENVIRONMENT '$HARBOR_ENVIRONMENT'. Use: runloop | modal | docker" >&2; exit 1 ;;
 esac
 
 uv run python "$REPO_DIR/meta_harness.py" --validate-agent "$AGENT_IMPORT_PATH"
@@ -56,9 +56,22 @@ case "$TASK_SET" in
         echo "Unknown task_set '$TASK_SET'. Use: hard | full" >&2; exit 1 ;;
 esac
 
+# Dataset source. Default is the paper's remote registry. Set HARBOR_DATASET_PATH
+# to a local task or dataset directory to use the repo's frozen snapshot instead;
+# harbor's -p and -d are mutually exclusive, so exactly one is passed.
+DATASET_FLAGS=()
+if [[ -n "${HARBOR_DATASET_PATH:-}" ]]; then
+    DATASET_FLAGS=(-p "$HARBOR_DATASET_PATH")
+    DATASET_LABEL="$HARBOR_DATASET_PATH"
+else
+    DATASET_FLAGS=(-d "terminal-bench@2.0")
+    DATASET_LABEL="terminal-bench@2.0 (remote registry)"
+fi
+
 echo "agent:       $AGENT_IMPORT_PATH"
 echo "environment: $HARBOR_ENVIRONMENT"
 echo "task_set:    $TASK_SET"
+echo "dataset:     $DATASET_LABEL"
 echo "model:       $MODEL"
 echo "concurrent:  $N_CONCURRENT"
 echo "runs:        $RUNS"
@@ -77,7 +90,7 @@ fi
 CMD=(
     uv run harbor run
     --agent "$AGENT_IMPORT_PATH"
-    -d "terminal-bench@2.0"
+    "${DATASET_FLAGS[@]}"
     -m "$MODEL"
     -e "$HARBOR_ENVIRONMENT"
     -n "$N_CONCURRENT"

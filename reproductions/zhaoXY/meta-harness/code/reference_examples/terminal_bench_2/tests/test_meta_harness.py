@@ -167,6 +167,80 @@ class TimeoutWiringTests(unittest.TestCase):
         self.assertEqual(command_args[:3], ["run", "harbor", "run"])
 
 
+class SmokeTaskResolutionTests(unittest.TestCase):
+    """The smoke task must come from the split actually mounted for the run.
+
+    Upstream hardcodes extract-elf, which split-v1.json assigns to the test set:
+    the smoke trial would touch sealed data, and the optimizer reads its trace.
+    """
+
+    def _resolve(
+        self, dataset_path: str | None, override: str | None = None
+    ) -> str:
+        env = {"PATH": os.environ.get("PATH", "")}
+        if dataset_path is not None:
+            env["HARBOR_DATASET_PATH"] = dataset_path
+        if override is not None:
+            env["HARBOR_SMOKE_TASK"] = override
+        with mock.patch.dict(os.environ, env, clear=True):
+            return meta_harness._resolve_smoke_task()
+
+    def test_registry_mode_uses_the_train_task_not_upstream_test_task(self) -> None:
+        # Even with nothing configured, the default must not be a sealed test
+        # task; fix-code-vulnerability also exists in the full 89-task registry.
+        self.assertEqual(
+            self._resolve(None), meta_harness.SMOKE_TEST_TASK_PREFERRED
+        )
+
+    def test_default_is_never_the_upstream_test_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp) / "some-task"
+            task_dir.mkdir()
+            (task_dir / "task.toml").write_text("")
+            for dataset in (None, tmp, str(task_dir)):
+                with self.subTest(dataset=dataset):
+                    self.assertNotEqual(self._resolve(dataset), "extract-elf")
+
+    def test_prefers_declared_train_task_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for task in (meta_harness.SMOKE_TEST_TASK_PREFERRED, "other-task"):
+                (Path(tmp) / task).mkdir()
+                (Path(tmp) / task / "task.toml").write_text("")
+            self.assertEqual(
+                self._resolve(tmp), meta_harness.SMOKE_TEST_TASK_PREFERRED
+            )
+
+    def test_falls_back_to_a_task_present_in_the_split(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for task in ("zzz-task", "aaa-task"):
+                (Path(tmp) / task).mkdir()
+                (Path(tmp) / task / "task.toml").write_text("")
+            # Neither is the preferred task: take one that exists in the split
+            # rather than upstream's hardcoded test task.
+            self.assertEqual(self._resolve(tmp), "aaa-task")
+
+    def test_single_task_directory_is_used_as_is(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp) / "some-task"
+            task_dir.mkdir()
+            (task_dir / "task.toml").write_text("")
+            self.assertEqual(self._resolve(str(task_dir)), "some-task")
+
+    def test_env_override_wins(self) -> None:
+        self.assertEqual(self._resolve(None, override="regex-log"), "regex-log")
+
+    def test_legacy_env_var_still_honored(self) -> None:
+        env = {"PATH": os.environ.get("PATH", "")}
+        env["SMOKE_TEST_TASK"] = "polyglot-c-py"
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(meta_harness._resolve_smoke_task(), "polyglot-c-py")
+
+    def test_missing_directory_fails_loudly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(RuntimeError):
+                self._resolve(str(Path(tmp) / "does-not-exist"))
+
+
 class KiraLoopSignatureTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_agent_loop_accepts_current_signature(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
