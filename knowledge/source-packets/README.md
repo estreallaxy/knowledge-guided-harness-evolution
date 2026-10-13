@@ -40,6 +40,11 @@
 | 论文 | 方向 | 来源包 |
 | --- | --- | --- |
 | How Well Do Agentic Skills Work in the Wild: Benchmarking LLM Skill Usage in Realistic Settings | 指令与 Skill | [skill-usage-2604.04323](skill-usage-2604.04323/) |
+| Inducing Programmatic Skills for Agentic Tasks | 指令与 Skill | [agent-skill-induction-2504.06821](agent-skill-induction-2504.06821/) |
+| ACON: Optimizing Context Compression for Long-horizon LLM Agents | 上下文管理与压缩 | [acon-2510.00615](acon-2510.00615/) |
+| AgentFold: Long-Horizon Web Agents with Proactive Context Management | 上下文管理与压缩 | [agentfold-2510.24699](agentfold-2510.24699/) |
+| FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance | 模型选择与资源分配 | [frugalgpt-2305.05176](frugalgpt-2305.05176/) |
+| RouteLLM: Learning to Route LLMs with Preference Data | 模型选择与资源分配 | [routellm-2406.18665](routellm-2406.18665/) |
 | ToolSandbox: A Stateful, Conversational, Interactive Evaluation Benchmark for LLM Tool Use Capabilities | 工具与环境交互 | [toolsandbox-2025.findings-naacl.65](toolsandbox-2025.findings-naacl.65/) |
 | The Berkeley Function Calling Leaderboard (BFCL): From Tool Use to Agentic Evaluation of Large Language Models | 工具与环境交互 | [bfcl-2025.icml](bfcl-2025.icml/) |
 | Why Do Multi-Agent LLM Systems Fail? | 容错与故障恢复 | [mast-2025.neurips](mast-2025.neurips/) |
