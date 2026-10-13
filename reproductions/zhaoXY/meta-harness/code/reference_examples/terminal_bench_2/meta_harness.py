@@ -99,9 +99,35 @@ BASELINE_AGENT_NAME = BASELINES[0][0]  # primary baseline for frontier compariso
 EVAL_TASK_SET = "full"
 N_EVAL_TASKS = 89  # full official TB2 dataset used in the paper runs
 
-# Default is the upstream smoke task. Override when the frozen split assigns it
-# elsewhere (in this repo's split-v1.json, extract-elf is a test task).
-SMOKE_TEST_TASK = os.environ.get("SMOKE_TEST_TASK", "extract-elf")
+# Smoke task. Upstream hardcodes extract-elf, but split-v1.json assigns it to the
+# sealed test set: any smoke trial on it would touch test data, and the optimizer
+# reads smoke traces. Resolve from the split actually mounted for the run instead.
+SMOKE_TEST_TASK_PREFERRED = "fix-code-vulnerability"  # train; measured 1.1/1.3 min, 2/2 pass
+
+
+def _resolve_smoke_task():
+    """Pick the smoke task from the mounted split, never from the test set."""
+    override = os.environ.get("HARBOR_SMOKE_TASK") or os.environ.get("SMOKE_TEST_TASK")
+    if override:
+        return override
+    dataset_path = os.environ.get("HARBOR_DATASET_PATH")
+    if not dataset_path:
+        # No local split mounted (upstream registry mode, full 89 tasks).
+        return "extract-elf"
+    dataset_dir = Path(dataset_path)
+    if not dataset_dir.is_dir():
+        raise RuntimeError(f"HARBOR_DATASET_PATH is not a directory: {dataset_dir}")
+    if (dataset_dir / "task.toml").is_file():
+        return dataset_dir.name  # a single task directory was mounted
+    if (dataset_dir / SMOKE_TEST_TASK_PREFERRED / "task.toml").is_file():
+        return SMOKE_TEST_TASK_PREFERRED
+    for entry in sorted(dataset_dir.iterdir()):
+        if (entry / "task.toml").is_file():
+            return entry.name
+    raise RuntimeError(f"no task with task.toml found under {dataset_dir}")
+
+
+SMOKE_TEST_TASK = _resolve_smoke_task()
 
 MODEL = os.environ.get("HARBOR_MODEL", "anthropic/claude-opus-4-6")
 DEFAULT_SEARCH_TRIALS = 2
