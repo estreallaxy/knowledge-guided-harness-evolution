@@ -1,16 +1,16 @@
 # Configs and examples
 
-## 官方配置
+## Official configuration
 
-| 设置 | 配置目录 | 主要内容 |
+|set up|Configuration directory|Main content|
 | --- | --- | --- |
-| LLM 接入配置样例 | `official-code/OAI_CONFIG_LIST_sample` | 3 条：OpenAI gpt-4；Azure gpt-4 与 gpt-3.5-turbo（api_version 2023-07-01-preview）。头部注释要求改名为 `OAI_CONFIG_LIST` 后使用。 |
+|LLM access configuration example| `official-code/OAI_CONFIG_LIST_sample` |3 items: OpenAI gpt-4; Azure gpt-4 and gpt-3.5-turbo (api_version 2023-07-01-preview). The header annotation requires renaming to`OAI_CONFIG_LIST`before use.|
 
-配置只能和对应论文版本、代码 revision 与模型环境一起解释。论文中的运行结果不能由配置样例独立复现。
+Configurations can only be interpreted in conjunction with corresponding paper versions, code revisions, and model environments. The running results in the paper cannot be independently reproduced by the configuration examples.
 
-## 官方流程入口
+## Official process entrance
 
-官方 README（本包内为 `official-code/README.upstream.md`）给出最小示例：
+The official README (`official-code/README.upstream.md`in this package) gives a minimal example:
 
 ```bash
 pip install pyautogen
@@ -24,21 +24,21 @@ user_proxy = UserProxyAgent("user_proxy")
 user_proxy.initiate_chat(assistant, message="Plot a chart of META and TESLA stock price change YTD.")
 ```
 
-要点（行号均经核对）：
+Key points (line numbers have been checked):
 
-- `README.upstream.md:46`：`pip install pyautogen`。
-- `README.upstream.md:75-84`：上述双 agent 示例；`79` 行用 `config_list_from_json(env_or_file="OAI_CONFIG_LIST")` 加载配置；`config_list_from_json` 定义在 `official-code/autogen/oai/openai_utils.py:209`。
-- `README.upstream.md:88`：`python test/twoagent.py`；该测试文件不在本快照内，不可直接运行。
+- `README.upstream.md:46`: `pip install pyautogen`.
+-`README.upstream.md:75-84`: The above dual agent example;`79`line uses`config_list_from_json(env_or_file="OAI_CONFIG_LIST")`to load the configuration;`config_list_from_json`is defined in`official-code/autogen/oai/openai_utils.py:209`.
+-`README.upstream.md:88`:`python test/twoagent.py`; This test file is not in this snapshot and cannot be run directly.
 
-运行前必须另外取得模型凭据与外部依赖：
+Model credentials and external dependencies must be additionally obtained before running:
 
-- OpenAI/Azure API key（经 `OAI_CONFIG_LIST` 或环境变量）。
-- Docker 可选：`official-code/autogen/code_utils.py:221` 的 `use_docker` 默认随 docker 包开启；无 Docker daemon 时需在 `code_execution_config` 中显式 `{"use_docker": False}` 以本机执行（代码需可信任）。
-- 检索方案（A2）需 `chromadb`（`official-code/autogen/retrieve_utils.py:7-9` 实测 import）。
-- Wolfram 变体（A1）需 `wolframalpha` 包（`official-code/autogen/agentchat/contrib/math_user_proxy_agent.py:396-399`）。
+- OpenAI/Azure API key (via`OAI_CONFIG_LIST`or environment variable).
+- Docker optional:`use_docker`of`official-code/autogen/code_utils.py:221`is enabled by default with the docker package; if there is no Docker daemon,`{"use_docker": False}`needs to be explicitly executed in`code_execution_config`locally (the code must be trustworthy).
+- The search plan (A2) requires`chromadb`(`official-code/autogen/retrieve_utils.py:7-9`measured import).
+- Wolfram variant (A1) requires the`wolframalpha`package (`official-code/autogen/agentchat/contrib/math_user_proxy_agent.py:396-399`).
 
-## 本地保存范围
+## Local saving range
 
-`official-code/` 保存与论文机制直接相关的核心包：`autogen/agentchat/`（conversable_agent、groupchat、assistant_agent、user_proxy_agent 及 contrib 的 math/retrieve 代理）、`autogen/oai/`、`autogen/code_utils.py`、`autogen/math_utils.py`、`autogen/retrieve_utils.py`、`autogen/version.py`，以及 `OAI_CONFIG_LIST_sample`、`README.upstream.md`、`LICENSE`/`LICENSE-CODE`。仓库的 `test/`、`notebook/`、数据集与打包配置不在本目录中。
+`official-code/`saves core packages directly related to the paper mechanism:`autogen/agentchat/`(conversable_agent, groupchat, assistant_agent, user_proxy_agent and contrib's math/retrieve agent),`autogen/oai/`,`autogen/code_utils.py`,`autogen/math_utils.py`,`autogen/retrieve_utils.py`,`autogen/version.py`, and`OAI_CONFIG_LIST_sample`,`README.upstream.md`,`LICENSE`/`LICENSE-CODE`. The`test/`,`notebook/`, data sets and packaging configurations of the repository are not in this directory.
 
-一致性提醒：快照 `autogen/version.py:1` 为 `0.1.6`，论文 Figure 5（p.18）自称 v0.1.1；两者同期但版本号不一致，引用时注意。
+Consistency reminder: The snapshot`autogen/version.py:1`is`0.1.6`, and the paper Figure 5 (p.18) calls itself v0.1.1; the two are in the same period but the version numbers are inconsistent, so be careful when citing.

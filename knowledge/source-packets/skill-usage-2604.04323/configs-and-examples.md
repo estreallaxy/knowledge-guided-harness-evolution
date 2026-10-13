@@ -1,24 +1,24 @@
 # Configs and examples
 
-## 官方实验配置
+# Official Experiment Configuration
 
-| 设置 | 配置目录 | 主要差异 |
+|Settings|Configure Directory|Major variances|
 | --- | --- | --- |
-| SkillsBench | `official-code/experiments/configs/skillsbench/` | Claude、Kimi、Qwen 三套运行配置。 |
-| Terminal-Bench 2.0 | `official-code/experiments/configs/terminalbench/` | Claude、Kimi、Qwen 三套运行配置。 |
+| SkillsBench | `official-code/experiments/configs/skillsbench/` |Claude, Kimi, Qwen three sets of operating configurations.|
+| Terminal-Bench 2.0 | `official-code/experiments/configs/terminalbench/` |Claude, Kimi, Qwen three sets of operating configurations.|
 
-配置只能和对应论文版本、代码 revision、任务数据与模型环境一起解释。论文中的运行结果不能由单个 YAML 独立复现。
+The configuration can only be explained with the corresponding paper version, code review, task data and the model environment. The results of a run in a paper cannot be reproduced independently by a single YaML.
 
-## 官方流程入口
+# The official process entrance
 
-官方仓库把过程分为四步：
+The official repository divided the process into four steps:
 
-1. `scripts/prepare_experiment.py`：下载或组织实验材料，生成任务目录与 Harbor 配置。
-2. `scripts/retrieve_skills.py`：针对任务检索候选技能。
-3. `scripts/query_specific_refinement.py`：在任务环境中探索、判断并生成任务条件技能。
-4. `scripts/check_skill_usage.py` 与 `scripts/calculate_results.py`：检查轨迹中的技能使用并汇总结果。
+1.`scripts/prepare_experiment.py`: Download or organise experimental materials, generate task catalogues and Harbor configurations.
+2.`scripts/retrieve_skills.py`: Job search candidate skills.
+3.`scripts/query_specific_refinement.py`: Explore, diagnose and generate mission conditions skills in the mission environment.
+4. `scripts/check_skill_usage.py`with`scripts/calculate_results.py`: Check the use of skills in trajectories and summarize results.
 
-Query-specific refinement 的代码入口：
+Query-special access:
 
 ```bash
 python scripts/query_specific_refinement.py prepare \
@@ -34,8 +34,8 @@ python scripts/query_specific_refinement.py collect \
   --workspace <isolated-workspace>
 ```
 
-运行前必须另外取得论文使用的数据与外部依赖。仓库根 README 指向 Hugging Face 数据集 `Shiyu-Lab/Skill-Usage`；大型数据没有放入本来源包。
+Additional data and external reliance on the papers must be obtained before running. ReADME ReadME points to Hugging Face dataset`Shiyu-Lab/Skill-Usage`; large data is not included in the source package.
 
-## 本地保存范围
+# Local Save Range
 
-`official-code/` 保存与论文方法直接相关的核心脚本、检索服务、六套实验配置、任务查询元数据、三种检索 Skill，以及 refinement 使用的 skill-creator。任务全集、Terminal-Bench 2.0 副本、运行缓存和下载数据不在本目录中。
+`official-code/`saves core scripts, search services, six sets of experimental configurations, task query metadata, three types of search, Skill-creator for paper methods. Job Full Set, Terminal-Bench 2.0 Copy, Run Cache and Download data are not in this directory.

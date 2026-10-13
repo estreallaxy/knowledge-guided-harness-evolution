@@ -1,33 +1,33 @@
 # Configs and examples
 
-## 环境与配置入口
+##Environment and configuration entry
 
-| 文件 | 用途 |
+|document|use|
 | --- | --- |
-| `README.md` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `data_prepare/process_example.py` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `SENSE/README.md` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `data_prepare/1_goal/config.json` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `data_prepare/2_private_info/config.json` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `SENSE/configs/judge_config.json` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `SENSE/configs/prompt_template.json` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `SENSE/commands/example/gpt4o.sh` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `SENSE/commands/example/heter_gpt4o_gpt35.sh` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `SENSE/commands/example/llama3_8b.sh` | 核心方法所需的依赖、参数、配置或最小示例。 |
+| `README.md` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
+| `data_prepare/process_example.py` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
+| `SENSE/README.md` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
+| `data_prepare/1_goal/config.json` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
+| `data_prepare/2_private_info/config.json` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
+| `SENSE/configs/judge_config.json` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
+| `SENSE/configs/prompt_template.json` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
+| `SENSE/commands/example/gpt4o.sh` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
+| `SENSE/commands/example/heter_gpt4o_gpt35.sh` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
+| `SENSE/commands/example/llama3_8b.sh` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
 
-## Method 接入入口
+## Method access entrance
 
-| 文件 | 使用方式 |
+|document|Usage|
 | --- | --- |
-| `SENSE/initialization.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `SENSE/metric.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `SENSE/run_eval.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `SENSE/simulation.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `SENSE/commands/example/gpt4o.sh` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `SENSE/commands/example/heter_gpt4o_gpt35.sh` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `SENSE/commands/example/llama3_8b.sh` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `SENSE/configs/judge_config.json` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
+| `SENSE/initialization.py` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
+| `SENSE/metric.py` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
+| `SENSE/run_eval.py` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
+| `SENSE/simulation.py` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
+| `SENSE/commands/example/gpt4o.sh` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
+| `SENSE/commands/example/heter_gpt4o_gpt35.sh` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
+| `SENSE/commands/example/llama3_8b.sh` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
+| `SENSE/configs/judge_config.json` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
 
-## 本地保存范围
+## Local saving range
 
-`official-code/` 仅保存论文方法的核心实现、直接依赖接口、最小配置/示例/测试和许可证。大型外部数据、通用框架副本、缓存与论文实验输出未纳入。
+`official-code/` only preserves the paper method's core implementation, direct dependency interfaces, and the minimum configuration, examples, tests, and licenses. Large external datasets, copies of common frameworks, caches, and paper experiment outputs are not included.

@@ -1,17 +1,17 @@
 # Configs and examples
 
-## 环境与配置入口
+# Environment and configuration portal
 
-| 文件 | 用途 |
+|Documentation|Purpose|
 | --- | --- |
-| 未发现独立配置文件 | 从仓库 README 与入口程序核对运行参数 |
+|No separate profile found|Check running parameters from the repository README to the entry program|
 
-## 执行入口
+# Execute the entrance
 
-| 文件 | 使用方式 |
+|Documentation|Usage|
 | --- | --- |
-| `js/app.js` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `js/app.js` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
 
-## 本地保存范围
+# Local Save Range
 
-`official-code/` 保存官方仓库在固定 revision 下的核心源代码、配置、示例和测试入口。完整数据集、模型权重、缓存和论文实验输出需按官方 README 另行取得。
+`official-code/`saves the core source code, configuration, example and test portal of the official repository under fixed review. The complete data set, model weights, caches and theatrical outputs are to be obtained separately by official README.

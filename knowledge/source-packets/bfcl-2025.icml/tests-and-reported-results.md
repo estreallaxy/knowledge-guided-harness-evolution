@@ -1,12 +1,12 @@
 # Tests and reported results
 
-## 论文报告结果
+# Thesis reports
 
-Table 1（PDF p.6）给出 71 行模型 × 22 列的成绩。**以下全部为论文报告结果，不是本仓库复跑结果**；本包不含 `bfcl_eval/data/` 与其余模型适配器，无法复现这些数字。
+Table 1 (PDF p.6) gives results for 71 row models x 22 columns. ** The following is a full paper report and is not a rerun of the repository**; these figures cannot be reproduced without`bfcl_eval/data/`and the remaining model adaptor.
 
-论文表把 22 列分成：Overall Acc、Single Turn（AST 四列 + Execute 四列）、Crowd Sourced（四列）、Hallucination Measure（Irrelevance、Relevance）、Multi Turn（Base、Miss Func、Miss Param、Long Context）、Agentic（Web Search、Memory、SQL）。下列只列已核对过列位置的字段（核对依据见本节末）：
+The paper lists 22 columns: Overall Acc, Single Turn (AST IV + Execute IV), Crowd Sourced (IV), Halluciation Measure (Irelevance, Relevance), Multi Turn (Base, Miss Func, Miss Param, Long Context), Agenic (Web Search, Memory, SQL). The fields listed below have been checked for column locations (see end of this section for the basis of the check):
 
-| 模型（论文写法） | Overall Acc | Hallucination: Irrelevance | Multi Turn: Base | Multi Turn: Long Context | Agentic: Web Search | Agentic: Memory | Agentic: SQL |
+|Models (paper writing)| Overall Acc | Hallucination: Irrelevance | Multi Turn: Base | Multi Turn: Long Context | Agentic: Web Search | Agentic: Memory | Agentic: SQL |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | gpt-4o-2024-11-20 (Prompt) | 66.4 | 83.8 | 59.0 | 55.0 | 64.0 | 6.0 | 78.0 |
 | gpt-4o-2024-11-20 (FC) | 65.8 | 83.1 | 62.5 | 58.0 | 82.0 | 0.0 | 81.0 |
@@ -17,65 +17,65 @@ Table 1（PDF p.6）给出 71 行模型 × 22 列的成绩。**以下全部为�
 | Claude-3.5-Sonnet-20241022 (FC) | 53.8 | 74.0 | 55.0 | 47.5 | 74.0 | 4.0 | 60.0 |
 | o1-2024-12-17 (FC) | 52.8 | 82.0 | 52.5 | 43.0 | 48.0 | 12.0 | 83.0 |
 | Claude-3.5-Sonnet-20241022 (Prompt) | 49.4 | 64.4 | 9.0 | 10.5 | 68.0 | 0.0 | 60.0 |
-| Gemma-3-1b-it (Prompt)，表末 | 12.5 | 30.9 | 0.0 | 0.0 | 0.0 | 0.0 | 1.0 |
+|Gemma-3-1b-it (Prompt), end of table| 12.5 | 30.9 | 0.0 | 0.0 | 0.0 | 0.0 | 1.0 |
 
-对全部 71 行做列统计（同样只是对论文表格的重新计数，不是复跑）：
+Count all 71 rows (also recounting paper tables, not running):
 
-| 观察 | 数值 |
+|Observation|Value|
 | --- | --- |
-| Overall Acc 范围 | 12.5（Gemma-3-1b-it Prompt）至 66.4（gpt-4o-2024-11-20 Prompt） |
-| Agentic: Memory | 最高 12.0（o1-2024-12-17 的 Prompt 与 FC 两行并列），71 行中有 57 行为 0.0 |
-| Agentic: Web Search | 最高 83.0（claude-3.5-haiku-20241022 FC），18 行为 0.0 |
-| Agentic: SQL | 最高 91.0（o1-2024-12-17 Prompt），8 行为 0.0 |
-| Multi Turn 四列最高值 | Base 62.5、Miss Func 41.0、Miss Param 48.5、Long Context 58.0，均远低于单轮同量级列（AST/Execute 单轮多在 90 上下） |
-| 并行列出现 0.0 的行数 | Single Turn AST Parallel 2 行、AST Parallel Multiple 3 行、Execute Parallel 2 行、Execute Parallel Multiple 6 行、Crowd Sourced Parallel 4 行、Crowd Sourced Parallel Multiple 5 行 |
+|Overall Acc Range|12.5 (Gema-3-1b-it Prompt) to 66.4 (gpt-4o-2024-11-20 Prompt)|
+| Agentic: Memory |Highest 12.0 (o1-2024-12-17 rows of Prompt and FC), with 57 behaviors 0.0 in 71 rows|
+| Agentic: Web Search |Highest 83.0 (claude-3.5-haiku-20241022FC), 18 act 0.0|
+| Agentic: SQL |Highest 91.0 (o1-2024-12-17 Prompt), 8 Behaviour 0.0|
+|Highest values across the four Multi Turn categories|Base 62.5, Miss Func 41.0, Miss Param 48.5, and Long Context 58.0; all are far below the corresponding single-turn columns, where most AST/Execute values exceed 90.|
+|Number of rows in the row of 0.0|Single Turn AST Parallel 2 lines, AST Parallel Multiple 3 lines, Execute Parallel 2 lines, Execute Parallel Multiple 6 lines, Crowd Sourced Parallel 4 lines, Crowd Sourced Parallel Multiple 5 lines|
 
-论文正文还报告了这些量化结论（位置见 `exact-source-anchors.md`）：
+These quantitative findings are also reported in the body of the paper (see`exact-source-anchors.md`location):
 
-| 结论 | 数值 |
+|Conclusions|Value|
 | --- | --- |
-| prompting 模型解码问题更多（§5.1，PDF p.5） | 平均 412.93 条 vs FC 模型 182.5 条，共 4 251 条条目 |
-| multiple 类目函数调用个数错误（§5.1，PDF p.6） | 仅算成功解码的回复，FC 模型平均 77.5 次 vs prompting 模型 21 次 |
-| 旗舰 FC 模型并行能力回退（§5.3，PDF p.7） | o1-2024-12-17-FC 与 claude-3-5-sonnet-20241022-FC；与 Table 1 中两者并行列接近 0 一致 |
-| 记忆类目最好成绩（§5.6，PDF p.9） | 12%（openai o1-2024-12-17 (FC)）；与 Table 1 统计出的 Memory 列最高值一致 |
-| 污染迹象（§5.5，PDF p.8–9，Tables 2–3） | Salesforce xLAM-7B 在 crowd-sourced 集上 PPL 从 3.67 升到 5.09（char-NLL 同步上升），与多数模型的下降方向相反 |
-| 多轮确定性错误分析规模（§5.4.1，PDF p.7，Figure 4） | 800 条多轮条目 |
-| AST 与 Exec 打分一致性（§4.3，PDF p.5，Figure 3） | 原文只称"强相关"，未给相关系数 |
+|More problems with decodering models (§ 5.1, PDF p.5)|Average 412.93 vs FC model 182.5 article, total 4 251 entry|
+|Multiple catalog function calling a number error (§ 5.1, PDF p.6)|Only successful decoded responses, FC model averaged 77.5 Vs prompting model 21 times|
+|Flagship FC Model parallel capability retreat (§ 5.3, PDF p.7)|o1-2024-12-17-FC and claude-3-5-sonnet-20241022-FC; close to 0 in line with Table 1|
+|Best in the memory category (§ 5.6, PDF p.9)|12% (openai o1-2024-12-17 (FC)); in line with the top values of Table 1 Melody column|
+|Signs of contamination (§ 5.5, PDF p.8-9, Tables 2-3)|Salesforce xLAM-7B on Crowd-sourced PPL from 3.67 to 5.09 (char-NLL rising simultaneously), contrary to the direction of most models falling|
+|Scale of multiple rounds of certainty error analysis (§ 5.4.1, PDF p.7, Figure 4)|800 multi-wheel entries|
+|AST and Exec points in line (§ 4.3, PDF p.5, Figure 3)|Original is only "highly relevant" and no relevant coefficient|
 
-引用 Table 1 时的两个注意点：
+Two attention points when quoting Table 1:
 
-1. 表头在文本提取中被压成三行，列位置靠表头顺序对齐。本包核对了三处可独立验证的位置：Overall Acc 为第一列；最后三列为 Web Search / Memory / SQL（用 §5.6 的"12%"与 Memory 列最高值 12.0 互证）；`parallel` 相关列的位置与 §5.3 所述 o1-2024-12-17-FC、claude-3-5-sonnet-20241022-FC 并行能力回退互证（两行在这些列上分别为 0.0 与 3.5/5.0/4.0/0.0）。其余列未逐列反查，引用前应回到 PDF p.6。
-2. 表中 `Amazon-Nova-Lite-v1:0 (FC)` 出现两行，分类列数值完全相同，仅 Overall Acc 与 Agentic 三列不同（52.1 与 43.7；Web Search 62.0 与 10.0，SQL 58.0 与 9.0），论文未说明差异来源；引用该模型的数字时必须指明是哪一行。
+1. Text extraction compresses the table header into three rows, so columns must be aligned by header order. This packet cross-checks three independently verifiable positions: Overall Acc is the first column; the final three columns are Web Search, Memory, and SQL (cross-checked against the “12%” in §5.6 and the Memory-column maximum of 12.0); and, as described in §5.3, the `parallel` column is aligned using the parallel-capability rows for o1-2024-12-17-FC and claude-3-5-sonnet-20241022-FC, whose values are 0.0 and 3.5/5.0/4.0/0.0. Other columns have not been cross-checked and should be verified against PDF p.6 before citation.
+2. In the table, two rows of`Amazon-Nova-Lite-v1:0 (FC)`appear, with identical values for the classification column. Only Overall Acc differs from Argentina ' s three columns (52.1 and 43.7; Web Search 62.0 and 10.0, SQL 58.0 and 9.0), the source of the difference is not indicated in the paper; the reference to the model ' s figures must indicate which line.
 
-## 官方检查入口
+# Official check the entrance #
 
-BFCL 目录内没有单元测试目录、`pytest.ini`/`tox.ini`，`pyproject.toml` 也没有 pytest 配置；官方"检查"以可执行脚本与 CLI 自检命令为主，CI 相关配置在上游 `.github/`（未纳入本包）。
+There is no module test directory,`pytest.ini`/`tox.ini`, and `pyproject.toml` has no pytest configuration in the BFCL directory; the official "check" is dominated by an enforceable script and a CLI self-check command, and the CI-related configuration is upstream `.github/` (not included in this package).
 
-| 检查对象 | 官方代码 | 说明 |
+|Check Object|Official code|Annotations|
 | --- | --- | --- |
-| 测试类别与类别组是否齐全 | `official-code/TEST_CATEGORIES.md`；`bfcl test-categories`（`bfcl_eval/__main__.py:67-81`） | 打印 `TEST_COLLECTION_MAPPING` 中的类别与组。 |
-| 模型名是否可用 | `bfcl models`（`bfcl_eval/__main__.py:83-94`）、`official-code/bfcl_eval/constants/supported_models.py` | 列出 `MODEL_CONFIG_MAPPING` 的键。 |
-| 版本记录 | `bfcl version`（`bfcl_eval/__main__.py:60-65`） | 官方提示"PyPI 版本仍在演进，可复现性以 commit 为准"。 |
-| 函数文档格式 | `official-code/bfcl_eval/scripts/check_func_doc_format.py` | 校验 function doc 必须恰有三个顶层字段、参数类型落在枚举内等，并打印出问题的条目 ID。 |
-| 非法 Python 参数名 | `official-code/bfcl_eval/scripts/check_illegal_python_param_name.py` | 用 `keyword.kwlist` 检查参数名与 Python 关键字冲突，并回写修正。 |
-| 多轮函数文档一致性 | `official-code/bfcl_eval/scripts/compile_multi_turn_func_doc.py`、`_compile_helper.py` | 从后端类方法签名重新生成 `multi_turn_func_doc/*.json`，可与现有文档比对。 |
-| 多轮真值对话可复现 | `official-code/bfcl_eval/scripts/visualize_multi_turn_ground_truth_conversation.py` | 用 `execute_multi_turn_func_call` 重跑真值调用并输出每轮状态，是核对多轮真值的主要手段。 |
-| 端到端评测 | `bfcl generate` → `bfcl evaluate` → `bfcl scores` | 需要 `bfcl_eval/data/**` 数据集与模型 API key。 |
+|Test for full category and group| `official-code/TEST_CATEGORIES.md`；`bfcl test-categories`（`bfcl_eval/__main__.py:67-81`） |Prints categories and groups in`TEST_COLLECTION_MAPPING`.|
+|Modelname Available| `bfcl models`（`bfcl_eval/__main__.py:83-94`）、`official-code/bfcl_eval/constants/supported_models.py` |Lists`MODEL_CONFIG_MAPPING`keys.|
+|Version Record| `bfcl version`（`bfcl_eval/__main__.py:60-65`） |The official tip "PyPI version is still evolving and replicability is based on committee."|
+|Function document format| `official-code/bfcl_eval/scripts/check_func_doc_format.py` |Validates that the application doc must happen to have three top-level fields, the parameter type falls within the number of numbers, and prints the wrong entry ID.|
+|Invalid Python parameter name| `official-code/bfcl_eval/scripts/check_illegal_python_param_name.py` |Checks with`keyword.kwlist`parameters to conflict with Python keywords and write corrections back.|
+|Multi-cycle document consistency| `official-code/bfcl_eval/scripts/compile_multi_turn_func_doc.py`、`_compile_helper.py` |Recreates`multi_turn_func_doc/*.json`from the back-end method to match the existing document.|
+|Multi-cycle truth conversations can be repeated| `official-code/bfcl_eval/scripts/visualize_multi_turn_ground_truth_conversation.py` |Rerun the real value of`execute_multi_turn_func_call`and output the state of each wheel is the main means of checking multiple-wheel true values.|
+|End-to-end assessment| `bfcl generate` → `bfcl evaluate` → `bfcl scores` |`bfcl_eval/data/**`dataset and model API key.|
 
-上表脚本都以 `bfcl_eval/data/` 为输入（`PROMPT_PATH`、`POSSIBLE_ANSWER_PATH`、`MULTI_TURN_FUNC_DOC_PATH`），本包未纳入数据，因此这些脚本在本包内不能直接运行。
+`bfcl_eval/data/`is used as input (`PROMPT_PATH`, `POSSIBLE_ANSWER_PATH`, `MULTI_TURN_FUNC_DOC_PATH`), which is not included in the data and therefore cannot run directly in the package.
 
-## 当前核验状态
+# Current verification status
 
-| 项目 | 状态与依据 |
+|Item|Status and basis|
 | --- | --- |
-| PDF 可解析 | 已通过：`paper/paper-v1.pdf` 1 200 643 字节，`/Type /Page` 计数 22，与 22 个 `===== PDF p.N =====` 标记一致。 |
-| 论文页码与锚点 | 已通过：`exact-source-anchors.md` 中每一处章节/图表页码均回到 `paper/paper-v1.txt` 的 p.N 标记核对。 |
-| 论文 Table 1 | 已部分核对：上表与统计中引用的数值逐字取自 txt；列位置用三处可独立验证的位置交叉验证（见上），其余列未逐列反查。 |
-| 官方代码 revision | `6ea57973c7a6097fd7c5915698c54c17c5b1b6c8`（2026-03-23，branch `main`）。 |
-| official-code 体积 | 已通过：69 个文件、979 896 字节（约 0.93 MiB），无单文件 >1 MB；最大文件 `long_context.py` 190 330 字节。 |
-| Python 语法可解析 | 已通过：59 个 `.py` 全部 `ast.parse` 通过（本地以 `python3 -I` 运行解析脚本，未执行快照代码）。 |
-| 数据集与模型输出 | 未纳入来源包（`bfcl_eval/data/**` 与 `result/`）；无 `possible_answer` 真值。 |
-| 官方端到端复跑（generate + evaluate） | 尚未执行：缺数据集与 API key。 |
-| 检查器的样例级本地运行 | 尚未执行：未构造样例调用 `ast_checker`、`multi_turn_checker`、`agentic_checker`；接口签名已在 `configs-and-examples.md` 中按代码核对。 |
-| 论文报告数字与本地代码行为的一致性 | 仅做了三处互证（Memory 12.0、并行列回退、权重表）。代码与论文存在若干实现差异（agentic 为包含式匹配而非严格相等、executable/rest/sql/chatable 类别被跳过、多轮无关检查器与方法顺序检查器未生效），已记录在 `exact-source-anchors.md`，未作为"论文结论错误"处理。 |
-| 迁移到目标 Harness 的收益 | 尚未验证。 |
+|PDF Parsable|Adopted: `paper/paper-v1.pdf` 1 200 643 byte, `/Type /Page` Count 22, consistent with 22 `===== PDF p.N =====` tags.|
+|Thesis page number and anchor|Checked by:`exact-source-anchors.md`for each chapter/chart page number returned to the p.N. tag for `paper/paper-v1.txt`.|
+|Paper table 1|Partially reconciled: values cited in the above table and statistics are taken word for word from txt; column positions are cross-checked with three independently validated locations (see above) and the remaining columns are not cross-checked.|
+|Official code| `6ea57973c7a6097fd7c5915698c54c17c5b1b6c8`（2026-03-23，branch `main`）。 |
+|volume|Adopted: 69 documents, 979 896 bytes (approximately 0.93 MiB), no single file > 1 MB; maximum file`long_context.py`190 330 bytes.|
+|Python Syntax:|Passed: 59`.py`All `ast.parse` (Screen parsing scripts running locally with `python3 -I`, no snapshot code executed).|
+|Data sets and model outputs|Source package not included (`bfcl_eval/data/**`and `result/`); no`possible_answer`real value.|
+|Official-to-end rerun (generate + evaluate)|Not implemented: missing data set with API key.|
+|Sample Standard Runr Local|Not implemented:`ast_checker`, `multi_turn_checker`, `agentic_checker`; interface signature checked by code in `configs-and-examples.md`.|
+|Consistency of paper report figures with local code behaviour|Only three cross-certifications were made (Memory 12.0, plus back, weighting table). There are a number of achieving differences between the code and the the thesis (agentic is an inclusive match rather than a strict equivalence, executable/rest/sql/chatableclass is skipped, multiple rounds of non-relevant and method sequence checker is not in effect), recorded in `exact-source-anchors.md` and not treated as "conclusion error " .|
+|Proceed from moving to target Harness|Not yet validated.|

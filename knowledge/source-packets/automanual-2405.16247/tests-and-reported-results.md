@@ -1,40 +1,40 @@
 # Tests and reported results
 
-## 论文报告证据
+# Paper reporting evidence
 
-| 证据 | 位置 | 状态 |
+|Evidence|Location|Status|
 | --- | --- | --- |
-| 论文表格 | PDF p.8 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.9 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.15 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.16 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.19 | 论文报告值；本仓库尚未复跑。 |
+|Paper table| PDF p.8 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.9 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.15 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.16 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.19 |Value reported in the paper; it has not been rerun in this repository.|
 
-## 官方验证入口
+# Official validation entry points
 
-| 文件 | 核对对象 |
+|Documentation|Check Object|
 | --- | --- |
-| `alfworld/scripts/run_eval.py` | 官方评测、测试或结果计算入口 |
-| `automanual_alfworld/main_test.py` | 官方评测、测试或结果计算入口 |
-| `automanual_miniwob/main_test.py` | 官方评测、测试或结果计算入口 |
-| `automanual_webarena/main_test.py` | 官方评测、测试或结果计算入口 |
-| `alfworld/configs/eval_config.yaml` | 官方评测、测试或结果计算入口 |
-| `automanual_webarena/config_files/test.raw.json` | 官方评测、测试或结果计算入口 |
-| `alfworld/alfworld/agents/detector/coco_eval.py` | 官方评测、测试或结果计算入口 |
-| `alfworld/alfworld/agents/eval/evaluate_dagger.py` | 官方评测、测试或结果计算入口 |
-| `alfworld/alfworld/agents/eval/evaluate_dqn.py` | 官方评测、测试或结果计算入口 |
-| `alfworld/alfworld/agents/eval/evaluate_vision_dagger.py` | 官方评测、测试或结果计算入口 |
-| `alfworld/alfworld/agents/eval/__init__.py` | 官方评测、测试或结果计算入口 |
-| `automanual_alfworld/test_trial.py` | 官方评测、测试或结果计算入口 |
-| `automanual_miniwob/test_trial.py` | 官方评测、测试或结果计算入口 |
-| `automanual_webarena/test_trial.py` | 官方评测、测试或结果计算入口 |
+| `alfworld/scripts/run_eval.py` |Official assessment, test or result calculation portal|
+| `automanual_alfworld/main_test.py` |Official assessment, test or result calculation portal|
+| `automanual_miniwob/main_test.py` |Official assessment, test or result calculation portal|
+| `automanual_webarena/main_test.py` |Official assessment, test or result calculation portal|
+| `alfworld/configs/eval_config.yaml` |Official assessment, test or result calculation portal|
+| `automanual_webarena/config_files/test.raw.json` |Official assessment, test or result calculation portal|
+| `alfworld/alfworld/agents/detector/coco_eval.py` |Official assessment, test or result calculation portal|
+| `alfworld/alfworld/agents/eval/evaluate_dagger.py` |Official assessment, test or result calculation portal|
+| `alfworld/alfworld/agents/eval/evaluate_dqn.py` |Official assessment, test or result calculation portal|
+| `alfworld/alfworld/agents/eval/evaluate_vision_dagger.py` |Official assessment, test or result calculation portal|
+| `alfworld/alfworld/agents/eval/__init__.py` |Official assessment, test or result calculation portal|
+| `automanual_alfworld/test_trial.py` |Official assessment, test or result calculation portal|
+| `automanual_miniwob/test_trial.py` |Official assessment, test or result calculation portal|
+| `automanual_webarena/test_trial.py` |Official assessment, test or result calculation portal|
 
-## 当前核验状态
+# Current verification status
 
-| 项目 | 状态 |
+|Item|Status|
 | --- | --- |
-| 顶会录用页 | 已记录并与论文题目核对。 |
-| PDF 与分页文本 | 已下载并可解析，共 37 页。 |
-| 官方代码 | 已固定 revision，并保存核心代码、配置、示例与测试入口。 |
-| 大型数据与模型权重 | 未纳入来源包。 |
-| 官方端到端实验复跑 | 尚未执行；不得把论文报告结果表述为本地复跑结果。 |
+|Conference acceptance page|The title of the paper was recorded and checked.|
+|PDF Text with Page Break|Downloaded and parsed, 37 pages.|
+|Official code|Revision is fixed and the core code, configuration, example and test entry is saved.|
+|Large data and model weights|Not included in source package.|
+|Official-to-end experiment rerun|Not implemented; paper-reported results must not be presented as a local rerun.|

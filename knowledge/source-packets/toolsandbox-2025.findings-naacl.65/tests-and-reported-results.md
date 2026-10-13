@@ -1,14 +1,14 @@
 # Tests and reported results
 
-## 论文报告结果
+# Thesis reports
 
-以下数值均为**论文结果，非本仓库复跑结果**；引用位置见 `exact-source-anchors.md`。
+The following values are the results of the ** paper and the results of the rerun of the non-incorporated repository**; for the reference position see`exact-source-anchors.md`.
 
-### 主结果：平均相似度（Table 5，PDF p.7 / p.1166）
+# # Main result: average similarity (Table 5, PDF p.7/ p.1166)
 
-列为：Avg Score、Single Tool Call、Multiple Tool Call、Single User Turn、Multiple User Turn、State Dependency、Canonicalization、Insufficient Information。
+As follows: Avg Scorre, Single Tool Call, Multiple Tool Call, Single User Turn, Multiple User Turn, State Dependency, Canonicalization, Inclusion.
 
-| 模型 | Avg | STC | MTC | SUT | MUT | SD | C | II |
+|Model| Avg | STC | MTC | SUT | MUT | SD | C | II |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | GPT-4o-2024-05-13 | 73.0 | 87.8 | 80.1 | 84.2 | 74.7 | 84.0 | 76.6 | 42.0 |
 | Claude-3-Opus-20240229 | 69.2 | 83.5 | 70.0 | 74.5 | 67.2 | 74.5 | 71.1 | 57.3 |
@@ -24,13 +24,13 @@
 | Gorilla-Openfunctions-v2 | 25.6 | 36.2 | 8.2 | 15.1 | 9.3 | 0.0 | 8.9 | 69.2 |
 | C4AI-Command R+ | 24.7 | 57.2 | 13.6 | 24.3 | 15.2 | 4.0 | 19.4 | 35.3 |
 
-同一张表的工具增强列（0/3/10 干扰工具、All Tools、工具名/工具描述/参数描述/参数类型打乱）为：GPT-4o 75.1/75.0/74.6/72.6/72.4/69.3/73.0/71.9；Claude-3-Opus 68.3/68.6/70.0/67.5/70.8/71.5/65.8/71.1；其余模型见 PDF p.7。
+The tool-augmentation columns in the same table (0, 3, and 10 distractor tools; All Tools; and scrambling of tool names, tool descriptions, parameter descriptions, and parameter types) report: GPT-4o 75.1/75.0/74.6/72.6/72.4/69.3/73.0/71.9; Claude-3-Opus 68.3/68.6/70.0/67.5/70.8/71.5/65.8/71.1. See PDF p.7 for the remaining models.
 
-论文从该表给出的结论：开源与闭源模型存在 >20 分的差距；Insufficient Information 与其他类别负相关（弱模型因"不乱调用"而虚高，论文明确称之为 side effect 而非正面结果）；State Dependency 上大模型反而劣于中等模型，原因是它们更倾向于对依赖工具发起并行调用；MTC/MUT 的退化速度远快于 STC/SUT（PDF pp.7–8）。
+The paper concluded from the table that there was a >20-point gap between open and closed-source models; that there was a negative correlation between weak models and other categories (weak models were too high because they were "no-discretioned" and the paper explicitly referred to them as side effect rather than positive results); that large models on State Dependency were worse than medium models because they preferred to initiate parallel calls on relying tools; and that the degradation of MTC/MUT was much faster than that of STC/SUT (PDF pp.7-8).
 
-### 效率：平均轮数（Table 11，PDF p.24 / p.1183）
+### Efficiency: Average number of wheels (Table 11, PDF p.24/p.1183)
 
-| 模型 | Avg Turn Count ↓ | 模型 | Avg Turn Count ↓ |
+|Model| Avg Turn Count ↓ |Model| Avg Turn Count ↓ |
 | --- | ---: | --- | ---: |
 | Claude-3-Opus-20240229 | 11.6 | Gemini-1.5-Pro-001 | 15.0 |
 | Mistral-7B-Instruct-v0.3 | 11.8 | Hermes-2-Pro-Mistral-7B | 15.3 |
@@ -41,21 +41,21 @@
 | Claude-3-Haiku-20240307 | 13.6 | | |
 | GPT-3.5-Turbo-0125 | 13.7 | | |
 
-表注明确：轮数不能孤立解读，模型可能自信地做错并提前结束，应与相似度接近的模型互相比较。
+The table is clear: the rotation cannot be read in isolation, the model may be wrong with confidence and end early and should be compared with a similar model.
 
-### 消融与对照
+# And melt and contrast #
 
-| 实验 | 结果 | 位置 |
+|Experiment|Result|Location|
 | --- | --- | --- |
-| 用户模拟器提示（User Goal → +Knowledge Boundary → +Demonstration） | 幻觉 12.4 → 7.75 → 6.97；指令遵循错误 6.20 → 3.88 → 0.77（%，1032 条人工标注轨迹） | Table 2，PDF p.4 |
-| 用户模拟器误差 vs agent | GPT-4o 8.02±1.36、Claude-3-Opus 7.78±0.52、Gemini-1.5-Pro 8.07±1.03（4 次重复 × 1032 轨迹的总错误率） | Table 3，PDF p.4 |
-| ReAct 提示 vs 最小提示 | GPT-4o 73.0→73.6、Claude-3-Opus 69.2→69.3、GPT-4-0125 64.3→65.2、Claude-3-Sonnet 63.8→63.7 | Table 9，PDF p.22 |
-| 模型功能覆盖 | Gorilla、Command-R 系列不能消费工具响应，理论上只能在 Single Tool Call 上得分 | Table 10，PDF p.23 |
-| 工具 schema 打乱 | 论文报告为逐模型差异（Claude-3-Sonnet 在 All Tools 上比 0 干扰工具掉近 10 分；GPT-4o 对工具描述打乱敏感；Gemini-1.5 对参数类型打乱敏感） | §4，PDF p.8 |
+|User Simulator Hint (User Goal →Knowledge Bundary →Demontation)|Perceptions 12.4 → 7.75 → 6.97; error in command compliance 6.20 → 3.88 → 0.77 (%, 1032 manually marked tracks)| Table 2,PDF p.4 |
+|User emulator error vs agent|GPT-4o 8.02 ± 1.36, Claude-3-Opus 7.78/0.52, Gemini-1.5-Pro 8.07 (1)(4 repeat times x 1032 total error rate)| Table 3,PDF p.4 |
+|Rect Hint vs Mint Hint| GPT-4o 73.0→73.6,Claude-3-Opus 69.2→69.3,GPT-4-0125 64.3→65.2,Claude-3-Sonnet 63.8→63.7 | Table 9,PDF p.22 |
+|Model function overwrite|Gorilla, Comand-R series cannot be used to respond, theoretically only score on Single Tool Call| Table 10,PDF p.23 |
+|Tool Schema Disruption|The paper reports model-specific differences (Claude-3-Sonnet dropped close to 10 points on Alltools compared to 0 interference tools; GPT-4o was sensitive to tool descriptions; Gemini-1.5 was sensitive to parameter type)| §4,PDF p.8 |
 
-### 基准规模与里程碑覆盖
+# # base scale and milestone coverage
 
-| 基准 | 平均轮数 | 平均工具调用 | 测试用例 | 工具数 |
+|Benchmark|Average number of wheels|Average Tool Call|Test Example|Number of tools|
 | --- | ---: | ---: | ---: | ---: |
 | TOOL SANDBOX | 13.9 | 3.80 | 1032 | 34 |
 | BFCL | 2.00 | 0.78 | 2000 | 1193 |
@@ -64,40 +64,40 @@
 | ToolTalk | 7.42 | 3.68 | 78 | 28 |
 | τ-bench | 29.33 | 4.48 | 165 | 24 |
 
-（Table 4，PDF p.5）
+(Table 4,PDF p.5)
 
-场景类别计数（Table 6，PDF p.19，一个场景可属多类）：SINGLE_TOOL_CALL 152、MULTIPLE_TOOL_CALL 656、SINGLE_USER_TURN 584、MULTIPLE_USER_TURN 224、STATE_DEPENDENCY 192、CANONICALIZATION 472、INSUFFICIENT_INFORMATION 224。Table 7/8（同页）给出按数据库列（如 SETTING.wifi 136、SETTING.low_battery_mode 120）与按工具（如 `get_current_timestamp` 296、`search_contacts` 168）的里程碑覆盖计数。
+SINGLE TOOL CALL 152, MULTIPLE CALL CALL 656, SINGLE USER TURN 584, MULTIPLE USER TURN 224, STATE DEPENDENCY 192, CANONALIZATION 472, INSUFFICIT INFORMATION 224. Table 7/8 (same page) gives database columns (e.g. SETTING.wifi 136, SETTING.low battery mode 120) and press tools (e.g.`get_current_timestamp` 296,`search_contacts`168) Milestone coverage count.
 
-## 官方检查入口
+# Official check the entrance #
 
-| 检查对象 | 官方代码 | 本地是否执行 |
+|Check Object|Official code|Local execution|
 | --- | --- | --- |
-| 里程碑 / 矿场相似度算法 | `official-code/tests/common/evaluation_test.py`（4 个测试） | 已执行，4 项通过 |
-| 世界状态快照、增删改与序列化 | `official-code/tests/common/execution_context_test.py`（13 个测试） | 已执行，全部通过 |
-| 执行环境（语法错误、异常、并行调用） | `official-code/tests/roles/execution_environment_test.py`（6 个测试） | 已执行，4 通过 2 失败，见下 |
-| 状态依赖工具行为 | `official-code/tests/tools/setting_test.py`、`messaging_test.py`、`contact_test.py`、`reminder_test.py`、`utilities_test.py` | 已执行，全部通过（RapidAPI 测试被跳过） |
-| 消息与工具 schema 转换 | `official-code/tests/common/message_conversion_test.py`、`tool_conversion_test.py`、`tool_discovery_test.py`、`utils_test.py`、`validators_test.py` | 已执行，全部通过 |
-| 场景解析 | `official-code/tests/cli/cli_test.py` | 已执行，通过 |
-| 端到端评测产出 | `tool_sandbox` CLI 写出的 `result_summary.json`、`trajectories/*/conversation.json` | 未执行（需模型 API key 与 RapidAPI key） |
+|Milestone / mine similarity algorithm|`official-code/tests/common/evaluation_test.py`(4 tests)|Implemented, 4 adopted|
+|State of the world snapshot, add, delete and sequence|`official-code/tests/common/execution_context_test.py`(13 tests)|Implemented, all adopted|
+|Execute environments (grammatical errors, anomalies, parallel calls)|`official-code/tests/roles/execution_environment_test.py`(6 tests)|Implemented, 4 through 2 failed. See below|
+|State dependency on tool behaviour| `official-code/tests/tools/setting_test.py`,`messaging_test.py`,`contact_test.py`,`reminder_test.py`,`utilities_test.py` |Implemented, all (RapidaPI test skipped)|
+|Message & tool schema conversion| `official-code/tests/common/message_conversion_test.py`,`tool_conversion_test.py`,`tool_discovery_test.py`,`utils_test.py`,`validators_test.py` |Implemented, all adopted|
+|scene resolution| `official-code/tests/cli/cli_test.py` |Implemented, adopted|
+|End-to-end assessment output| `tool_sandbox`CLI wrote`result_summary.json`,`trajectories/*/conversation.json` |Not implemented (required model API key and RapidAPI key)|
 
-## 当前核验状态
+# Current verification status
 
-| 项目 | 状态 | 证据等级 |
+|Item|Status|Level of evidence|
 | --- | --- | --- |
-| 论文全文可解析 | 已通过：`paper/paper-v1.txt` 含 `PDF p.1`–`p.24` 共 24 页标记，与会议页码 1160–1183 对应 | 本地运行（文本层） |
-| 官方 PDF | 未纳入本包（原文件 20.2 MB，超出仓库体积约定）；获取地址 <https://aclanthology.org/2025.findings-naacl.65.pdf> | 未知（未做 PDF 解析复核） |
-| 论文 §2–§4、§7、Appendix A.7、Table 2–9 与本地全文 | 已逐段与 `paper/paper-v1.txt` 核对 | 本地运行 |
-| 官方代码版本 | 固定为 upstream revision `c8571d7` | 本地运行 |
-| 官方单元测试 | 已执行：69 通过、2 失败、1 跳过（62 秒） | 本地运行 |
-| 其中 2 项失败 | `tests/roles/execution_environment_test.py::test_execution_environment_syntax_error` 与 `::test_invalid_parallel_tool_call`，详见下节 | 本地运行 |
-| 官方端到端评测复跑（模型 × 1032 场景） | 尚未执行；需 OpenAI / Anthropic / RapidAPI 凭据与较长时间预算 | 尚未执行 |
-| 论文表格数值 | 已按原文誊录，未独立复算 | 论文报告 |
-| 迁移到目标 Harness 的收益 | 尚未验证 | 尚未验证 |
+|Full dissertation|Adopted:`paper/paper-v1.txt`Ham`PDF p.1`–`p.24`Twenty-four page marks, corresponding to the meeting page number 1160-1183|Locally run (text layer)|
+|Official PDF|Not included in the package (original file 20.2 MB, beyond repository size policy); address <https://aclanthology.org/2025.findings-naacl.65.pdf>|Unknown (PDF resolution review not performed)|
+|Papers §2–§4, §7, Appendix A.7, Table 2-9 and local full text|Checked with`paper/paper-v1.txt`paragraph by paragraph|Local Run|
+|Official code version|Fixed to upstream review`c8571d7`|Local Run|
+|Official module testing|Implemented: 69 pass, 2 fail, 1 skip (62 seconds)|Local Run|
+|Of which 2 failed| `tests/roles/execution_environment_test.py::test_execution_environment_syntax_error`with`::test_invalid_parallel_tool_call`As detailed in the following section|Local Run|
+|Official end-to-end rerun (model x 1032 scene)|Not implemented; OpenAI / Anthropic / RapidAPI based and longer budget|Not implemented|
+|Thesis table values|Interpreted, not independently recalculated|Paper reports|
+|Proceed from moving to target Harness|Not yet validated|Not yet validated|
 
-### 本地复跑命令与结果
+# Local rerun commands and results
 
 ```bash
-# 依赖按 official-code/pyproject.toml 的固定版本装入独立目录，未污染仓库
+# Reliance to load a stand-alone catalogue in a fixed version by special-code/pyproject.toml, uncontaminated repository
 python3 -m pip install --target /tmp/tsdeps "polars==0.20.31" "networkx==3.2.1" \
   "numpy==1.26.4" "scipy==1.13.1" "rouge-score==0.1.2" "StrEnum==0.4.15" \
   "typing_extensions==4.12.2" attrs pytest decorator==5.1.1 tqdm \
@@ -111,15 +111,15 @@ PYTHONPATH=/tmp/tsdeps python3 -m pytest tests/ -q -o addopts=""   # Python 3.10
 # => 2 failed, 69 passed, 1 skipped in 62.05s
 ```
 
-跳过的一项：`tests/tools/rapid_api_search_tools_test.py`，模块级 `pytest.skip`（无 `RAPID_API_KEY`）。
+Skipped:`tests/tools/rapid_api_search_tools_test.py`, module level`pytest.skip`(no`RAPID_API_KEY`).
 
-两项失败的定位（均为本地复跑观察到的**代码行为**，不是论文结论）：
+Two failed positioning (both local reruns observed ** code behaviour**, not the conclusion of the paper):
 
-| 失败测试 | 现象 | 判断 |
+|Failed Test|phenomena|Judgement|
 | --- | --- | --- |
-| `test_execution_environment_syntax_error` | 该测试把 Python 3.9 的 SyntaxError 提示原样写成期望值（单个 `^`），而 Python 3.10 会对整个 token 画 `^^^^` | 环境/解释器版本差异，与本包机制无关；换 3.9 解释器即可 |
-| `test_invalid_parallel_tool_call` | `df[-2]["openai_function_name"]` 实际为 `set_wifi_status`，测试期望 `search_stock`。实现（`execution_environment.py:192-224`）在第一个排列就检测到失败时**直接返回该排列的响应**，而不是测试期望的置换后顺序；测试第 280 行的"wifi 应仍为关闭"断言之所以通过，是因为它读的是置换前捕获的 `ExecutionContext` 对象 | 官方测试的期望与实际实现存在顺序语义差异；论文 Appendix A.6 只声明"检测到竞态就一定发生"，未规定消息顺序，故不能据此否定论文结论 |
+| `test_execution_environment_syntax_error` |The test prepares the SyntaxError hint of Python 3.9 as the desired value (individually)`^`) and Python 3.10 will draw the whole token`^^^^` |Environmental/Interpreter version differences, not related to this package mechanism; replace 3.9 Interpreters|
+| `test_invalid_parallel_tool_call` | `df[-2]["openai_function_name"]`Actual`set_wifi_status`Test expectations.`search_stock`I don't know. Achieved (`execution_environment.py:192-224`) When the first sequence is detected to fail ** returns the response to the sequence,** instead of testing the replacement order of expectations; the test line 280 "wifi should still be closed" assertion was adopted because it read the pre-replacement capture.`ExecutionContext`Object|The expectations of the official tests differ from the semantics of the actual realization; the paper Appendix A.6 simply states that "a race is detected" and does not specify the order of the message, so the conclusions cannot be refuted.|
 
-需要区分证据等级的两点：论文的"并行调用会被惩罚"属于**论文报告**；上面第 2 条只是**本地复跑观察到的代码行为**，两者不冲突但也不互相印证。
+Two points that need to be distinguished from the level of evidence: the "parallel call" of the paper is punishable as part of ** paper report**; article 2 above is only ** Code behaviour observed by the local rerun**, which is not in conflict with but does not support each other.
 
-另有一处**代码与论文正文的差异**（不涉及失败）：`ScenarioCategories` 枚举定义了 `COREFERENCE` 与 `DISAMBIGUATION`，但论文 §3 与 Table 5 均未单列这两类，且全仓无任何引用（见 `exact-source-anchors.md`）。
+There is also a difference between ** code and the body of the paper** (not involving failure):`ScenarioCategories`It's a definition.`COREFERENCE`with`DISAMBIGUATION`However, the paper § 3 and Table 5 do not list these two categories separately and are not quoted at all (see below).`exact-source-anchors.md`).

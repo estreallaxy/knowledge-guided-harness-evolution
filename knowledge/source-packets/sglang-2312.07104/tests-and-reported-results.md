@@ -1,26 +1,26 @@
 # Tests and reported results
 
-## 论文报告证据
+# Paper reporting evidence
 
-| 证据 | 位置 | 状态 |
+|Evidence|Location|Status|
 | --- | --- | --- |
-| 论文表格 | PDF p.4 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.8 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.9 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.18 | 论文报告值；本仓库尚未复跑。 |
+|Paper table| PDF p.4 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.8 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.9 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.18 |Value reported in the paper; it has not been rerun in this repository.|
 
-## 官方验证入口
+# Official validation entry points
 
-| 文件 | 核对对象 |
+|Documentation|Check Object|
 | --- | --- |
-| 未发现独立测试文件 | 依据官方 README 与方法入口执行最小验证。 |
+|No independent test file found|Do the minimum validation according to the official README and method portal.|
 
-## 当前核验状态
+# Current verification status
 
-| 项目 | 状态 |
+|Item|Status|
 | --- | --- |
-| 顶会录用页 | 已记录并与论文题目核对。 |
-| PDF 与分页文本 | 已下载并可解析，共 20 页。 |
-| 官方代码 | 已固定 revision，并保存核心代码、配置、示例与测试入口。 |
-| 大型数据与模型权重 | 未纳入来源包。 |
-| 官方端到端实验复跑 | 尚未执行；不得把论文报告结果表述为本地复跑结果。 |
+|Conference acceptance page|The title of the paper was recorded and checked.|
+|PDF Text with Page Break|Downloaded and parsed, 20 pages in total.|
+|Official code|Revision is fixed and the core code, configuration, example and test entry is saved.|
+|Large data and model weights|Not included in source package.|
+|Official-to-end experiment rerun|Not implemented; paper-reported results must not be presented as a local rerun.|

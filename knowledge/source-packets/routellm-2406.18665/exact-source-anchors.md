@@ -1,33 +1,33 @@
 # Exact source anchors
 
-页码按 `paper/paper-v1.pdf`（16 页）计，可用 `paper/paper-v1.txt` 的 `--- PDF page N ---` 标记复核。
+Page number by`paper/paper-v1.pdf`(16 pages)`paper/paper-v1.txt`Yes.`--- PDF page N ---`Marking review.
 
-## 论文
+# Papers
 
-| 要核对的内容 | 精确位置 | 原文支持的范围 |
+|Content to check|Exact Location|Scope of original support|
 | --- | --- | --- |
-| 问题设定：推理时在强/弱模型之间二选一 | Abstract 与 §1，PDF p.1 | 路由器在请求级决策；不做多模型级联。 |
-| 主打主张：成本降到 **1/2 以下**且不牺牲质量 | Abstract，PDF p.1 | 论文用「>2×」表述；具体随模型对与阈值变化。 |
-| 用**人类偏好数据**训练路由器 + 数据增强 | Abstract，PDF p.1；§2–§3，PDF p.2 | 偏好数据来源为 Chatbot Arena 对战。 |
-| 四类路由器 | §4（PDF pp.4–6） | 相似度加权、矩阵分解、BERT 分类器、因果语言模型；超参见原文。 |
-| 阈值/缩放参数 | §4，PDF p.5 | 论文称指数缩放效果最好并取 γ = 10。 |
-| 实验设置：强 `gpt-4-1106-preview`、弱 `Mixtral 8x7B`，随机路由为对照 | §5.1，PDF p.7 | CPT(50%)/CPT(80%) 与 APGR 三个指标的定义见该节。 |
-| MT Bench 主结果 | Table 1，PDF p.7 | 表注说明 CPT(50%) 处 MT Bench 8.8 ≈ GPT-4 的 95%。 |
-| MMLU 结果 | Table 2，PDF p.7 | 表注说明 CPT(50%) 处 75 ≈ GPT-4 的 92%。 |
-| GSM8K 结果 | Table 3，PDF p.8 | 表注说明 CPT(50%) 处 75 ≈ GPT-4 的 87%。 |
-| 迁移：路由到训练中未出现的模型对 | Table 4，PDF p.8 | 论文主张路由器有较强泛化；表中给出跨模型对结果。 |
-| 成本估计 | §5，PDF p.9 | 论文用 GPT-4 与 Mixtral 8x7B 的每百万 token 价格估算。 |
+|Problem-setting: Select between strong/weak models in reasoning|Abstract and § 1, PDF p.1|Routers make decisions at the request level; no multi-model cascades.|
+|Main claim: cost down to **1/2 below** without sacrificing quality| Abstract,PDF p.1 |The paper is presented as >2x; as the model changes with the threshold.|
+|Train router + data enhancement using** human preference data**| Abstract,PDF p.1;§2–§3,PDF p.2 |The preferred source of data is Chatbot Arena against the war.|
+|Type 4 routers| §4(PDF pp.4–6) |Similarity weighting, matrix decomposition, BERT classification, causal language model; see also original.|
+|Threshold/scaling parameters| §4,PDF p.5 |The paper stated that index scaling was the best and took gamma = 10.|
+|Experiment Settings: Strong`gpt-4-1106-preview`Weak.`Mixtral 8x7B`, random route is contrasted| §5.1,PDF p.7 |For the definitions of the three indicators, CPC (50 per cent)/CPT (80 per cent) and APGR, see this section.|
+|MT Bench Main result| Table 1,PDF p.7 |The table indicates 95 per cent of MT Bench 8.8 ≈ GPT-4.|
+|MMLU Results| Table 2,PDF p.7 |The table indicates 92 per cent of 75 GPT-4 CPT (50 per cent).|
+|GSM8K Results| Table 3,PDF p.8 |The table shows 87 per cent of 75 GPT-4 CPT (50 per cent).|
+|Migration: route to model not present in training| Table 4,PDF p.8 |The paper advocated stronger generalization of routers; cross-model results were given in the table.|
+|Cost estimates| §5,PDF p.9 |The paper is estimated at GPT-4 and Mixtral 8x7B per million token prices.|
 
-## 官方代码
+# Official code
 
-行号锚点按 `official-code/` 快照（revision `0b64fdafe049e596a3f5657c219329f24af24198`）计。
+Line anchors are measured against the `official-code/` snapshot at revision `0b64fdafe049e596a3f5657c219329f24af24198`.
 
-| 机制或证据 | 代码位置 | 作用 |
+|Mechanism or evidence|Code Position|Role|
 | --- | --- | --- |
-| 路由控制器 | `routellm/controller.py:41`（`Controller`） | 对外接口：按 `router-<name>-<threshold>` 形式的模型名路由。 |
-| 模型对定义 | `routellm/controller.py:36`（`ModelPair`）、`:31`（`RoutingError`） | 强/弱模型对与路由异常。 |
-| 阈值校准 | `routellm/calibrate_threshold.py` | 命令行校准：给定强模型调用比例求阈值。 |
-| 路由器实现 | `routellm/routers/similarity_weighted/`、`matrix_factorization/`、`causal_llm/`、`routers.py` | 论文四类路由器中开源实现的三类 + 统一接口。 |
-| OpenAI 兼容服务 | `routellm/openai_server.py` | 起本地 OpenAI 兼容端点，便于无侵入替换客户端。 |
-| checkpoint 配置 | `config.example.yaml` | 指向 HuggingFace 上的 `routellm/*` 权重。 |
-| 评测脚本 | `routellm/evals/benchmarks.py`、`evaluate.py` | 评测入口（本快照未纳入其数据目录）。 |
+|Route controller| `routellm/controller.py:41`(`Controller`) |External interface: Model names in`router-<name>-<threshold>`.|
+|Model to Definition| `routellm/controller.py:36`(`ModelPair`),`:31`(`RoutingError`) |A strong/weak model is abnormal with route.|
+|threshold calibration| `routellm/calibrate_threshold.py` |Command line calibration: A ratio threshold is applied to a given strong model.|
+|Router achieved| `routellm/routers/similarity_weighted/`,`matrix_factorization/`,`causal_llm/`,`routers.py` |Three types of integrated interface to be achieved by open sources in the 4th class router.|
+|OpenAI Compatibility Service| `routellm/openai_server.py` |Starts the local OpenAI compatible endpoint to replace the client without intrusion.|
+|Checkpoint Configuration| `config.example.yaml` |Points to`routellm/*`weights on HuggingFace.|
+|Evaluate scripts| `routellm/evals/benchmarks.py`,`evaluate.py` |Assessment portal (this snapshot is not included in its data catalogue).|

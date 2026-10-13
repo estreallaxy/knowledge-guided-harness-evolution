@@ -1,23 +1,23 @@
 # Tests and reported results
 
-论文报告值，**不是本仓库复跑结果**。
+The value reported in the paper is not the result of repeated running in this repository.
 
-> 数值来自 `paper/paper-v3.txt` 的文本提取，表格单元格折行/串列风险存在。
-> 引用前请对照 `paper/paper-v3.pdf` 原文核对；本文件只登记可确证的数字。
+> The value comes from the text extraction of`paper/paper-v3.txt`, and there is a risk of folding/serializing the table cells.
+> Please check against the original text of`paper/paper-v3.pdf`before quoting; only verifiable numbers are registered in this document.
 
-## 核心主张（Abstract，PDF p.1；§1，PDF p.2）
+## Core Claims (Abstract, PDF p.1; §1, PDF p.2)
 
-| 主张 | 数值 | 说明 |
+|advocate|numerical value|illustrate|
 | --- | --- | --- |
-| 峰值 token 下降 | **26–54%** | 跨 AppWorld / OfficeBench / 8-objective QA 的区间。 |
-| 小模型作为长程 agent 的性能提升 | 最高 **+46%** | 缓解上下文干扰带来的收益，只针对小模型场景。 |
-| 相对压缩基线 | 成功率更高 | 与 FIFO / Retrieval / LLMLingua / Prompting 等基线对照。 |
+|Peak token decrease| **26–54%** |Intervals across AppWorld / OfficeBench / 8-objective QA.|
+|Performance improvement of small models as long-range agents|Up to **+46%**|The benefits brought by mitigating context interference are only for small model scenarios.|
+|Relative compression baseline|higher success rate|Compare with baselines such as FIFO / Retrieval / LLMLingua / Prompting.|
 
-## Table 1（PDF p.6）AppWorld，agent gpt-4.1 / compressor gpt-4.1，Average(168)
+## Table 1 (PDF p.6)AppWorld, agent gpt-4.1 / compressor gpt-4.1, Average(168)
 
-列为 accuracy / steps / peak input tokens（10³）/ dependency（10⁶）。
+Listed as accuracy / steps / peak input tokens (10³) / dependency (10⁶).
 
-| 方案 | Acc. | Steps | Peak | Dep. |
+|plan| Acc. | Steps | Peak | Dep. |
 | --- | ---: | ---: | ---: | ---: |
 | No compression | 56.0 | 16.14 | 49.93 | 5.96 |
 | History: FIFO | 45.8 | 28.48 | 6.73 | 5.69 |
@@ -29,54 +29,54 @@
 | Observation: **ACON UT** | 47.0 | 16.67 | 7.62 | 5.08 |
 | Observation: **ACON UTCO** | 53.6 | 18.12 | 7.43 | 4.93 |
 
-读法提醒：压缩把峰值 token 大幅压到个位数（10³），但 **steps 上升**（16.14 → 22.82），
-即「省上下文」换来了更多轮交互；不要只引用 token 下降而不提步数变化。
+Reading reminder: compression greatly reduces the peak token to single digits (10³), but **steps increases** (16.14 → 22.82),
+That is, "saving context" results in more rounds of interactions; don't just quote the token decrease without mentioning the change in the number of steps.
 
-## Table 2a（PDF p.7）OfficeBench，agent gpt-4.1 / compressor gpt-4.1
+## Table 2a (PDF p.7)OfficeBench, agent gpt-4.1 / compressor gpt-4.1
 
-| 方案 | Acc. | Steps | Peak | Dep. |
+|plan| Acc. | Steps | Peak | Dep. |
 | --- | ---: | ---: | ---: | ---: |
 | No Compression | 76.84 | 11.52 | 7.27 | 4.43 |
 | Prompting | 71.58 | 10.13 | 4.40 | 1.10 |
 | **ACON UT** | 74.74 | 13.13 | 4.93 | 3.85 |
 | **ACON UTCO** | 72.63 | 11.54 | 4.54 | 1.91 |
 
-读法提醒：OfficeBench 上 ACON 的准确率**低于不压缩**（76.84 → 74.74/72.63），
-论文只在效率—准确率权衡上主张优势。这一点在迁移前必须显式复核。
+Reading reminder: The accuracy of ACON on OfficeBench is lower than that without compression (76.84 → 74.74/72.63),
+The paper only advocates advantages on the efficiency-accuracy trade-off. This must be explicitly reviewed before migrating.
 
-## Table 3（PDF p.9）优化器消融（AppWorld，gpt-4.1 agent，history compressor）
+## Table 3 (PDF p.9) Optimizer ablation (AppWorld, gpt-4.1 agent, history compressor)
 
-| 优化器配置 | Average Acc. |
+|Optimizer configuration| Average Acc. |
 | --- | ---: |
-| o3 + 对比式反馈（默认） | 51.2 |
-| o3 去掉对比式反馈 | 50.6（−0.6） |
-| gpt-4.1 + 对比式反馈 | 47.6（−3.6） |
-| gpt-5 + 对比式反馈 | 50.6（−0.6） |
+|o3 + contrastive feedback (default)| 51.2 |
+|o3 Remove comparative feedback| 50.6 (−0.6) |
+|gpt-4.1 + comparative feedback| 47.6 (−3.6) |
+|gpt-5 + comparative feedback| 50.6 (−0.6) |
 
-## Table 4（PDF p.9）实际效率（AppWorld）
+## Table 4 (PDF p.9) Actual Efficiency (AppWorld)
 
-| 方案 | API 成本/题 | 单题时延 |
+|plan|API cost/question|Single question delay|
 | --- | ---: | ---: |
 | No Compression | $0.331 | 73.24s |
 | ACON (history) | $0.285 | 87.68s |
 | ACON (observation) | $0.272 | 101.92s |
 
-读法提醒：成本下降约 14–18%，但时延上升 20–39%；「省钱」不等于「更快」。
+Reading reminder: The cost dropped by about 14-18%, but the delay increased by 20-39%; "saving money" does not mean "faster".
 
-## Table 13（PDF p.25）蒸馏压缩器（AppWorld Average Acc.）
+## Table 13 (PDF p.25) Distillation Compressor (AppWorld Average Acc.)
 
-| 压缩器 | Average Acc. |
+|Compressor| Average Acc. |
 | --- | ---: |
-| Prompting（gpt-4.1-mini） | 39.3 |
-| **ACON（gpt-4.1-mini）** | 47.6 |
+| Prompting (gpt-4.1-mini) | 39.3 |
+| **ACON (gpt-4.1-mini)** | 47.6 |
 
-## 当前核验状态
+## Current verification status
 
-| 项目 | 状态 |
+|project|state|
 | --- | --- |
-| PDF 可解析 | 已通过，57 页，提取到 `paper/paper-v3.txt`（含分页标记） |
-| Abstract / §1 / §3 / §4 / §6 与 Table 1–4、13 | 已按本地文本核对，发现上述「steps 上升」「OfficeBench 准确率下降」两处需在引用时说明 |
-| 论文自身口径 | 未发现内部冲突 |
-| 官方端到端复跑 | **未执行**（需 AppWorld 数据与模型凭据） |
-| 官方单元测试 | **未知**：上游仓库无 tests 目录 |
-| 迁移到本 harness 的收益 | **未验证** |
+|PDF parsable|Passed, 57 pages, extracted to`paper/paper-v3.txt`(including pagination marks)|
+|Abstract / §1 / §3 / §4 / §6 and Table 1–4, 13|I have checked against the local text and found that the above two points "steps increased" and "OfficeBench accuracy decreased" need to be explained when citing.|
+|The caliber of the paper itself|No internal conflicts found|
+|Official end-to-end rerun|**Not executed** (requires AppWorld data and model credentials)|
+|Official unit tests|**Unknown**: There is no tests directory in the upstream repository|
+|Benefits of migrating to this harness|**Not verified**|

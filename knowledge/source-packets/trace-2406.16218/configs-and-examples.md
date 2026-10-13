@@ -1,34 +1,34 @@
 # Configs and examples
 
-## 环境与配置入口
+# Environment and configuration portal
 
-| 文件 | 用途 |
+|Documentation|Purpose|
 | --- | --- |
-| `examples/bbh/run_prompt_bigbench_dspy.py` | 依赖、参数、配置或运行示例入口 |
-| `examples/bbh/run_prompt_bigbench_trace.py` | 依赖、参数、配置或运行示例入口 |
-| `examples/textgrad_examples/evals/textgrad_prompt_optimization.py` | 依赖、参数、配置或运行示例入口 |
-| `examples/textgrad_examples/README.md` | 依赖、参数、配置或运行示例入口 |
-| `examples/textgrad_examples/evals/textgrad_solution_optimization.py` | 依赖、参数、配置或运行示例入口 |
-| `examples/textgrad_examples/notebooks/textgrad_prompt_optimization.ipynb` | 依赖、参数、配置或运行示例入口 |
-| `examples/textgrad_examples/notebooks/textgrad_test_time_loss_for_code.ipynb` | 依赖、参数、配置或运行示例入口 |
-| `examples/textgrad_examples/notebooks/textgrad_test_time_loss_for_code_OptoPrimeMulti.ipynb` | 依赖、参数、配置或运行示例入口 |
-| `.pre-commit-config.yaml` | 依赖、参数、配置或运行示例入口 |
-| `pyproject.toml` | 依赖、参数、配置或运行示例入口 |
-| `README.md` | 依赖、参数、配置或运行示例入口 |
-| `setup.py` | 依赖、参数、配置或运行示例入口 |
-| `examples/battleship.py` | 依赖、参数、配置或运行示例入口 |
-| `examples/greeting.py` | 依赖、参数、配置或运行示例入口 |
-| `examples/virtualhome.py` | 依赖、参数、配置或运行示例入口 |
-| `opto/trace/README.md` | 依赖、参数、配置或运行示例入口 |
+| `examples/bbh/run_prompt_bigbench_dspy.py` |Dependence, parameters, configuration or run example entry|
+| `examples/bbh/run_prompt_bigbench_trace.py` |Dependence, parameters, configuration or run example entry|
+| `examples/textgrad_examples/evals/textgrad_prompt_optimization.py` |Dependence, parameters, configuration or run example entry|
+| `examples/textgrad_examples/README.md` |Dependence, parameters, configuration or run example entry|
+| `examples/textgrad_examples/evals/textgrad_solution_optimization.py` |Dependence, parameters, configuration or run example entry|
+| `examples/textgrad_examples/notebooks/textgrad_prompt_optimization.ipynb` |Dependence, parameters, configuration or run example entry|
+| `examples/textgrad_examples/notebooks/textgrad_test_time_loss_for_code.ipynb` |Dependence, parameters, configuration or run example entry|
+| `examples/textgrad_examples/notebooks/textgrad_test_time_loss_for_code_OptoPrimeMulti.ipynb` |Dependence, parameters, configuration or run example entry|
+| `.pre-commit-config.yaml` |Dependence, parameters, configuration or run example entry|
+| `pyproject.toml` |Dependence, parameters, configuration or run example entry|
+| `README.md` |Dependence, parameters, configuration or run example entry|
+| `setup.py` |Dependence, parameters, configuration or run example entry|
+| `examples/battleship.py` |Dependence, parameters, configuration or run example entry|
+| `examples/greeting.py` |Dependence, parameters, configuration or run example entry|
+| `examples/virtualhome.py` |Dependence, parameters, configuration or run example entry|
+| `opto/trace/README.md` |Dependence, parameters, configuration or run example entry|
 
-## 执行入口
+# Execute the entrance
 
-| 文件 | 使用方式 |
+|Documentation|Usage|
 | --- | --- |
-| `examples/bbh/run_prompt_bigbench_dspy.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `examples/bbh/run_prompt_bigbench_trace.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `tests/unit_tests/run.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `examples/bbh/run_prompt_bigbench_dspy.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `examples/bbh/run_prompt_bigbench_trace.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `tests/unit_tests/run.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
 
-## 本地保存范围
+# Local Save Range
 
-`official-code/` 保存官方仓库在固定 revision 下的核心源代码、配置、示例和测试入口。完整数据集、模型权重、缓存和论文实验输出需按官方 README 另行取得。
+`official-code/`saves the core source code, configuration, example and test portal of the official repository under fixed review. The complete data set, model weights, caches and theatrical outputs are to be obtained separately by official README.

@@ -1,9 +1,9 @@
-# StateFork 报告结果与复核边界
+# StateFork report results and review borders
 
-固定论文 `2609.38648v1`，原文定位：§2.2 状态边界；§3.1–3.3 / PDF pp.6–7；§4 Waypoint；§5.2 / pp.11–12；附录 A 评测条件。
+Fixed paper`2609.38648v1`, original location: §2.2 state boundary; §3.1–3.3/PDF pp.6–7; §4 Waypoint; §5.2/pp.11–12; Appendix A Conditions for evaluation.
 
-论文报告相同 MCTS 与 visited-node 预算下任务完成相对提高约 26%、探索最高快约 70%；这是其 Terminal-Bench 设置、77 题且每配置一次，不是共同 TB2.0 30/19/40 协议。Smart Decider 对 eager：平均完成时间减少 23%、存储减少 58%，不是单项机制的本地迁移收益。
+The same paper reported that MCTS had a relative increase of about 26 per cent and a maximum of 70 per cent in terms of the completion of tasks under the budget of the World-node; this was its Terminal-Bench settings, 77 questions and each configuration, not a common TB2.0 30/19/40protocol. Smart Decider for eager: Average completion time decreased by 23 per cent, storage decreased by 58 per cent, not local migration proceeds for individual mechanisms.
 
-固定代码与本地适配的历史核对说明：论文估计 C_phys=αm+β，并与累计 C_replay 比较。固定 StateFork decider/decider.py 的 ThresholdDecider 默认 threshold=5 秒，并无此线性模型。本地版本由调用方显式传入估计成本，再按论文规则选择；不自动拟合 α/β，不宣称复现 upstream Smart Decider。Waypoint 固定代码为并发 fork 模型，需 Linux、root、CRIU/OverlayFS 与 fork-capable CLI；论文原实验 commit 未知，不能与论文后端自动等价。
+A historical reconciliation between the fixed code and local appliance: The paper estimates C phys = alpham+beta and compares it with the cumulative C replay. TrishholdDecider default for StateFork decider/decider.py = 5 seconds without this linear model. Local versions are selected by the caller ' s explicit input estimated cost, which is selected by the dissertation rules; no automatic alignment of alpha/beta, no declaration of recurrence. Waypoint fixed code is a combined fork model that requires Linux, root, CRIU/OverlayFS and fork-capable CLI; the original commit of the paper is unknown and cannot be automatically equivalent to the back end of the paper.
 
-官方测试的执行结果：未知；没有运行完整上游系统。固定 README 中的官方入口保存在 [配置与示例](configs-and-examples.md)。此前独立本地适配通过 5 项合成功能测试；这些测试既不是官方测试，也不是 H0 迁移、收益或完整论文复现。StateFork 的真实 CRIU/Waypoint 后端未验证。
+Results of implementation of official tests: unknown; complete upstream system not operational. The official entry in README is stored in [configuration and examples] (configs-and-examples.md). Previously, independent local adaptation passed 5 synthetic functional tests; these were neither official tests nor H0 migrations, returns or full dissertation. StateFork's real CRIU/Waypoint backend is not verified.

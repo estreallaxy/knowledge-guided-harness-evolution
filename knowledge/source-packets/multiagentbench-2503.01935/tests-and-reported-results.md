@@ -1,38 +1,38 @@
 # Tests and reported results
 
-## 论文报告证据
+# Paper reporting evidence
 
-| 证据 | 位置 | 状态 |
+|Evidence|Location|Status|
 | --- | --- | --- |
-| 论文表格 | PDF p.6 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.7 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.14 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.19 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.20 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.21 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.30 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.31 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.33 | 论文报告值；本仓库尚未复跑。 |
+|Paper table| PDF p.6 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.7 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.14 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.19 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.20 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.21 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.30 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.31 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.33 |Value reported in the paper; it has not been rerun in this repository.|
 
-## 官方验证入口
+# Official validation entry points
 
-| 文件 | 核对对象 |
+|Documentation|Check Object|
 | --- | --- |
-| `tests/test_model_prompting.py` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `tests/test_short_term_memory.py` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `marble/evaluator/env_evaluation_prompts.json` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `marble/evaluator/evaluator_prompts.json` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `marble/agent/werewolf_prompts/eval_communication.yaml` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `marble/agent/werewolf_prompts/eval_competiveness.yaml` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `marble/agent/werewolf_prompts/eval_prompts.yaml` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `marble/environments/db_env_docker/anomaly_trigger/join-order-benchmark-master/README.md` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
+| `tests/test_model_prompting.py` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
+| `tests/test_short_term_memory.py` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
+| `marble/evaluator/env_evaluation_prompts.json` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
+| `marble/evaluator/evaluator_prompts.json` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
+| `marble/agent/werewolf_prompts/eval_communication.yaml` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
+| `marble/agent/werewolf_prompts/eval_competiveness.yaml` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
+| `marble/agent/werewolf_prompts/eval_prompts.yaml` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
+| `marble/environments/db_env_docker/anomaly_trigger/join-order-benchmark-master/README.md` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
 
-## 当前核验状态
+# Current verification status
 
-| 项目 | 状态 |
+|Item|Status|
 | --- | --- |
-| 顶会录用页 | 已记录并与论文题目核对。 |
-| PDF 与分页文本 | 已下载并可解析，共 42 页。 |
-| 官方代码 | 已固定 revision，并保存核心代码、配置、示例与测试入口。 |
-| 大型数据与模型权重 | 未纳入来源包。 |
-| 官方端到端实验复跑 | 尚未执行；不得把论文报告结果表述为本地复跑结果。 |
+|Conference acceptance page|The title of the paper was recorded and checked.|
+|PDF Text with Page Break|Downloaded and deciphered, 42 pages.|
+|Official code|Revision is fixed and the core code, configuration, example and test entry is saved.|
+|Large data and model weights|Not included in source package.|
+|Official-to-end experiment rerun|Not implemented; paper-reported results must not be presented as a local rerun.|

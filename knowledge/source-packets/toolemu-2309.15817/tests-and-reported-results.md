@@ -1,43 +1,43 @@
 # Tests and reported results
 
-## 论文报告证据
+# Paper reporting evidence
 
-| 证据 | 位置 | 状态 |
+|Evidence|Location|Status|
 | --- | --- | --- |
-| 论文表格 | PDF p.2 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.5 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.7 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.8 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.9 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.10 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.11 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.12 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.13 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.22 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.23 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.30 | 论文报告值；本仓库尚未复跑。 |
+|Paper table| PDF p.2 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.5 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.7 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.8 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.9 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.10 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.11 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.12 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.13 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.22 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.23 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.30 |Value reported in the paper; it has not been rerun in this repository.|
 
-## 官方验证入口
+# Official validation entry points
 
-| 文件 | 核对对象 |
+|Documentation|Check Object|
 | --- | --- |
-| `toolemu/prompts/evaluator/agent_help_evaluator.py` | 官方评测、测试或结果计算入口 |
-| `toolemu/prompts/evaluator/agent_safe_evaluator.py` | 官方评测、测试或结果计算入口 |
-| `toolemu/prompts/evaluator/shared.py` | 官方评测、测试或结果计算入口 |
-| `toolemu/prompts/evaluator/__init__.py` | 官方评测、测试或结果计算入口 |
-| `toolemu/prompts/text/helpfulness_evaluator.md` | 官方评测、测试或结果计算入口 |
-| `toolemu/prompts/text/safety_evaluator.md` | 官方评测、测试或结果计算入口 |
-| `scripts/evaluate.py` | 官方评测、测试或结果计算入口 |
-| `toolemu/evaluators.py` | 官方评测、测试或结果计算入口 |
-| `scripts/generation/generate_test_cases.py` | 官方评测、测试或结果计算入口 |
-| `scripts/helper/read_eval_results.py` | 官方评测、测试或结果计算入口 |
+| `toolemu/prompts/evaluator/agent_help_evaluator.py` |Official assessment, test or result calculation portal|
+| `toolemu/prompts/evaluator/agent_safe_evaluator.py` |Official assessment, test or result calculation portal|
+| `toolemu/prompts/evaluator/shared.py` |Official assessment, test or result calculation portal|
+| `toolemu/prompts/evaluator/__init__.py` |Official assessment, test or result calculation portal|
+| `toolemu/prompts/text/helpfulness_evaluator.md` |Official assessment, test or result calculation portal|
+| `toolemu/prompts/text/safety_evaluator.md` |Official assessment, test or result calculation portal|
+| `scripts/evaluate.py` |Official assessment, test or result calculation portal|
+| `toolemu/evaluators.py` |Official assessment, test or result calculation portal|
+| `scripts/generation/generate_test_cases.py` |Official assessment, test or result calculation portal|
+| `scripts/helper/read_eval_results.py` |Official assessment, test or result calculation portal|
 
-## 当前核验状态
+# Current verification status
 
-| 项目 | 状态 |
+|Item|Status|
 | --- | --- |
-| 顶会录用页 | 已记录并与论文题目核对。 |
-| PDF 与分页文本 | 已下载并可解析，共 70 页。 |
-| 官方代码 | 已固定 revision，并保存核心代码、配置、示例与测试入口。 |
-| 大型数据与模型权重 | 未纳入来源包。 |
-| 官方端到端实验复跑 | 尚未执行；不得把论文报告结果表述为本地复跑结果。 |
+|Conference acceptance page|The title of the paper was recorded and checked.|
+|PDF Text with Page Break|Downloaded and parsed, 70 pages.|
+|Official code|Revision is fixed and the core code, configuration, example and test entry is saved.|
+|Large data and model weights|Not included in source package.|
+|Official-to-end experiment rerun|Not implemented; paper-reported results must not be presented as a local rerun.|

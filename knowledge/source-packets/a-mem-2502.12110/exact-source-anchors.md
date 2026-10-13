@@ -1,18 +1,18 @@
 # Exact source anchors
 
-## 论文
+## paper
 
-| 核对对象 | 精确位置 | 可支持的判断 |
+|Check objects|precise location|supportable judgment|
 | --- | --- | --- |
-| 方法与系统设计 | PDF p.1，`paper/paper-v11.txt` 中的 `===== PDF p.1 =====` | `method` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 结果与消融 | PDF p.7，`paper/paper-v11.txt` 中的 `===== PDF p.7 =====` | `4.4 Ablation` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 限制与边界 | PDF p.9，`paper/paper-v11.txt` 中的 `===== PDF p.9 =====` | `6 Limitations` 所在页；用于核对该部分的原始定义、条件与证据。 |
+|Methods and System Design|PDF p.1,`===== PDF p.1 =====`in`paper/paper-v11.txt`|The page where`method`is located; used to check the original definition, conditions and evidence of this section.|
+|Results and ablation|PDF p.7,`===== PDF p.7 =====`in`paper/paper-v11.txt`|The page where`4.4 Ablation`is located; used to check the original definition, conditions and evidence of this section.|
+|limits and boundaries|PDF p.9,`===== PDF p.9 =====`in`paper/paper-v11.txt`|The page where`6 Limitations`is located; used to check the original definition, conditions and evidence of this section.|
 
-## 官方代码
+## Official code
 
-| 文件 | 核对范围 |
+|document|Check scope|
 | --- | --- |
-| `run_all_experiments.sh` | 官方仓库固定 revision 中的实现、接口或配置入口；具体语义以文件内容为准。 |
-| `run_k_sweep.sh` | 官方仓库固定 revision 中的实现、接口或配置入口；具体语义以文件内容为准。 |
+| `run_all_experiments.sh` |The official repository fixes the implementation, interface or configuration entry in the revision; the specific semantics are subject to the file content.|
+| `run_k_sweep.sh` |The official repository fixes the implementation, interface or configuration entry in the revision; the specific semantics are subject to the file content.|
 
-代码位置均以 `source-packet.json` 固定的上游 revision 为准；论文页码以本地 PDF 为准。
+The code location is based on the fixed upstream revision of`source-packet.json`; the paper page number is based on the local PDF.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 取得本来源包的 official-code 快照。需要网络，在仓库根目录执行：
+# Get the official-code snapshot of this source package. A network is required. Execute in the root directory of the repository:
 #   bash knowledge/source-packets/agent-skill-induction-2504.06821/vendor-official-code.sh
 set -euo pipefail
 
@@ -8,7 +8,7 @@ REPO="https://github.com/zorazrw/agent-skill-induction.git"
 DEST="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/official-code"
 
 if [ -e "$DEST" ]; then
-  echo "!! $DEST 已存在，避免覆盖，请人工确认后处理。" >&2
+echo "!! $DEST already exists. To avoid overwriting, please manually confirm and process." >&2
   exit 1
 fi
 
@@ -21,6 +21,6 @@ cp -a "$tmp/upstream/." "$DEST/"
 rm -rf "$DEST/.git"
 rm -rf "$tmp"
 
-echo "==> 已写入 $DEST"
-echo "==> 请核对：许可证文件、entrypoint、依赖清单，并回填 source-packet.json 的"
+echo "==> Written to $DEST"
+echo "==> Please check: license file, entrypoint, dependency list, and backfill source-packet.json"
 echo "    official_code_version.retrieved_on / upstream_revision_date / snapshot_scope / license_status"

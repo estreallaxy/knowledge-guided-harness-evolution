@@ -1,38 +1,38 @@
 # Configs and examples
 
-## 环境与配置入口
+##Environment and configuration entry
 
-| 文件 | 用途 |
+|document|use|
 | --- | --- |
-| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/downward_translate/regression-tests/README` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/downward_translate/tests/test_scripts.py` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/eval_configs/main_results_all_tasks.yaml` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/eval_configs/.ipynb_checkpoints/main_results_all_tasks-checkpoint.yaml` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/agentboard/environment/alfworld/base_config.yaml` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/agentboard/environment/browser_env/env_config.py` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/agentboard/environment/browser_env/evaluation_function.py` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/demo.py` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/demo_planning.py` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/downward_translate/constraints.py` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/downward_translate/tools.py` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/tests/test_inference.py` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/tests/test_parser.py` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/tests/test_pddlenv.py` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/tests/test_searchandrescue.py` | 依赖、参数、配置或运行示例入口 |
-| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/tests/test_spaces.py` | 依赖、参数、配置或运行示例入口 |
+| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/downward_translate/regression-tests/README` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/downward_translate/tests/test_scripts.py` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/eval_configs/main_results_all_tasks.yaml` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/eval_configs/.ipynb_checkpoints/main_results_all_tasks-checkpoint.yaml` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/agentboard/environment/alfworld/base_config.yaml` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/agentboard/environment/browser_env/env_config.py` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/agentboard/environment/browser_env/evaluation_function.py` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/demo.py` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/demo_planning.py` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/downward_translate/constraints.py` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/downward_translate/tools.py` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/tests/test_inference.py` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/tests/test_parser.py` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/tests/test_pddlenv.py` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/tests/test_searchandrescue.py` |Dependencies, parameters, configuration or running example entry|
+| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/tests/test_spaces.py` |Dependencies, parameters, configuration or running example entry|
 
-## 执行入口
+## Execution entry
 
-| 文件 | 使用方式 |
+|document|Usage|
 | --- | --- |
-| `tasks/m3tooleval/main.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `tasks/m3tooleval/run.sh` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `tasks/sciworld/agentboard/eval_main_sci.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `tasks/travelplanner/agents/eval_main.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/demo.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/demo_planning.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `tasks/sciworld/agentboard/run.sh` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `tasks/m3tooleval/main.py` |Official code entry candidate; complete model, data and external services according to README before running.|
+| `tasks/m3tooleval/run.sh` |Official code entry candidate; complete model, data and external services according to README before running.|
+| `tasks/sciworld/agentboard/eval_main_sci.py` |Official code entry candidate; complete model, data and external services according to README before running.|
+| `tasks/travelplanner/agents/eval_main.py` |Official code entry candidate; complete model, data and external services according to README before running.|
+| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/demo.py` |Official code entry candidate; complete model, data and external services according to README before running.|
+| `tasks/sciworld/agentboard/environment/pddl_env/pddlgym/demo_planning.py` |Official code entry candidate; complete model, data and external services according to README before running.|
+| `tasks/sciworld/agentboard/run.sh` |Official code entry candidate; complete model, data and external services according to README before running.|
 
-## 本地保存范围
+## Local saving range
 
-`official-code/` 保存官方仓库在固定 revision 下的核心源代码、配置、示例和测试入口。完整数据集、模型权重、缓存和论文实验输出需按官方 README 另行取得。
+`official-code/`saves the core source code, configuration, examples and test entries of the official repository under a fixed revision. The complete data set, model weights, cache and paper experimental output must be obtained separately from the official README.

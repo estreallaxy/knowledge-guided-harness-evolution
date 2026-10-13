@@ -1,29 +1,29 @@
 # Configs and examples
 
-## 环境与配置入口
+##Environment and configuration entry
 
-| 文件 | 用途 |
+|document|use|
 | --- | --- |
-| `pyproject.toml` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `README.md` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `examples/local-agents/local_agent.py` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `examples/local-agents/scenario.py` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `examples/magentic-agents/scenario.py` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `tests/setup/local_agent.py` | 核心方法所需的依赖、参数、配置或最小示例。 |
+| `pyproject.toml` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
+| `README.md` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
+| `examples/local-agents/local_agent.py` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
+| `examples/local-agents/scenario.py` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
+| `examples/magentic-agents/scenario.py` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
+| `tests/setup/local_agent.py` |Dependencies, parameters, configuration, or minimal examples required by the core method.|
 
-## Method 接入入口
+## Method access entrance
 
-| 文件 | 使用方式 |
+|document|Usage|
 | --- | --- |
-| `src/agdebugger/__init__.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/agdebugger/app.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/agdebugger/backend.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/agdebugger/cli.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/agdebugger/intervention.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/agdebugger/intervention_utils.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/agdebugger/log.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/agdebugger/scoring.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
+| `src/agdebugger/__init__.py` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
+| `src/agdebugger/app.py` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
+| `src/agdebugger/backend.py` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
+| `src/agdebugger/cli.py` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
+| `src/agdebugger/intervention.py` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
+| `src/agdebugger/intervention_utils.py` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
+| `src/agdebugger/log.py` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
+| `src/agdebugger/scoring.py` |Method implementation or direct execution entry; complete the model, data and external services according to the official README.|
 
-## 本地保存范围
+## Local saving range
 
-`official-code/` 仅保存论文方法的核心实现、直接依赖接口、最小配置/示例/测试和许可证。大型外部数据、通用框架副本、缓存与论文实验输出未纳入。
+`official-code/` only preserves the paper method's core implementation, direct dependency interfaces, and the minimum configuration, examples, tests, and licenses. Large external datasets, copies of common frameworks, caches, and paper experiment outputs are not included.

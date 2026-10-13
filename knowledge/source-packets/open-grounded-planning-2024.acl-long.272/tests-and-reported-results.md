@@ -1,14 +1,14 @@
 # Tests and reported results
 
-本文件中的全部数值均为**论文报告值，不是本仓库复跑结果**。
+All values in this document are reported in ** and are not the result of reruns in this repository**.
 
-## 论文报告结果
+# Thesis reports
 
-### 主结果（Table 3，PDF p.7）
+# # Main result (Table 3, PDF p.7)
 
-论文的 Table 3 中，「wikiHow」三列是 19 个 wikiHow 类别的**全类别平均**（论文该组表头为 “Average of All Types”）；后 5 列是各 out-of-domain 数据集的 Pass Rate。论文只报 in-domain 的 Executability / Quality，OOD 只报 Pass Rate。
+The three columns of "wikiHow" in Table 3 of the paper are the average of the full categories of 19 wikiHow categories** (the paper's header is "Average of All Types"); the last 5 columns are Pass Rate of each out-of-work data set. Thesis is published only in-domain for Exactability/Quality, OOD only for Pass Late.
 
-| 模型 | 方法 | wikiHow 可执行率(%) | wikiHow 质量(%) | wikiHow Pass Rate(%) | APIBank | GPT4Tools | ToolAlpaca | VirtualHome | SayCan |
+|Model|Methodology|wikiHow Implementation Rate (%)|wikiHow Mass (%)| wikiHow Pass Rate(%) | APIBank | GPT4Tools | ToolAlpaca | VirtualHome | SayCan |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Vicuna-7B-v1.5-16k | Task-Retrieve | 89.60 | 27.87 | 24.97 | 36.50 | 16.30 | 19.90 | 12.40 | 14.94 |
 | Vicuna-7B-v1.5-16k | Plan-Retrieve | 67.77 | 42.41 | 28.74 | 26.05 | 15.10 | 9.70 | 11.90 | 12.20 |
@@ -26,24 +26,24 @@
 | LLaMA-2-7B(SFT) | DFS | 99.09 | 53.53 | 53.04 | 11.40 | 0.48 | 2.79 | 35.64 | 14.96 |
 | LLaMA-2-7B(SFT) | Retrieve and Rewrite | 98.26 | 61.58 | 60.51 | 45.42 | 43.70 | 45.02 | 46.80 | 42.68 |
 
-按论文数值整理的每个数据集 Pass Rate 最佳/次佳（论文用加粗/下划线标注）：
+Pars Rate Best/Second best data set by the number of the papers (the papers are marked by thick/lined):
 
-| 数据集 | 最佳 | 次佳 |
+|Data Set|Best|Jia|
 | --- | --- | --- |
-| wikiHow（全类别平均） | Retrieve and Rewrite, LLaMA-2-7B(SFT) — 60.51 | Plan-Retrieve, LLaMA-2-7B(SFT) — 57.70 |
+|wikiHow (average for all categories)| Retrieve and Rewrite, LLaMA-2-7B(SFT) — 60.51 | Plan-Retrieve, LLaMA-2-7B(SFT) — 57.70 |
 | APIBank | Task-Retrieve, LLaMA-2-7B(SFT) — 58.75 | Plan-Retrieve, LLaMA-2-7B(SFT) — 47.72 |
 | GPT4Tools | Retrieve and Rewrite, LLaMA-2-7B(SFT) — 43.70 | Plan-Retrieve, LLaMA-2-7B(SFT) — 35.00 |
 | ToolAlpaca | Task-Retrieve, LLaMA-2-7B(SFT) — 49.00 | Retrieve and Rewrite, LLaMA-2-7B(SFT) — 45.02 |
 | VirtualHome | Retrieve and Rewrite, GPT-3.5 — 47.00 | Retrieve and Rewrite, LLaMA-2-7B(SFT) — 46.80 |
 | SayCan | Plan-Retrieve, GPT-3.5 — 44.82 | Retrieve and Rewrite, LLaMA-2-7B(SFT) — 42.68 |
 
-主要可读出的结论（论文 §5.2–5.3 自述）：LLaMA-2-7B(SFT) 在 6 个数据集中的 4 个取得最佳；GPT-3.5 的 DFS 在 SayCan 上只有 11.28，而 SFT 的 DFS 在 GPT4Tools / ToolAlpaca 上塌到 0.48 / 2.79，说明 DFS 类回溯方法对模型能力高度敏感。
+The main readable conclusions (discussed in § 5.2– 5.3): LaMA-2-7B (SFT) is the best of four of the six data sets; the DFS of GPT-3.5 is only 11.28 on SayCan, while the DFS of SFT collapsed to 0.48 / 2.79 on GPT4ToolAlpaca, demonstrating the high sensitivity of the DFS type backtrace method to model capabilities.
 
-### OOD 详细分解（Appendix E，Table 5–9，PDF pp.13–14）
+#OOD Detail Decomposition (Appendix E, Table 5-9, PDF pp.13-14)
 
-论文只在这些表里报 Pass Rate 之外的 Executability 与 Quality；下表仅摘 Pass Rate，用于与 Table 3 交叉核对。核对结果：Table 3 的 5 列 OOD 数值与 Table 5–9 的 Pass Rate 逐格一致。
+The papers are only presented in these tables, other than Pass Rate, Executability and Quality; only Pass Rate is summarized below for cross-checking with Table 3. Check result: Table 3 values for 5 columns OOD are consistent with Table 5-9 for Pass Late.
 
-| 数据集 | 模型 | Task-Retrieve | Plan-Retrieve | Step-wise Select | DFS | Retrieve and Rewrite |
+|Data Set|Model| Task-Retrieve | Plan-Retrieve | Step-wise Select | DFS | Retrieve and Rewrite |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | APIBank (Table 5) | Vicuna-7B-v1.5-16k | 36.50 | 26.05 | 20.72 | 26.81 | 45.44 |
 | APIBank (Table 5) | GPT-3.5 | 37.26 | 30.61 | 32.32 | 35.55 | 43.73 |
@@ -61,53 +61,53 @@
 | SayCan (Table 9) | GPT-3.5 | 29.27 | 44.82 | 26.83 | 11.28 | 41.16 |
 | SayCan (Table 9) | LLaMA-2-7B(SFT) | 37.50 | 30.79 | 31.71 | 14.96 | 42.68 |
 
-### 消融与分析类结果
+# # digest and analyze #
 
-| 分析项 | 位置 | 论文报告的结论 |
+|Analysis Item|Location|Conclusions of the paper|
 | --- | --- | --- |
-| 检索数量对 Task-Retrieve 的影响 | §5.5，Figure 3，PDF pp.8–9 | 只在 wikiHow-Computers and Electronics 上、且只检查输出格式；Pass Rate 随召回数先升后降，GPT-3.5 在召回 20 条时最好；召回 5 条时仍会出现不可执行步骤。 |
-| 检索数量对 Plan-Retrieve / Step-wise Select 的影响 | Appendix D，Figure 4，PDF pp.12–13 | Plan-Retrieve 召回越多可执行率越低；Step-wise Select 上 Vicuna 随候选增多而上升、GPT-3.5 下降。 |
-| Rewrite 的格式错误率 | §5.4，PDF p.8 | 不可执行的 Rewrite 计划中 11.84% 是格式解析错误（其余归因于幻觉）。 |
-| DFS 的重复步 | §5.4，PDF p.8 | 19.32% 的 DFS 计划出现两次及以上的重复步骤。 |
-| SFT 模型在 tools 上的 DFS 塌陷 | §5.3，PDF p.7 | 平均计划长度不足 1（其他方法为 1–2）；作者归因于训练数据中「拒绝」比例偏高导致模型不敢选择检索结果。 |
-| 自动评判与人工评判一致性 | Appendix C，PDF p.12 | 随机抽 200 例人工评估，与 ChatGPT 自动评估的 Spearman 相关系数为 80.76%。 |
-| 方法内对照案例 | Table 4，PDF p.8 | 同一任务下 Plan-Retrieve / DFS / Rewrite / golden plan 的对照，展示 DFS 的重复步与 Rewrite 的补充信息能力。 |
+|Impact of the number of searches on Task-Retrieve| §5.5,Figure 3,PDF pp.8–9 |Only wikiHow-Computers and Electronics, and only check the output format; Pass Late rises and drops after recall, GPT-3.5 is best when recalled 20; unenforceable steps will still occur when recalled 5.|
+|Impact of Retrieving Numbers on Plan-Retriev / Step-wise Secure| Appendix D,Figure 4,PDF pp.12–13 |The more Plan-Retrieve recalls, the lower the implementation rate, the more Vicuna on Step-wise Select rises with more candidates and the lower GPT-3.5.|
+|Rewrite Format Error Rate| §5.4,PDF p.8 |The non-enforceable Rewrite program 11.84% is a formal error (the rest is attributable to hallucinations).|
+|DFS repeat steps| §5.4,PDF p.8 |The DFS plan of 19.32 per cent has two or more duplicate steps.|
+|DFS collapse of SFT models on tables| §5.3,PDF p.7 |The average planned length was less than 1 (other methods 1-2); the author attributed the high percentage of "denied" in training data to the fact that the model was afraid to choose the search results.|
+|Automatic and manual consistency| Appendix C,PDF p.12 |200 randomly drawn manual assessments with a coefficient of 80.76 per cent for Spearman, which is automatically assessed by ChatGPT.|
+|Comparative cases within methodology| Table 4,PDF p.8 |A comparison of Plan-Retrieve / DFS / Rewrite / Golden Plan under the same task shows the repeat steps of DFS and the additional information capabilities of Rewrite.|
 
-### 论文自述的失效与限制
+No, no, no, no.
 
-| 项 | 位置 | 内容 |
+|Item|Location|Contents|
 | --- | --- | --- |
-| 检索器未优化 | Limitation，PDF p.9 | 当前是「检索 + 生成」两阶段，作者预期任务专用检索器会更好。 |
-| 动作不含参数 | Limitation，PDF p.9 | 数据集只做「把任务接地到给定动作集」，不含每个动作的参数。 |
-| 评判器偏差 | Limitation，PDF p.9 | ChatGPT 评判仍带偏差与幻觉，虽有位置交换与长度惩罚，仍未被消除。 |
-| 达到迭代上限 | Appendix B，PDF p.12 | 达到 20/30/20 的迭代上限意味着计划可能不完整；论文仍按可执行计，但质量受损。 |
-| GPT-3.5 在 tools 上不听指令 | §5.3，PDF p.7 | 即使做了大量 prompt 工程，GPT-3.5 仍倾向生成自然语言完整步骤而非给定 API 名。 |
-| 检索数量窗口窄 | §5.5，PDF pp.8–9 | 召回数过少或过多都会降低 Pass Rate，最优值只在被测试的单一设置上确定。 |
+|Retrieval not optimized| Limitation,PDF p.9 |The author expects a mission-specific searcher to be better.|
+|Action without arguments| Limitation,PDF p.9 |The data set is only "Situation of tasks to given action set" and does not contain parameters for each action.|
+|Judge deviation| Limitation,PDF p.9 |ChatGPT's judgement is still marked by deviations and illusions and has not been eliminated despite the exchange of places and length of punishment.|
+|Reaching an iterative ceiling| Appendix B,PDF p.12 |Reaching the iterative ceiling of 20/30/20means that the plan may be incomplete; the papers are still available on an implementable basis but the quality is impaired.|
+|GPT-3.5 Do Not Listen to Commands on Tols| §5.3,PDF p.7 |Even with a large number of prompt projects, GPT-3.5 tends to produce a natural language complete step rather than a given API name.|
+|Low Retrieving Number Window| §5.5,PDF pp.8–9 |A small or excessive recall reduces Pass Late, with the best value determined only on the single settings tested.|
 
-## 官方检查入口
+# Official check the entrance #
 
-| 检查对象 | 官方代码 |
+|Check Object|Official code|
 | --- | --- |
-| 生成结果是否逐任务落盘、是否有失败项 | `official-code/generate/generate_loop.py:543-551`（写 `record`）、`:594-602`（汇总 `error.json`） |
-| 每个任务的执行状态与迭代轨迹 | `record["status"]` 与 `record["select_iterations"]` / `record["dfs_iterations"]` / `record["rewrite"]`（`generate_loop.py:194`、`:196-202`、`:312`、`:434`、`:445-450`） |
-| 可执行率（Executability） | `official-code/evaluate/eval_utils.py:93-105` |
-| 幻觉步计数 | `official-code/evaluate/eval_utils.py:245-254` |
-| 质量胜率（Quality，含位置交换） | `official-code/evaluate/eval_utils.py:134-160`、`:206-242` |
-| 三维度评判提示词 | `official-code/evaluate/eval_prompts.py:1-27` |
-| 结果汇总（三列指标） | `official-code/evaluate/get_score_result.py:5-27` |
-| 逐类别结果文件 | `official-code/evaluate/eval_utils.py:118-131` 写出的 `final_score.json` |
+|Whether to create results on a task-by-task basis and whether to fail| `official-code/generate/generate_loop.py:543-551`♪ Write ♪`record`),`:594-602`Summary`error.json`) |
+|Performance status and iterative trajectory of each task| `record["status"]`with`record["select_iterations"]` / `record["dfs_iterations"]` / `record["rewrite"]`(`generate_loop.py:194`,`:196-202`,`:312`,`:434`,`:445-450`) |
+|Executability| `official-code/evaluate/eval_utils.py:93-105` |
+|Imagination Step Count| `official-code/evaluate/eval_utils.py:245-254` |
+|Quality, including place exchange| `official-code/evaluate/eval_utils.py:134-160`,`:206-242` |
+|A 3-D assessment tip| `official-code/evaluate/eval_prompts.py:1-27` |
+|Summary of results (three indicators)| `official-code/evaluate/get_score_result.py:5-27` |
+|Category-by-category outcome documents|`official-code/evaluate/eval_utils.py:118-131`Written by`final_score.json`|
 
-## 当前核验状态
+# Current verification status
 
-| 项目 | 状态 |
+|Item|Status|
 | --- | --- |
-| PDF 可解析 | 已通过。本包内用 pypdf 重新解析，确认共 **22 页**，与 `paper-v1.txt` 的 `PDF p.1`–`PDF p.22` 标记、以及印刷页 4982–5003 一一对应。 |
-| Table 3 的列结构 | 已核对。原文抽取文本丢失列对齐，本包用 PDF 文本坐标重建表头与数据行，确认结构为「方法 + 可执行率 + 质量 + 6 个 Pass Rate 列（Average of All Types / APIBank / GPT4Tools / ToolAlpaca / VirtualHome / SayCan）」，并逐格与 Appendix E 的 Table 5–9 交叉验证一致。 |
-| 论文 §3.1、§3.2/Table 1–2、§3.3.1、§3.3.2、§4/Figure 2、§5.1、§5.4/Table 4、§5.5/Figure 3、Appendix B–D、Figure 4、Appendix E–F | 已与本地全文核对。 |
-| 指标自洽性 | 已核对。Table 3 的 15 行 in-domain 数据均满足 Pass Rate = Executability × Quality（四舍五入误差 ≤ 0.01）。 |
-| 官方代码 revision | `c9d3cd5e98d82498a544da81fc090b6fc72b0e4b`（2024-06-11）。 |
-| 官方端到端生成复跑 | **尚未执行**。缺上游 `datasets/`（任务与动作库）、缺 `actions_emb.npy`，且需要 OpenAI 兼容端点与密钥。 |
-| 官方评测复跑 | **尚未执行**。静态阅读发现评测侧以 `model="1106"` 调用 `get_ans`，而该快照的 `get_ans` 只接受 `vicuna` / `sft` / 含 `chatgpt` 的字符串，按原样运行会在评分阶段抛 `ValueError` 并被吞掉（详见 `exact-source-anchors.md`）。未运行验证该推断。 |
-| SFT 模型的训练流程 | **未知**。论文 §5.1 说明用 FastChat、每子类 200 条、与 Alpaca 混合、3 epoch，但上游仓库不含训练脚本或训练数据。 |
-| 数据集本体（`datasets/`） | 未纳入来源包（按规范剔除数据集）。 |
-| 迁移到目标 Harness 的收益 | 尚未验证。 |
+|PDF Parsable|Adopted. In this package, re-analyze with pypdf to confirm a total of **22 pages**, with`paper-v1.txt`Yes.`PDF p.1`–`PDF p.22`Marks, and printed pages 4982-503, one by one.|
+|Column structure for Table 3|Reconciled. Original text is lost and this package recreates table headers and data rows with PDF text coordinates to confirm structure as "Method + Implementation Rate + Mass + 6 Pass Late Columns (Average of All Types / APIbank / GPT4ToolTools / ToolAlpaca / VirtualHome / SayCan)" and cross-checks with Table 5-9 of Appendix E.|
+|Articles § 3.1, § 3.2/Table 1-2, § 3.3.1, § 3.3.2, § 4/Figure 2, § 5.1, § 5.4/Table 4, § 5.5/Figure 3, Appendix B-D, Figure 4, Appendix E-F|Checked with local full text.|
+|Indicator self-conformity|Reconciled. Table 3 15 rows in-domain data meet Pass Late = Exactability x Quality (rounded error 0.01).|
+|Official code| `c9d3cd5e98d82498a544da81fc090b6fc72b0e4b`(2024-06-11). |
+|Official-to-end generation of reruns|** Not implemented.** Not upstream`datasets/`(task and action library), missing`actions_emb.npy`, and requires OpenAI compatible endpoints and keys.|
+|Official rerun.|** Not implemented.** Static reading finding side by side`model="1106"`Call`get_ans`And it's time to take a snapshot.`get_ans`Accept only`vicuna` / `sft`/ Includes`chatgpt`string, run as it is, will be evaluated for phase-out`ValueError`and swallowed (for more details)`exact-source-anchors.md`I'm not sure. Could not close temporary folder: %s|
+|Training process for SFT models|** Unknown**. § 5.1 describes the use of FastChat, 200 articles per subcategory, mixed with Alpaca, 3 epoch, but the upstream repository does not contain training scripts or training data.|
+|Dataset body (`datasets/`)|Source package not included (standardized data sets excluded).|
+|Proceed from moving to target Harness|Not yet validated.|

@@ -1,26 +1,26 @@
 # Configs and examples
 
-## 环境与配置入口
+# Environment and configuration portal
 
-| 文件 | 用途 |
+|Documentation|Purpose|
 | --- | --- |
-| `README.md` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `requirements.txt` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `src/setup_mix_instruct.py` | 核心方法所需的依赖、参数、配置或最小示例。 |
+| `README.md` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `requirements.txt` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `src/setup_mix_instruct.py` |Dependence, parameters, configuration or minimum example required for the core approach.|
 
-## Method 接入入口
+# Method Access
 
-| 文件 | 使用方式 |
+|Documentation|Usage|
 | --- | --- |
-| `src/run_smoothie.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/paper/routing_results.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/paper/prompting_results.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `replication_scripts/multiprompt_exps.sh` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/alpaca_generate_predictions.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/console.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/constants.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/data_utils.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
+| `src/run_smoothie.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `src/paper/routing_results.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `src/paper/prompting_results.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `replication_scripts/multiprompt_exps.sh` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `src/alpaca_generate_predictions.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `src/console.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `src/constants.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `src/data_utils.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
 
-## 本地保存范围
+# Local Save Range
 
-`official-code/` 仅保存论文方法的核心实现、直接依赖接口、最小配置/示例/测试和许可证。大型外部数据、通用框架副本、缓存与论文实验输出未纳入。
+`official-code/` contains only the core implementation of the paper's method, directly required interfaces, minimal configurations, examples, tests, and the license. Large external datasets, copies of general-purpose frameworks, caches, and paper experiment outputs are excluded.

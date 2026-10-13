@@ -1,60 +1,60 @@
 # Exact source anchors
 
-页码一律以 `paper/paper-v1.txt` 的 `===== PDF p.N =====` 标记为准（共 54 页）。代码行号以 `source-packet.json` 固定的 revision `a70542e` 为准。
+The page number is always based on the`===== PDF p.N =====`tag for`paper/paper-v1.txt`(54 pages in total). The code line number is based on the`source-packet.json`fixed review `a70542e`.
 
-## 论文
+# Papers
 
-| 要核对的内容 | 精确位置 | 原文支持的范围 |
+|Content to check|Exact Location|Scope of original support|
 | --- | --- | --- |
-| 研究问题与四项贡献（MAST-Data、MAST、LLM annotator、案例研究） | §1，PDF pp.1–3 | 论文把 MAS 表现增益有限归因于系统设计而非仅模型能力；不能推出「多 Agent 一定优于单 Agent」或反向结论。 |
-| 7 个开源 MAS 的失败率区间 41%–86.7% | §1，PDF p.2；Figure 5，PDF p.26 | 正文写 7 个 MAS，Figure 5 实际只画了 6 个（Magentic-One/GAIA、AG2/OlympiadBench、AppWorld/Test-C、HyperAgent/SWE-Bench Lite、ChatDev/ProgramDev、MetaGPT/ProgramDev，失败率依次 62.0%、41.0%、86.7%、74.7%、66.7%、60.0%）；OpenManus 的失败率未出现在 Figure 5。论文注明各系统 benchmark 不同、数值不可直接互比，不能当作跨系统性能排名。 |
-| MAST-Data 配置与规模（1642 条 trace，7 框架，4 模型族） | §1，PDF pp.2–3；Table 1，PDF p.3 | Table 1 给出每条来源的 MAS、benchmark、模型与标注类型（HE/HA/LA）及 trace 数（30/100/206/193/168/165 等）；不能推出这些 trace 覆盖了各 MAS 的全部任务分布。 |
-| 14 个失败模式 / 3 个类别 / 3 个执行阶段 | §4，PDF pp.7–8；Figure 1，PDF p.2 | Figure 1 把模式映射到 Pre-Execution、Execution、Post-Execution 阶段，并给出在 1642 条 trace 上的占比；「跨阶段」表示该问题可在多个阶段显现，不是独立的第三个维度。 |
-| Grounded Theory 建立分类法的过程 | §3.1，PDF p.5 | 150 条 trace、五个框架（HyperAgent、AppWorld、AG2、ChatDev、MetaGPT）、六个专家、每人 20 小时以上标注、迭代至理论饱和；不能推出该过程使用了预定义假设。 |
-| 分类法定义的多轮一致性校验（IAA，κ = 0.88） | §3.2，PDF pp.5–6；Figure 2，PDF p.5 | 每轮 3 名专家独立标注 5 条随机 trace，共 3 轮，讨论消解分歧约 10 小时，最终平均 Cohen's κ = 0.88；这 88% 只覆盖 IAA 子集，不等于全量 1642 条的质量。 |
-| LLM-as-a-Judge 流水线与人类标注的一致性 | §3.3，PDF p.6；Table 2，PDF p.6 | prompt 含 trace + MAST 定义 + few-shot 示例，模型为 OpenAI o1；报告 accuracy 0.94、Cohen's κ 0.77（few-shot），无 few-shot 时 0.89/0.58；不能推出该流水线在其他 MAS 或模型上保持同样一致性。 |
-| 分类法与标注器的跨系统/跨任务泛化验证 | §3.4，PDF p.6 | 在 OpenManus、Magentic-One 与 MMLU、GAIA 上多做一轮标注得到 κ = 0.79，且未修改分类法；这是单一额外轮次的结果，不能推出对任意新 MAS 都成立。 |
-| FC1 System Design Issues 的定义与 5 个模式 | §4 FC1，PDF p.7；Appendix A.1，PDF p.24 | FM-1.1 11.8%、FM-1.2 1.5%、FM-1.3 15.7%、FM-1.4 2.80%、FM-1.5 12.4%（占 1642 条）；论文把 disobey specification 同时归因于 MAS 设计、用户 prompt 与底层模型三点，不能只归因于模型指令遵循。 |
-| FC2 Inter-Agent Misalignment 的定义与 6 个模式 | §4 FC2，PDF pp.7–8；Appendix A.2，PDF pp.24–25 | FM-2.1 2.20%、FM-2.2 6.80%、FM-2.3 7.40%、FM-2.4 0.85%、FM-2.5 1.90%、FM-2.6 13.2%；论文认为标准化通信协议（MCP、A2A）不足以解决 FC2，需要「社会推理」能力；这是论文的论证，不是实验对照结论。 |
-| FC3 Task Verification 的定义与 3 个模式 | §4 FC3，PDF p.8；Appendix A.3，PDF p.25 | FM-3.1 6.20%、FM-3.2 8.20%、FM-3.3 9.10%；论文主张「有 verifier」不等于可靠，且需要多层次验证。 |
-| 分类法各类别的占比 | Figure 1 标题，PDF p.2 | System Design Issues 44.2%、Inter-Agent Misalignment 32.3%、Task Verification 23.5%（1642 条 trace，与 §4 中各 FM 占比之和一致）；Figure 1 中标 FM-2.4 为 0.80%，§4 正文写 0.85%，两处存在 0.05 个百分点的不一致。 |
-| 类别之间的区分度（相关性分析） | Appendix E，PDF p.29；Figure 6、Figure 7 | 三个类别之间的相关性为 0.17–0.32，模式之间最高 0.63；论文据此认为分类法内部区分度成立，同时承认高相关模式会让自动标注器混淆根因。 |
-| 各 MAS 的失败画像（210 条 trace） | §5.1，PDF p.9；Figure 4，PDF p.8 | Figure 4 只统计每个系统前 30 条 trace；类别占比 41.8%/36.9%/21.3%，与 Figure 1 的全量占比不同，不能混用。 |
-| 模型与架构对失败分布的影响 | §5.1，PDF p.9；Appendix F，PDF pp.30–31；Figure 8、Figure 9 | MetaGPT 中 GPT-4o 比 Claude 3.7 Sonnet 少 39% 的 FC1 失败；ProgramDev 上 MetaGPT 比 ChatDev 少 60–68% 的 FC1/FC2 失败但多 1.56 倍 FC3；不能推出模型或架构在所有任务上同向。 |
-| 失败模式与任务成败的关系 | Appendix J.1，PDF p.36；Table 7 | FM-1.5、FM-2.4 几乎只出现在失败运行中，而 FM-3.2、FM-3.3 在成功运行中也频繁出现；样本为 ChatDev/MetaGPT 的各 20/18 条，比例不可外推。 |
-| 不同 benchmark 的失败率 | Appendix J.2，PDF p.37；Table 8 | 固定 AG2 + GPT-4o，GSM / MMLU / Olympiad 的 FC1、FC2、FC3 每 trace 失败率；benchmark 越难失败率越高，不能据此比较不同 MAS。 |
-| 开源模型的失败模式分布 | Appendix I，PDF pp.35–36；Table 6 | 400 条 trace，Qwen2.5-Coder-32B-Instruct 与 CodeLlama-7b-Instruct-hf 各在 ChatDev、MetaGPT 上的逐模式计数；论文结论是开源模型失败频率高于 GPT-4o/Claude-3。 |
-| 干预案例研究（AG2 与 ChatDev） | Appendix H，PDF pp.33–35；Table 5，PDF p.34 | AG2/GSM-Plus 三种配置 × GPT-4/GPT-4o 各 6 次重复；ChatDev 在 ProgramDev-v0 与 HumanEval 上 baseline 25.0/89.6 → 改 prompt 34.4/90.3 → 改拓扑 40.6/91.5。Wilcoxon 检验 p 值 0.4（GPT-4）与 0.03（GPT-4o）说明改进并非在所有模型上显著。 |
-| 干预前后的失败模式分布变化 | Appendix H.3，PDF pp.34–35；Figure 10、Figure 11 | 用同一 LLM-as-a-Judge 重新标注干预前后的 trace，观测到各模式下降，拓扑改动比 prompt 改动更有效；这是论文自身的观察，未经外部复现。 |
-| 战术手段与结构性策略的对应关系 | Appendix G，PDF pp.32–33；Table 4，PDF p.33 | Table 4 给出「失败类别 → 战术手段 / 结构性策略」的映射建议，属论文提出的方向性主张，不是已验证的方法清单。 |
-| 标注成本 | Appendix K，PDF p.37；Table 9 | 全部 trace 的平均 API 成本 1.8 美元，按框架 0.3740–4.1409 美元；成本随 trace 长度变化，与具体模型价格绑定，不能作为当前价格下的预算依据。 |
-| `agentdash` Python 库用法 | Appendix C，PDF p.28 | 论文给出 `pip install agentdash` 与 `annotator(...).produce_taxonomy(trace)` 的调用示例；本来源包内的代码快照没有该包，不能据此确认其可安装性或接口现状。 |
-| ProgramDev / ProgramDev-v2 任务来源 | Appendix D，PDF p.28 | ProgramDev 30 题、ProgramDev-v2 100 题；论文把任务文件指向仓库 `traces/programdev/programdev_dataset.json`，该文件属于未纳入本来源包的 `traces/` 数据集。 |
-| 每个失败模式的原文示例 | Appendix N，PDF pp.45–54 | N.1–N.13 逐条给出 MAS、任务、发生了什么与原文片段（如 N.1 HyperAgent 的 step repetition + conversation reset + disobey role specification 组合）。这些是人工挑选的例证，不是随机抽样。 |
-| 干预所用 prompt 全文 | Appendix L，PDF pp.38–41；Appendix M，PDF pp.42–44 | AG2 的初始/结构化 prompt 与 Problem Solver、Coder、Verifier 三个角色 prompt；ChatDev 的原始与修改后角色 prompt（Programmer、Test Engineer、Code Reviewer、CEO、CTO）。 |
-| 闭源系统无法纳入细粒度标注 | Appendix B.3，PDF p.27 | Manus 等闭源平台不公开底层模型与完整执行 trace，只能做任务正确性的人工评测（Manus 在 ProgramDev 上 60%），无法进入 MAST-Data 的失败模式标注；不能推出闭源系统失败率更低。 |
+|Research issues and four contributions (MAST-Data, MAST, LLM annotator, case studies)| §1，PDF pp.1–3 |The paper attributed the limited performance gain of the MAS to the system design rather than to the modelling capacity alone; it could not introduce "more Agent must be better than single Agent" or reverse conclusions.|
+|Failure-rate range of 41%–86.7% across 7 open-source MASs|§1, PDF p.2; Figure 5, PDF p.26|The text states 7 MASs, but Figure 5 plots only 6: Magentic-One/GAIA, AG2/OlympiadBench, AppWorld/Test-C, HyperAgent/SWE-Bench Lite, ChatDev/ProgramDev, and MetaGPT/ProgramDev, with failure rates of 62.0%, 41.0%, 86.7%, 74.7%, 66.7%, and 60.0%, respectively. OpenManus has no failure rate in Figure 5. The paper notes that these systems use different benchmarks, so the values are not directly comparable and cannot support a cross-system performance ranking.|
+|MAST-Data Configuration and Size (1642 trace, 7 frame, 4 model family)| §1，PDF pp.2–3；Table 1，PDF p.3 |Table 1 gives the MAS, benchmark, model and label type (HE/HA/LA) and number of tracks (30 /100/206/193/168/165 etc.) for each source; it is not possible to launch these tracks to cover the full distribution of tasks for each MAS.|
+|14 failed modes / 3 categories / 3 implementation phases| §4，PDF pp.7–8；Figure 1，PDF p.2 |Figure 1 maps the mode to the Pre-Execution, Execution, Post-Execution phases, and gives a ratio on 1642 tracks; the "Strength" indicates that the problem can appear at multiple stages, not a third dimension of independence.|
+|Grinded Theory| §3.1，PDF p.5 |150 trace, five frameworks (HyperAgent, AppWorld, AG2, Chatdev, MetaGPT), six experts, marked over 20 hours per person, to theoretical saturation; a predefined assumption could not be used to launch the process.|
+|Multi-round consistency validation of the taxonomy definitions (IAA, κ = 0.88)|§3.2, PDF pp.5–6; Figure 2, PDF p.5|In each of 3 rounds, 3 experts independently annotate 5 random traces and spend about 10 hours resolving disagreements. The final mean Cohen's κ is 0.88. This 88% agreement covers only the IAA subset and is not a quality estimate for all 1642 traces.|
+|LLM-as-a-Judge Consistency of the current line with human labelling| §3.3，PDF p.6；Table 2，PDF p.6 |Prompt with track + MAST definition + few-shot example, model OpenAI o1; report accuracy 0.94, Cohen's hundred 0.77 (new-shot), no new-shot 0.89/ 0.58; cannot launch the current line to maintain the same consistency on other MAS or models.|
+|Cross-system and cross-task generalization validation of the taxonomy and annotator|§3.4, PDF p.6|One additional annotation round on OpenManus and Magentic-One with MMLU and GAIA yields κ = 0.79 without modifying the taxonomy. This single extra round does not establish validity for every new MAS.|
+|FC1 System Design Issues Definition and 5 Modes| §4 FC1，PDF p.7；Appendix A.1，PDF p.24 |FM-1.1 11.8%, FM-1.2 1.5%, FM-1.3 15.7%, FM-1.4 2.80%, FM-1.5 12.4% (inhabited 1642; the paper attributed dissobey specification to the three points of MAS design, user prompt and bottom model, which cannot be attributed solely to model instructions.|
+|FC2 Inter-Agent Misalignment definition and 6 modes| §4 FC2，PDF pp.7–8；Appendix A.2，PDF pp.24–25 |FM-2.1 2.20%, FM-2.2 6.80%, FM-2.3 7.40%, FM-2.4 0.85%, FM-2.5 1.90%, FM-2.6 13.2%; the paper considers that standardized communication agreements (MCP, A2A) are not sufficient to address FC2 and require “social reasoning” capabilities; this is the argument of the paper and is not an experimental comparison.|
+|FC3 Task Verification Definition and 3 Modes| §4 FC3，PDF p.8；Appendix A.3，PDF p.25 |FM-3.1 6.20%, FM-3.2 8.20%, FM-3.3 9.10%; the paper argues that "with verifier" is not equivalent to reliable and requires multilevel verification.|
+|Proportion of categories of classification|Figure 1 Title, PDF p.2|System Design Issues 44.2%, Inter-Agent Misalignment 32.3%, Task Verification 23.5% (1642 track, consistent with the ratio of each FM in § 4; Figure 1 won the mark FM-2.4 as 0.80%, § 4 in the original writing 0.85%, where there is a discrepancy between 0.05 percentage points.|
+|Distinction between categories (relevance analysis)| Appendix E，PDF p.29；Figure 6、Figure 7 |The correlation between the three categories was 0.17-0.32 and the highest among the models 0.63; on that basis, the paper found that the internal division of the classification was established, while recognizing that a high-relevant model would confuse the root causes of the automatic label.|
+|Failed image of each MAS (210 trace)| §5.1，PDF p.9；Figure 4，PDF p.8 |Figure 4 counts only the 30 track of each system; category share 41.8%/ 36.9%/21.3%, unlike the full share of Figure 1, cannot be mixed.|
+|Impact of models and structures on distribution of failures| §5.1，PDF p.9；Appendix F，PDF pp.30–31；Figure 8、Figure 9 |GT-4o in MetaGPT failed 39% less than Claude 3.7 Sonnet; CFC1/FC2 60-68% less on ProgramDev failed 1.56 times more than ChatDev; no model or architecture could be launched on all tasks.|
+|The relationship between failure patterns and mission success or failure| Appendix J.1，PDF p.36；Table 7 |FM-1.5, FM-2.4 appear almost exclusively in a failed operation, while FM-3.2, FM-3.3 appear frequently in a successful operation; the sample is 20/18 articles of ChatDev/MetaGPT and cannot be extrapolated.|
+|Different failure rate for benchmark| Appendix J.2，PDF p.37；Table 8 |Fixed AG2 + GPT-4o, GSM / MMLU / Olympiad FC1 , FC2 , FC3 per track; the harder it is to benchmark, the higher the failure rate, the difference cannot be compared to MAS.|
+|Failed mode distribution of open source models| Appendix I，PDF pp.35–36；Table 6 |400 trace, Qwen2.5-Coder-32B-Instruct and CodeLlama-7b-Instract-hf on ChatDev, MetaGPT; the paper concluded that open-source models failed more frequently than GPT-4o/Claude-3.|
+|Case studies on interventions (AG2 and ChatDev)|Appendix H, PDF pp.33–35; Table 5, PDF p.34|AG2/GSM-Plus uses three configurations with 6 repetitions each for GPT-4 and GPT-4o. On ProgramDev-v0 and HumanEval, ChatDev moves from the 25.0/89.6 baseline to 34.4/90.3 after changing the prompt and to 40.6/91.5 after changing the topology. Wilcoxon p-values of 0.4 (GPT-4) and 0.03 (GPT-4o) show that the improvement is not significant for every model.|
+|Changes in distribution of failure patterns before and after intervention| Appendix H.3，PDF pp.34–35；Figure 10、Figure 11 |Using the same LLM-as-a-Judge to remark the tracks before and after the intervention, it was observed that the models had fallen and that the scaling changes were more effective than the prompt changes; this was the paper ' s own observation and had not been reproduced externally.|
+|Response of tactical means to structural strategies| Appendix G，PDF pp.32–33；Table 4，PDF p.33 |Table 4 gives a mapping proposal for "failure categories of tactical means/structural strategies", which is a directional proposition presented in the paper and is not a validated list of methods.|
+|Description cost| Appendix K，PDF p.37；Table 9 |The average API cost for the entire track is US$ 1.8, based on a framework of US$ 0.3740-4.1409; the cost varies with the duration of the track and is tied to the price of the specific model and cannot be the basis for the budget under the current price.|
+|`agentdash`Python library usage| Appendix C，PDF p.28 |The paper gave examples of calls for`pip install agentdash`and `annotator(...).produce_taxonomy(trace)`; code snapshots in this source package do not have the package and cannot confirm their installation or interface status.|
+|ProgramDev / ProgramDev-v2 task source|Appendix D, PDF p.28|ProgramDev contains 30 tasks and ProgramDev-v2 contains 100 tasks. The paper points to `traces/programdev/programdev_dataset.json`, which belongs to the `traces/` dataset excluded from this source packet.|
+|Original example of each failure mode| Appendix N，PDF pp.45–54 |N.1 –N.13 Gives an article by article MAS, tasks, what happened and the original clip (e. g. N.1 HyperAgent's step reversion + transfer reet + disobey role specification). These are examples of manual selection, not random sampling.|
+|Full prompt for intervention| Appendix L，PDF pp.38–41；Appendix M，PDF pp.42–44 |The initial/structured prompt of AG2 and the three roles of Problem Solver, Coder, Verifier prompt; the original and modified role of ChatDev prompt (Progmmer, Test Engineering, Code Reviewer, CEO, CTO).|
+|The closed-source system is unable to incorporate fine particle scale indications| Appendix B.3，PDF p.27 |The Manus closed-source platform does not disclose the bottom model and complete track, but only manual assessment of mission correctness (Manus 60% on ProgramDev) and does not have access to the MAST-Data failure model; failure rates are lower.|
 
-## 官方代码
+# Official code
 
-| 机制或证据 | 文件与行号 | 作用 |
+|Mechanism or evidence|File & Line Number|Role|
 | --- | --- | --- |
-| 14 个失败模式的定义文本 | `official-code/taxonomy_definitions_examples/definitions.txt:1-133` | 逐模式的正式定义、成因与后果，是 LLM judge 的 prompt 输入，也是人工标注的参照。各模式起始行：1.1→1、1.2→4、1.3→7、1.4→24、1.5→27、2.1→69、2.2→72、2.3→75、2.4→78、2.5→81、2.6→84、3.1→102、3.2→104、3.3→115。 |
-| 各失败模式的带原文示例 | `official-code/taxonomy_definitions_examples/examples.txt:1-1116` | 以 `### 模式名 ###` 分隔的示例集（标题位于第 5、174、419、472、578、617、641、744、761、781、828、857、870、883、903、914、932、948、961、977、990、1052、1068 行），作为 few-shot 材料。 |
-| 判定 prompt 的完整结构 | `official-code/llm_judge_pipeline.ipynb:38-94` | 要求模型输出 A 摘要、B 任务是否完成、C 十四个失败模式的 yes/no，并规定 `@@` 包裹的回答边界。 |
-| 模型与调用配置 | `official-code/llm_judge_pipeline.ipynb:9-29` | 客户端初始化（`:13-19`）、`model='o1'`（`:27`）、`temperature=1.0`（`:29`）；文件顶部同时留有 `NousResearch/Meta-Llama-3-8B-Instruct` 与本地 `base_url="http://localhost:8000/v1"` 的痕迹，实际调用为 OpenAI o1。 |
-| 定义与示例的注入方式 | `official-code/llm_judge_pipeline.ipynb:36, 90, 92, 103` | 第 36 行读 `definitions.txt`，第 103 行读 `examples.txt`，再分别拼到 prompt 尾部的 `{definitions}`（`:90`）与 `{examples}`（`:92`）位置。 |
-| 批量评测循环与容错 | `official-code/llm_judge_pipeline.ipynb:144-182` | 逐条调用、单条按 1,048,570 字符截断（第 158-159 行）、每轮写 `saved_results/o1_results_checkpoint.pkl` 且每 10 条备份一次。 |
-| 答案解析成 14 维二元标注 | `official-code/llm_judge_pipeline.ipynb:198-280` | `parse_responses` 用多套正则从自由文本中抽取每个模式的 yes/no（字典初始化在第 211-216 行），全部失败时默认 0；解析鲁棒性依赖模型遵守格式。 |
-| 按来源分组统计失败率 | `official-code/llm_judge_pipeline.ipynb:284-299, 301-350` | 先打印各模式的 yes 占比，再用 `source_sizes = [30,30,30]` 的滑动分组算每来源均值；分组是硬编码的，换数据集必须同步改。 |
-| 人工标注一致性原始材料 | `official-code/inter_annotator_agreement_annotations/interannotator_annotations_round_2_trim.pdf`、`interannotator_annotations_round3_trim.pdf` | 17 模式中间版本（FC1 1.1–1.7、FC2 2.1–2.7、FC3 3.1–3.3）的按系统 × 标注者 TRUE/FALSE 矩阵，带分歧讨论备注；标注集合为 AppWorld、HyperAgent、AG2、ChatDev、MetaGPT 的 Traces Set 2 / Set 3。 |
-| 新 benchmark 的一致性轮次 | `official-code/inter_annotator_agreement_annotations/interannotator_annotations_new_benchmarks_trim.pdf`、`interannotator_annotations_round1_trim.pdf` | 用最终 14 模式分类法对 MMLU-ChatDev、MMLU-MetaGPT、GAIA-Magentic、GAIA-OpenManus 的标注矩阵，对应论文 §3.4 的 κ = 0.79 泛化验证；两个文件抽取出的文本内容一致，仅二进制编码不同。 |
-| 仓库入口与数据集下载 | `official-code/README.md:1-53` | 指向 Hugging Face 数据集与 arXiv/博客，并给出两条 `hf_hub_download` 片段。 |
+|Definition text for 14 failed modes| `official-code/taxonomy_definitions_examples/definitions.txt:1-133` |Formal mode-by-mode definition, cause and consequence is a prompt input for LLM judge and a manual reference. The starting lines of each model are: 1.1:1, 1.2:4, 1.3:7; 1.4:24: 1.5:27; 2.1:69; 2.2:72; 2.3:75: 2.4:78; 2.5:81; 2.6:84; 3.1:102; 3.2:104; 3.3:115.|
+|Original failure-pattern examples| `official-code/taxonomy_definitions_examples/examples.txt:1-1116` |A collection of examples separated by `### pattern name ###` headings (at lines 5, 174, 419, 472, 578, 617, 641, 744, 761, 781, 828, 857, 870, 883, 903, 914, 932, 948, 961, 977, 990, 1052, and 1068), used as few-shot material.|
+|Determines the complete structure of prompt| `official-code/llm_judge_pipeline.ipynb:38-94` |Requires model output A summary, B mission completed, C fourteen failed mode yess/no, and specifies the boundaries of the `@@` package response.|
+|Model & Call Configuration| `official-code/llm_judge_pipeline.ipynb:9-29` |Client Initialization (`:13-19`), `model='o1'` (`:27`), `temperature=1.0` (`:29`); at the top of the file, there are also traces of `NousResearch/Meta-Llama-3-8B-Instruct` and local `base_url="http://localhost:8000/v1"`, actually calling OpenAI o1.|
+|Definitions and examples of injection methods| `official-code/llm_judge_pipeline.ipynb:36, 90, 92, 103` |Line 36, reading`definitions.txt`, Line 103 reading `examples.txt`, then aggregating `{definitions}` (`:90`) and `{examples}` (`:92`) at the end of prompt.|
+|Batch assessment cycle and tolerance error| `official-code/llm_judge_pipeline.ipynb:144-182` |An article-by-article article is cut by 1,048,570 characters (line 158-159),`saved_results/o1_results_checkpoint.pkl`is written per round and is backed up every 10 articles.|
+|Answers to 14-dimensional binary| `official-code/llm_judge_pipeline.ipynb:198-280` |`parse_responses`uses multiple sets of regulars to extract the yess/no of each mode from the free text (initialized in row 211-216), default 0 when all failed; analyzes the sticky-dependent model to follow the format.|
+|Breakdown of failure rates by source| `official-code/llm_judge_pipeline.ipynb:284-299, 301-350` |Prints the ratio of yess for each mode, then calculates the average value per source with`source_sizes = [30,30,30]`; the grouping is hard-coded and the replacement data set must be synchronized.|
+|Manually label the consistency source material| `official-code/inter_annotator_agreement_annotations/interannotator_annotations_round_2_trim.pdf`、`interannotator_annotations_round3_trim.pdf` |17 The system x-setr TRUE/FALSE matrix for intermediate versions of the mode (FC1 1.1 - 1.7, FC2 2.1 - 2.7, FC3 3.1 - 3.3), with a comment on the discussion; the labels are AppWorld, HyperAgent, AG2, ChatDev, MetaGPT Traces Set 2 / Set 3.|
+|Consistency round on new benchmarks|`official-code/inter_annotator_agreement_annotations/interannotator_annotations_new_benchmarks_trim.pdf`, `interannotator_annotations_round1_trim.pdf`|Annotation matrices produced with the final 14-pattern taxonomy for MMLU-ChatDev, MMLU-MetaGPT, GAIA-Magentic, and GAIA-OpenManus, corresponding to the κ = 0.79 generalization validation in §3.4. Text extracted from the two files is identical; only their binary encodings differ.|
+|Repository entrance and data set download| `official-code/README.md:1-53` |Points to the Hugging Face data set and arXiv/Blog and gives two`hf_hub_download`clips.|
 
-## 代码与论文不一致之处（使用前必须知道）
+# Concordance between code and paper (must know before use)
 
-| 项目 | 论文 | 代码快照 |
+|Item|Papers|Codeshot|
 | --- | --- | --- |
-| FM-3.2 / FM-3.3 的命名 | 3.2 No or incomplete verification（8.20%）、3.3 Incorrect verification（9.10%），见 §4 FC3 与 Appendix A.3 | `definitions.txt:104` 把 3.2 写作 Weak Verification、`:115` 把 3.3 写作 No or Incorrect Verification；`llm_judge_pipeline.ipynb:64-65` 反过来写成 3.2 No or Incorrect Verification、3.3 Weak Verification。三者两两不一致。 |
-| 分类法版本 | 最终 14 模式 | `round_2_trim.pdf`、`round3_trim.pdf` 记录的是 17 模式的中间版本；`definitions.txt`、`examples.txt` 与最终版一致。 |
-| FM-2.6 的称呼 | Reasoning-Action Mismatch（§4、Figure 1） | `definitions.txt:84` 与 notebook 均写作 Action-Reasoning Mismatch；`round3_trim.pdf` 中为 Inconsistency between reasoning and action。 |
-| 可调用的库接口 | Appendix C 描述 `pip install agentdash` | 快照内没有 `agentdash` 包，只有 notebook 形式的流水线。 |
+|Naming FM-3.2 / FM-3.3|3.2 No or incomplete verification (8.20%), 3.3 Impact verification (9.10%), see § 4 FC3 and Appendix A.3|`definitions.txt:104`writes 3.2 Weak Verification, `:115` writes 3.3 No or Incorporation; `llm_judge_pipeline.ipynb:64-65` is in turn 3.2 No or Incorporation, 3.3 Weak Verification. The three are not the same.|
+|Classification Version|Final 14 Mode|`round_2_trim.pdf`,`round3_trim.pdf`records an intermediate version of the 17 mode; `definitions.txt`, `examples.txt` corresponds to the final version.|
+|Name of FM-2.6| Reasoning-Action Mismatch（§4、Figure 1） |`definitions.txt:84`and Notebook both write Action-Reasoning Mismatch; `round3_trim.pdf` is the Inconsistency between receiving and action.|
+|Callable Library Interface|Appendix C Description`pip install agentdash`|There are no`agentdash`packages in the snapshot, only the water lines in the form of Notebook.|

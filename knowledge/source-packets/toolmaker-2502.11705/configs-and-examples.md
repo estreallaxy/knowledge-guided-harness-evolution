@@ -1,27 +1,27 @@
 # Configs and examples
 
-## 环境与配置入口
+# Environment and configuration portal
 
-| 文件 | 用途 |
+|Documentation|Purpose|
 | --- | --- |
-| `pyproject.toml` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `README.md` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `.github/workflows/build.yml` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `.github/workflows/ci.yml` | 核心方法所需的依赖、参数、配置或最小示例。 |
+| `pyproject.toml` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `README.md` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `.github/workflows/build.yml` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `.github/workflows/ci.yml` |Dependence, parameters, configuration or minimum example required for the core approach.|
 
-## Method 接入入口
+# Method Access
 
-| 文件 | 使用方式 |
+|Documentation|Usage|
 | --- | --- |
-| `toolmaker/agent/__init__.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `toolmaker/agent/agent.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `toolmaker/agent/state.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `scripts/toolmaker_function_runner.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `toolmaker/cli.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `toolmaker/definition.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `toolmaker/run.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `toolmaker/__init__.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
+| `toolmaker/agent/__init__.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `toolmaker/agent/agent.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `toolmaker/agent/state.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `scripts/toolmaker_function_runner.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `toolmaker/cli.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `toolmaker/definition.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `toolmaker/run.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `toolmaker/__init__.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
 
-## 本地保存范围
+# Local Save Range
 
-`official-code/` 仅保存论文方法的核心实现、直接依赖接口、最小配置/示例/测试和许可证。大型外部数据、通用框架副本、缓存与论文实验输出未纳入。
+`official-code/` contains only the core implementation of the paper's method, directly required interfaces, minimal configurations, examples, tests, and the license. Large external datasets, copies of general-purpose frameworks, caches, and paper experiment outputs are excluded.

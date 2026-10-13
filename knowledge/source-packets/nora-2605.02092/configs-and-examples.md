@@ -1,10 +1,10 @@
-# NORA 官方配置与示例
+# NORA Official Configuration and Example
 
-配置、命令和使用前提以固定 revision 中的原始文件为准；本包没有用本地改编参数替代论文参数。官方 benchmark、模型凭据、外部服务及完整依赖未在本包部署。
+The configuration, command and use prerequisites are based on the original file in the fixed review; this package does not replace the paper parameters with locally adapted parameters. Official benchmark, model supporting, external services and integrity were not deployed in the package.
 
 ## GRIND-Lab-Core/night_owl_research_agent
 
-- [README.md](official-code/night_owl_research_agent/README.md)：固定原始配置或使用说明。
-- [settings.json](official-code/night_owl_research_agent/settings.json)：固定原始配置或使用说明。
+- [README.md] (official-code/night_owl_research_agent/README.md)): Fixed original configuration or description.
+- [settings.json] (official-code/night_owl_research_agent/settings.json): fixed original configuration or description of use.
 
-完整论文配置见带页码的 [论文文本](paper/paper-v1.txt) 和 [论文 PDF](paper/paper-v1.pdf)。没有归档或未明确给出的参数保持未知；不据此宣称官方全流程已跑通。
+The complete paper is configured in the page-coded [text of the paper] (paper/paper-v1.txt) and [paper PDF] (paper/paper-v1.pdf). Parameters that were not archived or were not clearly given remain unknown; the official whole process is not claimed to have run.

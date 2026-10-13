@@ -1,31 +1,31 @@
-# 对齐上下文与工作区的检查点恢复
+# Align context and workspace checkpoint recovery
 
-AgentRewind 在模型决策边界对齐上下文与受控工作区，回退时恢复旧前缀并保留上一次尝试的经验，再生成新后缀。其受控环境恢复边界是工作区文件树，不代表恢复全部进程或外部服务。
+AgentRewind aligns the context and the controlled workspace at the model decision boundary, restores the old prefix when rolling back, retains the experience of the last attempt, and generates a new suffix. Its controlled environment recovery boundary is the workspace file tree and does not represent the recovery of all processes or external services.
 
-| 字段 | 机制说明 |
+|Field|Mechanism description|
 | --- | --- |
-| 目标瓶颈 | 早期错误同时污染上下文和工作区，后续追加动作无法充分撤销 |
-| 作用模块 | 执行记录、上下文恢复与工作区文件状态恢复 |
-| 输入 | 模型/工具原始记录、工作区检查点、目标记录 ID、回退理由和经验摘要 |
-| 触发条件 | 正常执行在模型决策边界记录；agent 判定当前轨迹难以推进时请求回退 |
-| 必要步骤 | 对齐记录；呈现候选检查点；选择目标并总结失败经验；恢复旧上下文和文件状态；注入经验；从目标生成新后缀 |
-| 状态变化 | 当前上下文与文件树回到目标状态，回退经验累计，后续轨迹形成新分支 |
-| 预期输出 | 可继续执行的上下文、恢复后的工作区、新分支记录与回退经验 |
-| 前提与限制 | 文件树以外的网络、服务和运行时状态不能撤销；需可靠记录和工作区管理。论文评测提供验收反馈且没有预设总 token/步骤/墙钟上限，不能直接移作本项目固定预算收益 |
+|target bottleneck|Early errors contaminate both the context and the workspace, and subsequent append actions cannot be fully undone.|
+|function module|Execution logging, context recovery, and workspace file state recovery|
+|enter|Model/tool origin records, workspace checkpoints, target record IDs, fallback reasons, and experience summaries|
+|Trigger condition|Normal execution is recorded at the model decision boundary; the agent requests a rollback when it determines that the current trajectory is difficult to advance.|
+|Necessary steps|Align records; present candidate checkpoints; select targets and summarize failure experience; restore old context and file state; inject experience; generate new suffixes from targets|
+|status change|The current context and file tree return to the target state, the rollback experience is accumulated, and the subsequent trajectory forms a new branch.|
+|expected output|Continued execution context, restored workspace, new branch record and rollback experience|
+| Prerequisites and limitations | Network, service, and runtime state beyond the file tree cannot be undone; reliable logging and workspace management are required. The paper's evaluation provides acceptance feedback and does not impose preset total-token, step, or wall-clock limits, so its results cannot be transferred directly to this project's fixed-budget setting. |
 
-## 机制与证据对应
+## Correspondence between mechanism and evidence
 
-| 标识 | 主张 | 论文与固定代码 | 支持范围 |
+|logo|advocate|Papers and Fixed Code|Support scope|
 | --- | --- | --- | --- |
-| AR1 | 从旧模型输入构建回退上下文并关联累计经验与新分支 | PDF pp.2–3 Framework / Rewind Module；`replay/backtrack.py:prepare_backtrack_replay` | 论文恢复链路及公开上下文准备、经验记录接口；该函数本身不证明环境恢复已执行 |
-| AR2 | 恢复工作区文件树中的修改、删除和新增文件 | PDF p.4 External Environment Recovery Boundary；`replay/git_workspace.py:restore_commit`、`commit_current` | 固定 Git 工作区保存与恢复实现；不证明进程、远端 API 或数据库恢复 |
-| AR3 | 恢复保留前缀来自执行记录，外部副作用不能撤销 | PDF pp.3–4 Rewind Module / Recovery Boundary | 论文明确的恢复边界；不据此保证所有外部调用幂等或无重复 |
+| AR1 |Build fallback context from old model inputs and associate accumulated experience with new branches| PDF pp.2–3 Framework / Rewind Module; `replay/backtrack.py:prepare_backtrack_replay` |Paper recovery link and public context preparation and experience recording interface; this function itself does not prove that environment recovery has been executed|
+| AR2 |Recover modified, deleted and newly added files in the workspace file tree| PDF p.4 External Environment Recovery Boundary; `replay/git_workspace.py:restore_commit`, `commit_current` |Fixed Git workspace save and restore implementation; does not certify process, remote API, or database restore|
+| AR3 |Recovery retains prefix from execution record, external side effects cannot be undone| PDF pp.3–4 Rewind Module / Recovery Boundary |The paper explicitly restores boundaries; it does not guarantee that all external calls are idempotent or non-duplicate.|
 
-精确位置与支持范围见 [证据映射](claim-evidence-map.json)，评测差异见 [结果边界](tests-and-reported-results.md)。公开代码是固定 alpha 选定片段，原论文私有评测系统未包含在本包；原实验 commit 对应未知。
+See [Evidence Map](claim-evidence-map.json) for the precise location and support range, and see [Result Boundary](tests-and-reported-results.md) for evaluation differences. The public code is a fixed alpha selected fragment. The private evaluation system of the original paper is not included in this package; the original experimental commit correspondence is unknown.
 
-## 方法关系与项目使用边界
+## Method relationships and project usage boundaries
 
-- [StateFork](../statefork-2609.38648/mechanism-and-boundaries.md)：AR2 的文件树恢复与 SF1/SF3 的环境恢复不同。需要恢复进程/PTY/本地服务的任务可能需要更广的后端，但不能将文件恢复称为物理全状态恢复；后端替换是待测假设。
-- [ReasoningBank](../reasoningbank-2509.25140/mechanism-and-boundaries.md)：AR1 的任务内回退摘要与 RB2 的跨任务经验提取可关联；只允许从 train 转入长期经验，dev/test 的回退反馈不得用于更新优化知识。未实现该组合。
+- [StateFork](../statefork-2609.38648/mechanism-and-boundaries.md): AR2 file-tree recovery differs from SF1/SF3 environment recovery. Tasks that must recover processes, PTYs, or local services may require a broader backend. File recovery alone must not be described as physical full-state recovery; replacing the backend remains a hypothesis to test.
+- [ReasoningBank](../reasoningbank-2509.25140/mechanism-and-boundaries.md): AR1's intra-task fallback summary and RB2's cross-task experience extraction can be associated; only transfer from train to long-term experience is allowed, and dev/test's fallback feedback must not be used to update optimization knowledge. This combination is not implemented.
 
-本项目的 token、时间和费用账本必须累计保留，状态回退不清零消耗。既有本地文件副本示例没有实现完整录制器、自动回退选择或模型后缀生成，也尚未接入 H0。
+The token, time and expense ledgers of this project must be retained cumulatively, and consumption will not be cleared after status rollback. The existing local file copy example does not implement a full recorder, automatic fallback selection, or model suffix generation, nor does it yet have access to H0.

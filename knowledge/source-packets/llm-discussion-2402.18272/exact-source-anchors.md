@@ -1,19 +1,19 @@
 # Exact source anchors
 
-## 论文
+# Papers
 
-| 核对对象 | 精确位置 | 可支持的判断 |
+|Check Object|Exact Location|Supportable judgement|
 | --- | --- | --- |
-| 方法与系统设计 | PDF p.1，`paper/paper-v1.txt` 中的 `===== PDF p.1 =====` | `approach` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 实验设置 | PDF p.3，`paper/paper-v1.txt` 中的 `===== PDF p.3 =====` | `experiments` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 结果与消融 | PDF p.4，`paper/paper-v1.txt` 中的 `===== PDF p.4 =====` | `5.1 Analysis` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 限制与边界 | PDF p.1，`paper/paper-v1.txt` 中的 `===== PDF p.1 =====` | `discussion` 所在页；用于核对该部分的原始定义、条件与证据。 |
+|Methodology and system design|`===== PDF p.1 =====`in PDF p.1,`paper/paper-v1.txt`|`approach`page; used to check the original definition, conditions and evidence of that part.|
+|Experiment Settings|`===== PDF p.3 =====`in PDF p.3,`paper/paper-v1.txt`|`experiments`page; used to check the original definition, conditions and evidence of that part.|
+|Results and digestion|`===== PDF p.4 =====`in PDF p.4,`paper/paper-v1.txt`|`5.1 Analysis`page; used to check the original definition, conditions and evidence of that part.|
+|Restrictions and borders|`===== PDF p.1 =====`in PDF p.1,`paper/paper-v1.txt`|`discussion`page; used to check the original definition, conditions and evidence of that part.|
 
-## 官方代码
+# Official code
 
-| 文件 | 核对范围 |
+|Documentation|Check scope|
 | --- | --- |
-| `scripts/run_evaluation.py` | 官方仓库固定 revision 中的实现、接口或配置入口；具体语义以文件内容为准。 |
-| `src/llm_discussion/cli.py` | 官方仓库固定 revision 中的实现、接口或配置入口；具体语义以文件内容为准。 |
+| `scripts/run_evaluation.py` |The official repository fixes the realization, interface or configuration entry; the semantics are based on the content of the document.|
+| `src/llm_discussion/cli.py` |The official repository fixes the realization, interface or configuration entry; the semantics are based on the content of the document.|
 
-代码位置均以 `source-packet.json` 固定的上游 revision 为准；论文页码以本地 PDF 为准。
+The location of the code is based on the fixed upstream review of`source-packet.json`; the paper page number is based on the local PDF.

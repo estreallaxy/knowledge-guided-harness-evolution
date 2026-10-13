@@ -1,31 +1,31 @@
 # Configs and examples
 
-## 环境与配置入口
+# Environment and configuration portal
 
-| 文件 | 用途 |
+|Documentation|Purpose|
 | --- | --- |
-| `dockerfile` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `README.md` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `requirements.txt` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `lib/overcooked_ai/environment.yml` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `lib/overcooked_ai/README.md` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `lib/overcooked_ai/setup.py` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `src/prompts/gpt/assistant_example.txt` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `src/prompts/gpt/chef_example.txt` | 核心方法所需的依赖、参数、配置或最小示例。 |
+| `dockerfile` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `README.md` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `requirements.txt` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `lib/overcooked_ai/environment.yml` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `lib/overcooked_ai/README.md` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `lib/overcooked_ai/setup.py` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `src/prompts/gpt/assistant_example.txt` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `src/prompts/gpt/chef_example.txt` |Dependence, parameters, configuration or minimum example required for the core approach.|
 
-## Method 接入入口
+# Method Access
 
-| 文件 | 使用方式 |
+|Documentation|Usage|
 | --- | --- |
-| `src/main.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/collab/__init__.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/collab/collab.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/collab/modules.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/collab/utils.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/collab/web_util.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `lib/overcooked_ai/overcooked_ai_py/planning/planners.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `src/prompts/gpt/assistant_example.txt` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
+| `src/main.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `src/collab/__init__.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `src/collab/collab.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `src/collab/modules.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `src/collab/utils.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `src/collab/web_util.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `lib/overcooked_ai/overcooked_ai_py/planning/planners.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `src/prompts/gpt/assistant_example.txt` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
 
-## 本地保存范围
+# Local Save Range
 
-`official-code/` 仅保存论文方法的核心实现、直接依赖接口、最小配置/示例/测试和许可证。大型外部数据、通用框架副本、缓存与论文实验输出未纳入。
+`official-code/` retains only the core implementation of the paper method, directly required interfaces, minimal configurations, examples, tests, and licenses. Large external datasets, generic framework copies, caches, and paper experiment artifacts are excluded.

@@ -1,32 +1,32 @@
 # Configs and examples
 
-## 环境与配置入口
+##Environment and configuration entry
 
-| 文件 | 用途 |
+|document|use|
 | --- | --- |
-| `scripts/run_suite_on_docker.py` | 依赖、参数、配置或运行示例入口 |
-| `docker_setup/entrypoint.sh` | 依赖、参数、配置或运行示例入口 |
-| `docker_setup/start_emu.sh` | 依赖、参数、配置或运行示例入口 |
-| `docker_setup/start_emu_headless.sh` | 依赖、参数、配置或运行示例入口 |
-| `android_world/agents/README.md` | 依赖、参数、配置或运行示例入口 |
-| `android_world/env/setup_device/setup_test.py` | 依赖、参数、配置或运行示例入口 |
-| `Dockerfile` | 依赖、参数、配置或运行示例入口 |
-| `pyproject.toml` | 依赖、参数、配置或运行示例入口 |
-| `README.md` | 依赖、参数、配置或运行示例入口 |
-| `requirements.txt` | 依赖、参数、配置或运行示例入口 |
-| `setup.py` | 依赖、参数、配置或运行示例入口 |
-| `.github/workflows/pytest.yml` | 依赖、参数、配置或运行示例入口 |
-| `android_world/env/setup_device/apps.py` | 依赖、参数、配置或运行示例入口 |
-| `android_world/env/setup_device/setup.py` | 依赖、参数、配置或运行示例入口 |
-| `android_world/env/setup_device/__init__.py` | 依赖、参数、配置或运行示例入口 |
+| `scripts/run_suite_on_docker.py` |Dependencies, parameters, configuration or running example entry|
+| `docker_setup/entrypoint.sh` |Dependencies, parameters, configuration or running example entry|
+| `docker_setup/start_emu.sh` |Dependencies, parameters, configuration or running example entry|
+| `docker_setup/start_emu_headless.sh` |Dependencies, parameters, configuration or running example entry|
+| `android_world/agents/README.md` |Dependencies, parameters, configuration or running example entry|
+| `android_world/env/setup_device/setup_test.py` |Dependencies, parameters, configuration or running example entry|
+| `Dockerfile` |Dependencies, parameters, configuration or running example entry|
+| `pyproject.toml` |Dependencies, parameters, configuration or running example entry|
+| `README.md` |Dependencies, parameters, configuration or running example entry|
+| `requirements.txt` |Dependencies, parameters, configuration or running example entry|
+| `setup.py` |Dependencies, parameters, configuration or running example entry|
+| `.github/workflows/pytest.yml` |Dependencies, parameters, configuration or running example entry|
+| `android_world/env/setup_device/apps.py` |Dependencies, parameters, configuration or running example entry|
+| `android_world/env/setup_device/setup.py` |Dependencies, parameters, configuration or running example entry|
+| `android_world/env/setup_device/__init__.py` |Dependencies, parameters, configuration or running example entry|
 
-## 执行入口
+## Execution entry
 
-| 文件 | 使用方式 |
+|document|Usage|
 | --- | --- |
-| `scripts/run_suite_on_docker.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `run.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `scripts/run_suite_on_docker.py` |Official code entry candidate; complete model, data and external services according to README before running.|
+| `run.py` |Official code entry candidate; complete model, data and external services according to README before running.|
 
-## 本地保存范围
+## Local saving range
 
-`official-code/` 保存官方仓库在固定 revision 下的核心源代码、配置、示例和测试入口。完整数据集、模型权重、缓存和论文实验输出需按官方 README 另行取得。
+`official-code/`saves the core source code, configuration, examples and test entries of the official repository under a fixed revision. The complete data set, model weights, cache and paper experimental output must be obtained separately from the official README.

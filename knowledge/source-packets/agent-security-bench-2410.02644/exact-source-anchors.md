@@ -1,16 +1,16 @@
 # Exact source anchors
 
-## 论文
+## paper
 
-| 核对对象 | 精确位置 | 可支持的判断 |
+|Check objects|precise location|supportable judgment|
 | --- | --- | --- |
-| 实验设置 | PDF p.24，`paper/paper-v4.txt` 中的 `===== PDF p.24 =====` | `experiments` 所在页；用于核对该部分的原始定义、条件与证据。 |
+|Experimental setup|PDF p.24,`===== PDF p.24 =====`in`paper/paper-v4.txt`|The page where`experiments`is located; used to check the original definition, conditions and evidence of this section.|
 
-## 官方代码
+## Official code
 
-| 文件 | 核对范围 |
+|document|Check scope|
 | --- | --- |
-| `scripts/run.sh` | 官方仓库固定 revision 中的实现、接口或配置入口；具体语义以文件内容为准。 |
-| `main_attacker.py` | 官方仓库固定 revision 中的实现、接口或配置入口；具体语义以文件内容为准。 |
+| `scripts/run.sh` |The official repository fixes the implementation, interface or configuration entry in the revision; the specific semantics are subject to the file content.|
+| `main_attacker.py` |The official repository fixes the implementation, interface or configuration entry in the revision; the specific semantics are subject to the file content.|
 
-代码位置均以 `source-packet.json` 固定的上游 revision 为准；论文页码以本地 PDF 为准。
+The code location is based on the fixed upstream revision of`source-packet.json`; the paper page number is based on the local PDF.

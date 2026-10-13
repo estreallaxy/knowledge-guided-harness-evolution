@@ -1,31 +1,31 @@
-# 实例与类生命周期回调的输入输出合同
+# Input and output contract of instance and class life cycle callback
 
-AgentScope 的生命周期 hook 允许扩展行为而无需直接修改核心方法。固定 v1.0.0 实现定义了回调顺序、参数复制和返回值更新语义；这些接口事实不等于 hook 组件的性能收益。
+AgentScope's lifecycle hooks allow extending behavior without directly modifying core methods. Fixed v1.0.0 implementation defining callback ordering, argument copying, and return value update semantics; these interface facts do not equate to performance gains for hook components.
 
-| 字段 | 机制说明 |
+|Field|Mechanism description|
 | --- | --- |
-| 目标瓶颈 | 日志、校验和行为扩展直接侵入 agent 核心代码，难以独立组合 |
-| 作用模块 | 生命周期扩展注册与异步方法包装 |
-| 输入 | hook 类型与名称、回调函数、方法参数、原方法输出 |
-| 触发条件 | 被包装方法执行前/正常返回后；回调需已注册 |
-| 必要步骤 | 注册实例或类回调；规范化参数；按序执行 pre；调用原方法；按序执行 post；返回更新输出 |
-| 状态变化 | 回调注册表增删；pre 可替换参数，post 可替换结果，None 表示不替换 |
-| 预期输出 | 按回调合同更新后的方法输出，以及扩展自行保存的记录 |
-| 前提与限制 | pre 返回值须满足参数字典合同；参数与输出 deepcopy 的兼容性、回调开销未知。原方法异常不进入正常 post，不能将 post 用作必达清理或崩溃恢复保障 |
+|target bottleneck|Log, checksum and behavior extensions directly invade the agent core code and are difficult to combine independently.|
+|function module|Lifecycle extension registration and asynchronous method packaging|
+|enter|Hook type and name, callback function, method parameters, original method output|
+|Trigger condition|Before the wrapped method is executed/after returning normally; the callback must be registered|
+|Necessary steps|Register instance or class callback; normalize parameters; execute pre in sequence; call the original method; execute post in sequence; return update output|
+|status change|Callback registry additions and deletions; pre can replace parameters, post can replace results, None means no replacement|
+|expected output|Output according to the updated method of the callback contract, and expand self-saved records|
+|Prerequisites and limitations|The return value of pre must satisfy the parameter dictionary contract; the compatibility of parameters and output deepcopy and the callback overhead are unknown. If the original method is abnormal, it will not enter the normal post, and the post cannot be used as a must-clean or crash recovery guarantee.|
 
-## 机制与证据对应
+## Correspondence between mechanism and evidence
 
-| 标识 | 主张 | 论文与固定代码 | 支持范围 |
+|logo|advocate|Papers and Fixed Code|Support scope|
 | --- | --- | --- | --- |
-| AS1 | 生命周期 pre/post hook 可修改输入与输出 | PDF pp.10–11 §3.1.4；`_agent_meta.py:_wrap_with_hooks` | 支持论文接口设计与固定包装实现，不支持独立收益结论 |
-| AS2 | 实例回调先于类回调，参数和结果复制后传入，None 不替换 | `_agent_meta.py:_wrap_with_hooks` | 固定代码的具体语义；论文没有逐项规定该顺序和复制合同 |
-| AS3 | 注册同名 hook 会覆盖原回调；原方法异常不触发正常 post | `_agent_base.py:register_instance_hook`、`register_class_hook`；`_agent_meta.py:_wrap_with_hooks` | 固定代码行为；不能类推为 finally hook 或异常恢复能力 |
+| AS1 |Life cycle pre/post hook can modify input and output| PDF pp.10–11 §3.1.4; `_agent_meta.py:_wrap_with_hooks` |Supports paper interface design and fixed packaging implementation, but does not support independent income conclusions|
+| AS2 |Instance callbacks precede class callbacks. Parameters and results are copied and passed in. None is not replaced.| `_agent_meta.py:_wrap_with_hooks` |The specific semantics of the fixed code; the paper does not specify the order and copying contract|
+| AS3 |Registering a hook with the same name will overwrite the original callback; the original method exception will not trigger the normal post| `_agent_base.py:register_instance_hook`, `register_class_hook`; `_agent_meta.py:_wrap_with_hooks` |Fixed code behavior; no analogy to finally hooks or exception recovery capabilities|
 
-精确行号与范围哈希见 [证据映射](claim-evidence-map.json)。论文提及 reasoning/acting 等事件，但本包选定 `_agent_base.py` 与 `_agent_meta.py` 主要核对 reply/observe/print；未归档部分不补造实现位置。框架结果与 hook 消融边界见 [结果说明](tests-and-reported-results.md)。
+See [evidence map](claim-evidence-map.json) for the exact line number and range hash. The paper mentions events such as reasoning/acting, but this package selects`_agent_base.py`and`_agent_meta.py`to mainly check reply/observe/print; the unarchived parts will not be reworked to implement the location. For frame results and hook ablation boundaries, see [Result Description](tests-and-reported-results.md).
 
-## 方法关系与项目使用边界
+## Method relationships and project usage boundaries
 
-- [NORA](../nora-2605.02092/mechanism-and-boundaries.md)：AS1–AS3 是进程内函数回调，NO1–NO2 是宿主命令事件与文件交接；触发时机、输入格式、异常和退出码合同不同，不能直接互换。
-- [StateFork](../statefork-2609.38648/mechanism-and-boundaries.md)：可用 AS1 观察 SF1 的动作和消耗；这是待测接线，不提供物理恢复能力。
+- [NORA](../nora-2605.02092/mechanism-and-boundaries.md): AS1–AS3 are in-process function callbacks, NO1–NO2 are host command events and file handovers; trigger timing, input format, exception and exit code contracts are different and cannot be directly interchanged.
+- [StateFork](../statefork-2609.38648/mechanism-and-boundaries.md): AS1 can be used to observe the action and consumption of SF1; this is the wiring under test and does not provide physical recovery capabilities.
 
-未来接入时需要单独验证回调失败语义、顺序和成本；当前未安装完整框架、未接入 H0，也未测迁移收益。不能因接口可核实而宣称整体框架收益由 hooks 带来。
+The callback failure semantics, order and cost need to be independently verified for future access; currently, the complete framework has not been installed, H0 has not been connected, and the migration benefits have not been measured. It cannot be claimed that the overall framework benefits are brought by hooks just because the interface is verifiable.

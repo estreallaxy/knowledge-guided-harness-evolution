@@ -1,14 +1,14 @@
 # Tests and reported results
 
-## 论文报告结果
+## Paper report results
 
-以下数值均为**论文结果，非本仓库复跑结果**。
+The following values are all the results of the paper, not the results of repeated runs in this repository.
 
-### Table 1：人评与自动评分的相关性（PDF p.6）
+### Table 1: Correlation between human reviews and automatic ratings (PDF p.6)
 
-30 条人工标注轨迹；标注者与模型拿到同样的 reasoning-action 序列与评分细则。
+30 manually labeled trajectories; the annotator and the model get the same reasoning-action sequence and scoring details.
 
-| 维度 | Pearson r | Spearman ρ | Kendall τ |
+|Dimensions| Pearson r | Spearman ρ | Kendall τ |
 | --- | ---: | ---: | ---: |
 | backtrack & explore | 0.39 | 0.43 | 0.36 |
 | task decomposition | 0.78 | 0.86 | 0.76 |
@@ -17,68 +17,68 @@
 | objective quality | 0.54 | 0.61 | 0.56 |
 | **Overall** | **0.57** | **0.62** | **0.56** |
 
-论文对该表的解释：task decomposition 一致性最高（0.78），说明该行为较易识别；backtracking & exploration 最低（0.39），论文归因于抽取回溯行为并判断其精度与正确性本身困难（§5.1，PDF p.6）。
+The paper explains the table: task decomposition has the highest consistency (0.78), indicating that the behavior is easier to identify; backtracking & exploration has the lowest (0.39), which the paper attributes to the difficulty of extracting backtracking behavior and judging its accuracy and correctness (§5.1, PDF p.6).
 
-### Figure 6：用评估分数筛选训练数据后的 WebArena 成功率（PDF p.6）
+### Figure 6: WebArena success rate after filtering training data with evaluation scores (PDF p.6)
 
-设定：NNetNav-Live 46k 训练样本，用 Gemini 2.5 Pro 作 LLM judge 打分，取 top 6k；按 NNetNav 的设置微调 Llama-3.1-8B，并在 WebArena 上用 BrowserGym 评测。
+Settings: NNetNav-Live 46k training samples, use Gemini 2.5 Pro as LLM judge to score, take the top 6k; fine-tune Llama-3.1-8B according to NNetNav settings, and use BrowserGym to evaluate on WebArena.
 
-| 训练集 | 样本数 | WebArena 成功率 |
+|training set|Number of samples|WebArena success rate|
 | --- | ---: | ---: |
-| llama3.1-8B-46k（全集） | 46k | 7.8% |
-| llama3.1-8B-top-6k（筛选后） | 6k | 8.7% |
+|llama3.1-8B-46k (full set)| 46k | 7.8% |
+|llama3.1-8B-top-6k (after filtering)| 6k | 8.7% |
 
-需要注意论文内部的一处不一致：§5.2 与摘要都记为“提高 **0.98**”，而 Figure 6 柱标为 7.8% → 8.7%（相差 0.9 个百分点）。本来源包按原文并列记录，不作修正。数据量为原来的 13%。
+Note one inconsistency within the paper: §5.2 and the abstract both report "improvement by **0.98**", while the Figure 6 bars read 7.8% → 8.7% (a difference of 0.9 percentage points). This source package is recorded juxtaposed with the original text without correction. Data volume is 13% of the original size.
 
-### 其他可核对的量化表述
+### Other verifiable quantitative expressions
 
-| 内容 | 位置 | 数值 |
+|content|Location|numerical value|
 | --- | --- | --- |
-| NNetNav-Live 训练样本总数 | §5.2，PDF p.6 | 46k |
-| 筛选用作微调的样本数 | §5.2，PDF p.6 | 6k（13%） |
-| 人工标注轨迹数 | §5.1，PDF p.6；§8，PDF p.7 | 30 |
-| 内置评估维度数 | 摘要、§3，PDF pp.1–4 | 5 |
-| 内置动作词抽取选项数 | §3，PDF p.4 | 6 |
+|NNetNav-Live total number of training samples| §5.2, PDF p.6 | 46k |
+|Filter the number of samples used for fine-tuning| §5.2, PDF p.6 | 6k (13%) |
+|Number of manually labeled trajectories| §5.1, PDF p.6; §8, PDF p.7 | 30 |
+|Number of built-in evaluation dimensions|Abstract, §3, PDF pp.1–4| 5 |
+|Number of built-in action word extraction options| §3, PDF p.4 | 6 |
 
-## 官方检查入口
+##Official inspection entrance
 
-**官方仓库没有任何测试**：`6ac7bedd` 快照的 44 个文件中不存在 `tests/`、`*_test.py`、`test_*.py`、`conftest.py`、`pytest.ini`、`tox.ini` 或 CI 测试工作流。因此没有可执行的官方测试套件，只能借助下列代码内建的检查点。
+**Official repository does not have any tests**: There are no`tests/`,`*_test.py`,`test_*.py`,`conftest.py`,`pytest.ini`,`tox.ini`or CI test workflows among the 44 files of the`6ac7bedd`snapshot. Therefore there is no official executable test suite, so you can only rely on the checkpoints built into the code below.
 
-| 检查对象 | 官方代码 | 说明 |
+|Check object|official code|illustrate|
 | --- | --- | --- |
-| 评分提示与 token 消耗（不发 API） | `official-code/evaluate_trajectories.py:339`、`:131-132`；`official-code/evaluator/scorers/base.py:90-100` | `--dry-run` 调用 `LLMScorer.dry_run`，用 tiktoken `cl100k_base` 数 token，返回 `details.prompt` 供人工核对提示拼装。这是唯一不依赖外部服务即可跑通的检查。 |
-| LLM 响应能否被解析 | `official-code/evaluator/scorers/reasoning_quality.py:139-146`；`objective_quality.py:82-89`、`:137-146` | 解析失败时返回 `score=0.0` 且 `details.error` + `details.raw_response`；`confidence` 为 0.0。成功时 `confidence` 分别为 0.9。 |
-| 目标质量评分的重试行为 | `official-code/evaluator/scorers/objective_quality.py:93-136` | 最多 2 次重试；仍失败则 `details.error` = `Failed after N attempts`。 |
-| 断点续跑是否生效 | `official-code/evaluate_trajectories.py:100-119` | 已有 `--output-json` 中出现的轨迹会被跳过，并在结尾打印累计 token 用量。 |
-| 中间落盘是否正常 | `official-code/evaluate_trajectories.py:134-161` | 每 50 条写一次，先写 `.temp` 再 rename，失败只打印 warning 不中断。 |
-| 轨迹能否被解析 | `official-code/evaluator/trajectory.py:179-206` | `from_json` 对缺失字段一律取默认值（`""`、`-1`、`0`、`[]`），不会因字段缺失报错；解析失败只会在 `load_trajectory` 处打印并跳过该文件（`evaluate_trajectories.py:25-33`）。这是宽松解析，不构成校验。 |
-| Dashboard 数据是否装载成功 | `official-code/dashboard/backend/main.py:1399-1417` | 从 `DASHBOARD_DATA_FILE` 读 pickle，打印装载的结果数与轨迹数。 |
+|Rating prompts and token consumption (no API issued)| `official-code/evaluate_trajectories.py:339`, `:131-132`; `official-code/evaluator/scorers/base.py:90-100` |`--dry-run`calls`LLMScorer.dry_run`, uses tiktoken`cl100k_base`to count tokens, and returns`details.prompt`for manual verification and prompt assembly. This is the only check that works without relying on an external service.|
+|Can the LLM response be parsed?| `official-code/evaluator/scorers/reasoning_quality.py:139-146`; `objective_quality.py:82-89`, `:137-146` |When parsing fails,`score=0.0`and`details.error`+`details.raw_response`are returned;`confidence`is 0.0. On success`confidence`are 0.9 respectively.|
+|Retry behavior for target quality scores| `official-code/evaluator/scorers/objective_quality.py:93-136` |Retry at most 2 times; if still fails,`details.error`=`Failed after N attempts`.|
+|Is resuming from a breakpoint effective?| `official-code/evaluate_trajectories.py:100-119` |Tracks that already appear in`--output-json`will be skipped, and the cumulative token usage will be printed at the end.|
+|Is the middle placement normal?| `official-code/evaluate_trajectories.py:134-161` |Write every 50 entries, first write`.temp`and then rename. If it fails, only a warning will be printed without interrupting.|
+|Can the trajectory be parsed?| `official-code/evaluator/trajectory.py:179-206` |`from_json`will always use the default value for missing fields (`""`,`-1`,`0`,`[]`), and no error will be reported due to missing fields; parsing failure will only be printed at`load_trajectory`and the file will be skipped (`evaluate_trajectories.py:25-33`). This is a loose parsing and does not constitute verification.|
+|Whether Dashboard data is loaded successfully| `official-code/dashboard/backend/main.py:1399-1417` |Read pickle from`DASHBOARD_DATA_FILE`and print the number of loaded results and tracks.|
 
-`navigation_path` 评分器需要特别说明：它的 `score` 恒为 `0.0`、`confidence=0.8`（`navigation_path_scorer.py:42-58`），只在 `details` 里给出导航统计。把它算进 overall 会拉低加权平均，看结果时应单独处理。
+The`navigation_path`scorer needs special instructions: its`score`is always`0.0`,`confidence=0.8`(`navigation_path_scorer.py:42-58`), and navigation statistics are only given in`details`. Counting it into the overall will lower the weighted average and should be dealt with separately when looking at the results.
 
-## 当前核验状态
+## Current verification status
 
-| 项目 | 状态 |
+|project|state|
 | --- | --- |
-| PDF 可解析 | 已通过，9 页（demo 论文）。 |
-| 论文 §3–§5、Table 1、Figure 3–6、附录 A 评分细则 | 已与本地全文逐条核对。 |
-| 官方代码版本 | upstream revision `6ac7bedd`（2025-07-03）。 |
-| 论文 Listing 1 与代码 CLI 参数的一致性 | 已核对：`--input` / `--scorers` / `--output-json` 三个参数与论文一致。 |
-| 五个维度的评分细则 | 论文附录 A（PDF p.9）与 `scorers/prompts/prompt.py` 的 system prompt 已比对，分档文字一致。 |
-| 示例轨迹数据 | 未纳入（12MB，9 个文件全部 >100KB）。 |
-| 官方端到端复跑（评估 46k 样本或微调 Llama-3.1-8B） | 尚未执行；论文未提供完整的微调与评测脚本。 |
-| 评估器最小运行（含 `--dry-run`） | 尚未执行；仓库无 Python 依赖清单，需先自行安装 litellm/spacy/benepar/tiktoken 等。 |
-| 真实 API 评分调用 | 尚未执行（需要 `LLM_API_KEY` 与计费额度）。 |
-| 前端 dashboard 构建（`npm run build`） | 无法执行：`+page.svelte:4-10` import 的 7 个 `lib/components/*.svelte` 不在上游快照中。 |
-| 导航图/t-SNE/词云的可视化效果 | 未知；需要先补齐前端组件并生成对应的产物目录。 |
-| 迁移到目标 Harness 的收益 | 尚未验证。 |
+|PDF parsable|Passed, 9 pages (demo paper).|
+|Paper §3–§5, Table 1, Figure 3–6, Appendix A Grading Rules|It has been checked item by item with the local full text.|
+|Official code version| upstream revision `6ac7bedd` (2025-07-03). |
+|Paper Listing 1 Consistency with Code CLI Parameters|Checked: The three parameters of`--input`/`--scorers`/`--output-json`are consistent with the paper.|
+|Scoring details for five dimensions|Appendix A of the paper (PDF p.9) has been compared with the system prompt of`scorers/prompts/prompt.py`, and the binning text is consistent.|
+|Sample trajectory data|Not included (12MB, 9 files all >100KB).|
+|Official end-to-end rerun (evaluating 46k samples or fine-tuning Llama-3.1-8B)|It has not been implemented yet; the paper does not provide a complete fine-tuning and evaluation script.|
+|Evaluator minimum run (including`--dry-run`)|It has not been executed yet; the repository does not have a Python dependency list, so you need to install litellm/spacy/benepar/tiktoken, etc. first.|
+|Real API scoring calls|Not executed yet (requires`LLM_API_KEY`and billing quota).|
+|Front-end dashboard build (`npm run build`)|Unable to execute:`+page.svelte:4-10`import of 7`lib/components/*.svelte`is not in the upstream snapshot.|
+| Visualization quality of the navigation map, t-SNE view, and word cloud | Unknown; the front-end components and corresponding artifact directory must first be generated. |
+|Benefits of migrating to Target Harness|Not verified yet.|
 
-## 论文自述的失效条件
+## Failure conditions of the paper's readme
 
-来自 §7 Limitations（PDF p.6），属于**论文自述**而非本仓库实测：
+From §7 Limitations (PDF p.6), it belongs to the **paper readme** rather than the actual measurement of this repository:
 
-- 主要面向 web navigation 任务设计，对 coding 等其他场景的适用性未验证。
-- 多模态场景未覆盖。
-- 评估系统整体依赖 LLM-based evaluation，论文建议后续用带细粒度人工标注的专用评估器替换以提升可靠性。
+- Mainly designed for web navigation tasks, the applicability to other scenarios such as coding has not been verified.
+- Multimodal scenes are not covered.
+- The overall evaluation system relies on LLM-based evaluation, and the paper recommends replacing it with a dedicated evaluator with fine-grained manual annotation to improve reliability.
 
-结合 Table 1 可确认的失效边界：backtracking & exploration 维度的人机一致性只有 0.39，在论文自己的 30 条样本上即属于弱相关，单独用该维度做筛选决策缺少证据支持。
+Combined with the confirmed failure boundary in Table 1: the human-computer consistency of the backtracking & exploration dimension is only 0.39, which is a weak correlation on the 30 samples of the paper itself. Using this dimension alone to make screening decisions lacks evidence support.

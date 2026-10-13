@@ -1,9 +1,9 @@
-# AgentRewind 官方配置与示例
+# AgentRewind official configuration and examples
 
-配置、命令和使用前提以固定 revision 中的原始文件为准；本包没有用本地改编参数替代论文参数。官方 benchmark、模型凭据、外部服务及完整依赖未在本包部署。
+The configuration, commands and usage prerequisites are subject to the original files in the fixed revision; this package does not replace the paper parameters with local adaptation parameters. Official benchmarks, model credentials, external services and complete dependencies are not deployed in this package.
 
 ## Futuresis/replay-agent-recorder
 
-- [README.md](official-code/replay-agent-recorder/README.md)：固定原始配置或使用说明。
+- [README.md](official-code/replay-agent-recorder/README.md): Fixed original configuration or usage instructions.
 
-完整论文配置见带页码的 [论文文本](paper/paper-v1.txt) 和 [论文 PDF](paper/paper-v1.pdf)。没有归档或未明确给出的参数保持未知；不据此宣称官方全流程已跑通。
+For the complete paper configuration, see [paper text](paper/paper-v1.txt) and [paper PDF](paper/paper-v1.pdf) with page numbers. Parameters that are not archived or not clearly given remain unknown; it is not claimed that the entire official process has been run through.

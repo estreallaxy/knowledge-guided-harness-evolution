@@ -1,31 +1,31 @@
-# 训练经验规则维护与成功示例检索
+# Rule Maintenance from Training Experience and Retrieval of Successful Examples
 
-ExpeL 将训练中的成功与失败轨迹转为可编辑规则，并检索成功轨迹作为新任务的示例。规则提取、示例检索和训练中的 Reflexion 是不同组件；原系统收益不能全部归因于规则维护。
+ExpeL turns successful and failed training trajectories into editable rules and retrieves successful trajectories as examples for new tasks. Rule extraction, example retrieval, and Reflexion during training are separate components; the gain of the complete system cannot be attributed solely to rule maintenance.
 
-| 字段 | 机制说明 |
+| Field | Mechanism |
 | --- | --- |
-| 目标瓶颈 | 不同任务之间没有保留可复用的行动经验，重复相似错误 |
-| 作用模块 | 离线经验收集、规则提取与执行前上下文构建 |
-| 输入 | 训练任务的成功/失败轨迹、已有规则及重要性计数、新任务、成功示例池与 embedding 接口 |
-| 触发条件 | 训练经验收集后提取规则；执行新任务时检索示例并注入规则 |
-| 必要步骤 | 收集训练轨迹；比较同任务成败对及跨任务成功集合；生成规则操作；更新计数并删除无效规则；检索成功示例；将规则和示例加入任务上下文 |
-| 状态变化 | 经验池与规则集合增长或修订，规则重要性计数增减；执行阶段使用已提取知识 |
-| 预期输出 | 带计数的规则、相关成功示例、增强后的任务指令 |
-| 前提与限制 | 原训练包含 Reflexion 重试；规则提取模型与执行模型有区别。训练样本质量、规则冲突、上下文长度及离线成本影响使用；本地模型接入和迁移收益未知 |
+| Target bottleneck | Reusable action experience is discarded across tasks, causing similar mistakes to recur. |
+| Role | Offline experience collection, rule extraction, and pre-execution context construction. |
+| Inputs | Successful and failed training trajectories, existing rules and importance counts, a new task, a pool of successful examples, and an embedding interface. |
+| Trigger | Rules are extracted after training experience is collected; examples are retrieved and rules injected before a new task is executed. |
+| Required steps | Collect training trajectories; compare success/failure pairs from the same task and successes across tasks; generate rule operations; update counts and remove invalid rules; retrieve successful examples; add rules and examples to the task context. |
+| State changes | The experience pool and rule set grow or are revised; rule importance counts increase or decrease; extracted knowledge becomes available at execution time. |
+| Outputs | Counted rules, relevant successful examples, and augmented task instructions. |
+| Preconditions and limits | The original training procedure includes Reflexion retries, and its rule-extraction model differs from the execution model. Training-sample quality, rule conflicts, context length, and offline cost affect use. Local model integration and transfer gains remain unverified. |
 
-## 机制与证据对应
+## Mechanism-to-evidence mapping
 
-| 标识 | 主张 | 论文与固定代码 | 支持范围 |
+| ID | Claim | Paper and pinned code | Supported scope |
 | --- | --- | --- | --- |
-| EX1 | 对成败对和成功集合提取规则，通过增删改与投票维护规则 | PDF p.4 §4.2、p.6 Algorithm 2；`agent/expel.py:create_rules`、`parse_rules`、`update_rules` | 论文与实现的规则维护；论文 UPVOTE/DOWNVOTE 对应代码 AGREE/REMOVE，操作顺序、满表 −3 和文本匹配差异保留 |
-| EX2 | 用任务相似度检索成功轨迹，并将规则与示例加入执行上下文 | PDF pp.4–5 §4.2–4.3、p.6 Algorithm 3；`agent/expel.py:setup_vectorstore`、`update_dynamic_prompt_components`、`insert_before_task_prompt` | 支持经验检索和上下文构建；不证明本地收益 |
-| EX3 | 训练先通过反思重试收集成败经验，不能忽略这部分成本 | PDF p.4 §4.1、p.6 Algorithm 1；`agent/expel.py:run` | 固定代码训练分支调用 `ReflectAgent.run`；父类不在本包选定源码中，完整训练行为与实际成本未知 |
+| EX1 | Rules are extracted from success/failure pairs and successful sets, then maintained through edit and vote operations. | PDF p.4 §4.2 and p.6 Algorithm 2; `agent/expel.py:create_rules`, `parse_rules`, `update_rules` | Supports rule maintenance in the paper and implementation. The paper's UPVOTE/DOWNVOTE differs from the code's AGREE/REMOVE; operation order, the −3 full-table behavior, and text-matching differences are preserved. |
+| EX2 | Successful trajectories are retrieved by task similarity, and rules and examples are added to the execution context. | PDF pp.4–5 §4.2–4.3 and p.6 Algorithm 3; `agent/expel.py:setup_vectorstore`, `update_dynamic_prompt_components`, `insert_before_task_prompt` | Supports experience retrieval and context construction; does not establish a local performance gain. |
+| EX3 | Training first collects success and failure experience through reflection and retry, so this cost cannot be ignored. | PDF p.4 §4.1 and p.6 Algorithm 1; `agent/expel.py:run` | The pinned training branch calls `ReflectAgent.run`. Its parent class is outside the selected source snapshot, so complete training behavior and actual cost remain unknown. |
 
-逐条论文页码、文本行号、代码范围及哈希见 [证据映射](claim-evidence-map.json)。报告数值和历史适配差异见 [结果边界](tests-and-reported-results.md)；原始材料与版本见 [来源锚点](exact-source-anchors.md)。
+Paper pages, text-line ranges, code ranges, and pinned links are recorded in [the evidence map](claim-evidence-map.json). Reported values and historical compatibility differences are recorded in [the results boundary](tests-and-reported-results.md); source materials and versions are recorded in [the source anchors](exact-source-anchors.md).
 
-## 方法关系与项目使用边界
+## Method relationships and project-use boundary
 
-- [ReasoningBank](../reasoningbank-2509.25140/mechanism-and-boundaries.md)：两者都复用经验，ExpeL 保存可编辑规则和成功示例，ReasoningBank 保存成败推理经验。对应 EX1–EX2、RB1–RB3；可以替代或组合，但重复建议和检索成本需处理。组合收益为待测假设。
-- [AgentRewind](../agentrewind-2608.14380/mechanism-and-boundaries.md)：EX1 的跨任务规则维护可与 AR1 的任务内恢复记忆互补；两种记忆的生命周期不同，不应混为同一经验池。该组合未实现、未测。
+- [ReasoningBank](../reasoningbank-2509.25140/mechanism-and-boundaries.md): both reuse experience. ExpeL stores editable rules and successful examples, whereas ReasoningBank stores reasoning experience from successes and failures. EX1–EX2 and RB1–RB3 may substitute for or complement one another, but duplicate advice and retrieval cost must be handled. Any combined gain remains an untested hypothesis.
+- [AgentRewind](../agentrewind-2608.14380/mechanism-and-boundaries.md): EX1's cross-task rule maintenance may complement AR1's within-task recovery memory. Their lifecycles differ and they should not be merged into one undifferentiated experience pool. This combination has not been implemented or measured.
 
-项目迁移只能从允许的 train 经验提取和更新，dev/test 使用冻结知识；这是项目边界，不是本包已完成的接入。既有本地合成测试不等于完整上游复现或 H0 迁移验证。
+For project transfer, knowledge may be extracted and updated only from permitted training experience; development and test runs use frozen knowledge. This is a project boundary, not a completed integration. Existing local synthetic tests do not constitute a full upstream reproduction or H0 transfer validation.

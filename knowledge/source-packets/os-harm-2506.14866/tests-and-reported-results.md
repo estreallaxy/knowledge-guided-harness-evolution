@@ -1,41 +1,41 @@
 # Tests and reported results
 
-## 论文报告证据
+# Paper reporting evidence
 
-| 证据 | 位置 | 状态 |
+|Evidence|Location|Status|
 | --- | --- | --- |
-| 论文表格 | PDF p.3 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.4 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.7 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.8 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.9 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.14 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.21 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.22 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.23 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.24 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.25 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.26 | 论文报告值；本仓库尚未复跑。 |
+|Paper table| PDF p.3 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.4 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.7 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.8 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.9 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.14 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.21 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.22 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.23 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.24 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.25 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.26 |Value reported in the paper; it has not been rerun in this repository.|
 
-## 官方验证入口
+# Official validation entry points
 
-| 文件 | 核对对象 |
+|Documentation|Check Object|
 | --- | --- |
-| `desktop_env/evaluators/README.md` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `desktop_env/evaluators/__init__.py` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `desktop_env/evaluators/metrics/thunderbird.py` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `desktop_env/evaluators/metrics/utils.py` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `desktop_env/evaluators/metrics/vlc.py` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `desktop_env/evaluators/metrics/vscode.py` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `evaluation_examples/examples/vs_code/___check_self_eval_prompt.json` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `evaluation_examples/examples/vs_code/___check_self_eval_prompt_aug.json` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
+| `desktop_env/evaluators/README.md` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
+| `desktop_env/evaluators/__init__.py` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
+| `desktop_env/evaluators/metrics/thunderbird.py` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
+| `desktop_env/evaluators/metrics/utils.py` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
+| `desktop_env/evaluators/metrics/vlc.py` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
+| `desktop_env/evaluators/metrics/vscode.py` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
+| `evaluation_examples/examples/vs_code/___check_self_eval_prompt.json` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
+| `evaluation_examples/examples/vs_code/___check_self_eval_prompt_aug.json` |Official portals for assessment, testing or calculation of results directly related to the core methodology.|
 
-## 当前核验状态
+# Current verification status
 
-| 项目 | 状态 |
+|Item|Status|
 | --- | --- |
-| 顶会录用页 | 已记录并与论文题目核对。 |
-| PDF 与分页文本 | 已下载并可解析，共 32 页。 |
-| 官方代码 | 已固定 revision，并保存核心代码、配置、示例与测试入口。 |
-| 大型数据与模型权重 | 未纳入来源包。 |
-| 官方端到端实验复跑 | 尚未执行；不得把论文报告结果表述为本地复跑结果。 |
+|Conference acceptance page|The title of the paper was recorded and checked.|
+|PDF Text with Page Break|Downloaded and parsed, 32 pages.|
+|Official code|Revision is fixed and the core code, configuration, example and test entry is saved.|
+|Large data and model weights|Not included in source package.|
+|Official-to-end experiment rerun|Not implemented; paper-reported results must not be presented as a local rerun.|

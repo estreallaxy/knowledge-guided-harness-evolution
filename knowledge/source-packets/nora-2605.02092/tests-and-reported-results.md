@@ -1,9 +1,9 @@
-# NORA 报告结果与复核边界
+# NORA report results and review borders
 
-固定论文 `2605.02092v1`，原文定位：§4.1–4.3 / PDF pp.12–13；附录 E / pp.73–74；原始 settings.json 与 pre/post/stop 脚本。
+Fixed Thesis`2605.02092v1`Original location: §4.1-4.3 / PDF pp. 12-13; Appendix E/pp.73-74; Original settlings.json and pre/post/stopScript.
 
-附录 E 是同一 research brief 的定性去组件分析，不能给出独立 hook 增益、可靠恢复率或故障注入统计。论文 §4.1 的意外终止不丢状态主张超出当前公开 Stop 代码可证明的边界。保留为可审计的生命周期编排案例。
+Appendix E is a qualitative deassembly analysis of the same research brief, which does not provide independent book gain, reliable recovery rate or failure injection statistics. The accidental termination of status in paper § 4.1 claims to go beyond the current publicly available stop code. Retain it as an auditable life cycle case.
 
-固定代码与本地适配的历史核对说明：固定原配置 Bash matcher 且以 $CLAUDE_TOOL_INPUT 作 argv；pre 脚本 regex 与 exit 1、无 deny JSON。2026-10-10 Claude Code 官方协议命令事件来自 stdin JSON，plain-text/空 stdout 的 exit 1 是非阻断错误；需要 exit 2 或有效决定字段。Stop 原脚本顺序复制/写文件不具多文件原子性。本地版本修正输入/决定合同，只做显式单文件交接，不复制原 permissions、通知或模型配置。固定上游树未找到 LICENSE：原始片段仅作本地来源证据，复用/再分发许可未知；runtime 是本地独立实现。
+The historical reconciliation of the fixed code with the local fit: the fixed-format configuration Bash matcher and argv for $CLAUDE TOOL INPUT; pre script regex with exit 1, no deny JSON. 2026-10 Claude Code official protocol order from stdin JSON, plain-text/ empty stdout exit 1 is a non-stop error; exit 2 or valid decision field is required. Stop Original Script Ordered Copy/Writes documents are not atomized in multiple files. Local version amends the input/decision contract, which is only for a single, visible file exchange, without copying original missions, notifications or model configuration. LICENSE was not found in the fixed upstream tree: the original footage was used as evidence of local sources only and the permit for reuse/redistribution was unknown; runtime was achieved locally.
 
-官方测试的执行结果：未知；没有运行完整上游系统。固定 README 中的官方入口保存在 [配置与示例](configs-and-examples.md)。此前独立本地适配通过 5 项合成功能测试；这些测试既不是官方测试，也不是 H0 迁移、收益或完整论文复现。NORA 的真实宿主 hook 接线未验证。
+Results of implementation of official tests: unknown; complete upstream system not operational. The official entry in README is stored in [configuration and examples] (configs-and-examples.md). Previously, independent local adaptation passed 5 synthetic functional tests; these were neither official tests nor H0 migrations, returns or full dissertation. The NORA real host hook connection is not verified.

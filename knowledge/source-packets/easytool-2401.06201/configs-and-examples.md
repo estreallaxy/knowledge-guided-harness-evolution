@@ -1,31 +1,31 @@
 # Configs and examples
 
-## 环境与配置入口
+# Environment and configuration portal
 
-| 文件 | 用途 |
+|Documentation|Purpose|
 | --- | --- |
-| `README.md` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `easytool/README.md` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `easytool/requirements.txt` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `hugginggpt/README.md` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `taskbench/README.md` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `taskbench/requirements.txt` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `hugginggpt/server/requirements.txt` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `hugginggpt/web/src/config/index.ts` | 核心方法所需的依赖、参数、配置或最小示例。 |
+| `README.md` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `easytool/README.md` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `easytool/requirements.txt` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `hugginggpt/README.md` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `taskbench/README.md` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `taskbench/requirements.txt` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `hugginggpt/server/requirements.txt` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `hugginggpt/web/src/config/index.ts` |Dependence, parameters, configuration or minimum example required for the core approach.|
 
-## Method 接入入口
+# Method Access
 
-| 文件 | 使用方式 |
+|Documentation|Usage|
 | --- | --- |
-| `easytool/data_process.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `easytool/main.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `easytool/requirements.txt` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `easytool/easytool/__init__.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `easytool/easytool/funcQA.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `easytool/easytool/restbench.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `easytool/easytool/toolbench.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `easytool/easytool/toolbench_retrieve.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
+| `easytool/data_process.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `easytool/main.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `easytool/requirements.txt` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `easytool/easytool/__init__.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `easytool/easytool/funcQA.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `easytool/easytool/restbench.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `easytool/easytool/toolbench.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `easytool/easytool/toolbench_retrieve.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
 
-## 本地保存范围
+# Local Save Range
 
-`official-code/` 仅保存论文方法的核心实现、直接依赖接口、最小配置/示例/测试和许可证。大型外部数据、通用框架副本、缓存与论文实验输出未纳入。
+`official-code/` retains only the core implementation of the paper method, directly required interfaces, minimal configurations, examples, tests, and licenses. Large external datasets, generic framework copies, caches, and paper experiment artifacts are excluded.

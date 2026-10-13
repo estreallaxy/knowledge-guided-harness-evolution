@@ -1,22 +1,22 @@
 # Configs and examples
 
-以下内容取自 `official-code/README.md` 与 `config.example.yaml`（revision
-`0b64fdafe049e596a3f5657c219329f24af24198`），**未在本机执行**。
+The following are taken from`official-code/README.md`with`config.example.yaml`(revision
+`0b64fdafe049e596a3f5657c219329f24af24198`),** not implemented on this machine**.
 
-## 运行前提
+# Run the preconditions #
 
-| 项目 | 要求 | 来源 |
+|Item|Request|Source|
 | --- | --- | --- |
-| 安装 | `pip install "routellm[serve,eval]"` 或源码 `pip install -e .[serve,eval]` | 上游 README Installation |
-| 强/弱模型凭据 | 论文用 `gpt-4-1106-preview` + `Mixtral-8x7B-Instruct-v0.1`（Anyscale 托管） | 上游 README Quickstart；论文 §5.1 |
-| 路由器权重 | HuggingFace 上的 `routellm/*` checkpoint（`mf_gpt4_augmented` 等） | `config.example.yaml` |
-| 训练数据 | Chatbot Arena 人类偏好对战（`lmsys/lmsys-arena-human-preference-55k`）、GPT-4 judge battles | `config.example.yaml` |
-| 校准数据 | 按查询分布校准阈值（论文用 Arena 数据） | 上游 README Threshold Calibration |
+|Install|`pip install "routellm[serve,eval]"`or source code`pip install -e .[serve,eval]`|Upstream README Information|
+|Evidence of strong/weak models|Thesis`gpt-4-1106-preview` + `Mixtral-8x7B-Instruct-v0.1`(Anyscale trustee)|Upstream README Quickstart; paper § 5.1|
+| Router weights | Hugging Face `routellm/*` checkpoints, including `mf_gpt4_augmented` | `config.example.yaml` |
+|Training data|Chatbot Arena Human Prejudice (`lmsys/lmsys-arena-human-preference-55k`), GPT-4 Judge Battles| `config.example.yaml` |
+|Calibration data|Calibration threshold by query (Arena data for the paper)|Upstream|
 
-## 上游示例命令
+# Upstream Example Command
 
 ```bash
-# 1) 用控制器做 drop-in 替换（Python SDK）
+#1) Replace with control drop-in (Python SDK)
 python - <<'PY'
 import os
 from routellm.controller import Controller
@@ -26,22 +26,22 @@ client = Controller(routers=["mf"], strong_model="gpt-4-1106-preview",
                     weak_model="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1")
 PY
 
-# 2) 校准阈值：让约 50% 的请求走强模型
+#2) Calibration threshold: to allow about 50% of requests to take a strong model
 python -m routellm.calibrate_threshold --routers mf --strong-model-pct 0.5 --config config.example.yaml
-# 上游输出示例：For 50.0% strong model calls for mf, threshold = 0.11593
+# Example of upstream output: For 50.0% strong model calls for mf,
 
-# 3) 生成时用 router-<name>-<threshold> 指定路由器
+#3) Specified router for generating
 #    model="router-mf-0.11593"
 
-# 4) 或用 OpenAI 兼容服务
+#4) or use OpenAI compatible services
 python -m routellm.openai_server --routers mf --strong-model gpt-4-1106-preview \
   --weak-model anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1
 ```
 
-## 配置片段
+Configure Snippet
 
 ```yaml
-# config.example.yaml（节选）
+#compig.example.yaml
 sw_ranking:
     arena_battle_datasets:
       - lmsys/lmsys-arena-human-preference-55k
@@ -54,8 +54,8 @@ mf:
     checkpoint_path: routellm/mf_gpt4_augmented
 ```
 
-## 未确认项（写为未知）
+# Unrecognized entry (identified)
 
-- 四个路由器各自的确切超参（除论文写明的缩放系数 γ = 10 外）：未逐一核对。
-- 论文 Table 1–4 与 `routellm/evals/` 脚本的对应命令：评测代码已纳入，底层第三方数据集（GSM8K/MMLU/MT-Bench）需自行获取。
-- 「>40% cheaper than commercial offerings」的比较对象与调用方式：论文放在附录 E，本包未转录。
+- The exact cross-references for each of the four routers (except for the Zoom Co. G = 10 in the paper): not checked individually.
+- Thesis Table 1-4 and the corresponding command for`routellm/evals/`scripts: the evaluation code has been incorporated and the bottom third-party data set (GSM8K/MMLU/MT-Bench) is self-accessible.
+- Comparison and callability of ">40% cheaper than commercial offers": The paper is in appendix E and is not reproduced in this package.

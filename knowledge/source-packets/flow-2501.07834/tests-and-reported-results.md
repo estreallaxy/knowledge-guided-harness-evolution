@@ -1,31 +1,31 @@
 # Tests and reported results
 
-## 论文报告证据
+# Paper reporting evidence
 
-| 证据 | 位置 | 状态 |
+|Evidence|Location|Status|
 | --- | --- | --- |
-| 论文表格 | PDF p.10 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.11 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.13 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.23 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.24 | 论文报告值；本仓库尚未复跑。 |
+|Paper table| PDF p.10 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.11 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.13 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.23 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.24 |Value reported in the paper; it has not been rerun in this repository.|
 
-## 官方验证入口
+# Official validation entry points
 
-| 文件 | 核对对象 |
+|Documentation|Check Object|
 | --- | --- |
-| `code_test_module.py` | 官方评测、测试或结果计算入口 |
-| `notebooks/Auto_Unit_Test_Off_Tetris.ipynb` | 官方评测、测试或结果计算入口 |
-| `notebooks/Auto_Unit_Test_Off_Tetris_match3.ipynb` | 官方评测、测试或结果计算入口 |
-| `notebooks/Auto_Unit_Test_On_Tetris.ipynb` | 官方评测、测试或结果计算入口 |
-| `notebooks/Auto_Unit_Test_On_Tetris_match3.ipynb` | 官方评测、测试或结果计算入口 |
+| `code_test_module.py` |Official assessment, test or result calculation portal|
+| `notebooks/Auto_Unit_Test_Off_Tetris.ipynb` |Official assessment, test or result calculation portal|
+| `notebooks/Auto_Unit_Test_Off_Tetris_match3.ipynb` |Official assessment, test or result calculation portal|
+| `notebooks/Auto_Unit_Test_On_Tetris.ipynb` |Official assessment, test or result calculation portal|
+| `notebooks/Auto_Unit_Test_On_Tetris_match3.ipynb` |Official assessment, test or result calculation portal|
 
-## 当前核验状态
+# Current verification status
 
-| 项目 | 状态 |
+|Item|Status|
 | --- | --- |
-| 顶会录用页 | 已记录并与论文题目核对。 |
-| PDF 与分页文本 | 已下载并可解析，共 36 页。 |
-| 官方代码 | 已固定 revision，并保存核心代码、配置、示例与测试入口。 |
-| 大型数据与模型权重 | 未纳入来源包。 |
-| 官方端到端实验复跑 | 尚未执行；不得把论文报告结果表述为本地复跑结果。 |
+|Conference acceptance page|The title of the paper was recorded and checked.|
+|PDF Text with Page Break|Downloaded and parsed, 36 pages.|
+|Official code|Revision is fixed and the core code, configuration, example and test entry is saved.|
+|Large data and model weights|Not included in source package.|
+|Official-to-end experiment rerun|Not implemented; paper-reported results must not be presented as a local rerun.|

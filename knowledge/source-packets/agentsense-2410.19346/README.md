@@ -1,10 +1,10 @@
 # AgentSense: Benchmarking Social Intelligence of Language Agents through Interactive Scenarios
 
-| 项目 | 内容 |
+|project|content|
 | --- | --- |
-| 顶会录用 | [NAACL 2025](https://doi.org/10.18653/v1/2025.naacl-long.257) |
-| 固定论文 | [arXiv:2410.19346v2](https://arxiv.org/abs/2410.19346v2) |
-| 官方代码 | [https://github.com/ljcleo/agent_sense](https://github.com/ljcleo/agent_sense)，revision `21b6ef909cabcd4a72cded7580869e1e28c0e628` |
-| 覆盖方向 | 长期记忆与经验复用、子 Agent 与多 Agent 协作、验证、评估与反馈 |
+|Will be accepted| [NAACL 2025](https://doi.org/10.18653/v1/2025.naacl-long.257) |
+|fixed paper| [arXiv:2410.19346v2](https://arxiv.org/abs/2410.19346v2) |
+|official code| [https://github.com/ljcleo/agent_sense](https://github.com/ljcleo/agent_sense), revision `21b6ef909cabcd4a72cded7580869e1e28c0e628` |
+|coverage direction|Long-term memory and experience reuse, sub-agent and multi-agent collaboration, verification, evaluation and feedback|
 
-本目录固定论文全文、官方代码核心快照、证据锚点、配置入口与论文报告结果。大型数据集、模型权重和运行产物未纳入仓库。
+This directory fixes the full text of the paper, official code core snapshots, evidence anchors, configuration entries and paper report results. Large datasets, model weights, and run products are not included in the repository.

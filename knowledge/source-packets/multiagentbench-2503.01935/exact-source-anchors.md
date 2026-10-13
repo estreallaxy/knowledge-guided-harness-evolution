@@ -1,29 +1,29 @@
 # Exact source anchors
 
-## 论文
+# Papers
 
-| 核对对象 | 精确位置 | 可支持的判断 |
+|Check Object|Exact Location|Supportable judgement|
 | --- | --- | --- |
-| 方法与系统设计 | PDF p.8，`paper/paper-v1.txt` 中的 `===== PDF p.8 =====` | `50 framework` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 实验设置 | PDF p.6，`paper/paper-v1.txt` 中的 `===== PDF p.6 =====` | `4 Experiment Setup` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 结果与消融 | PDF p.7，`paper/paper-v1.txt` 中的 `===== PDF p.7 =====` | `5 Ablation` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 限制与边界 | PDF p.4，`paper/paper-v1.txt` 中的 `===== PDF p.4 =====` | `Discussion` 所在页；用于核对该部分的原始定义、条件与证据。 |
+|Methodology and system design|`===== PDF p.8 =====`in PDF p.8,`paper/paper-v1.txt`|`50 framework`page; used to check the original definition, conditions and evidence of that part.|
+|Experiment Settings|`===== PDF p.6 =====`in PDF p.6,`paper/paper-v1.txt`|`4 Experiment Setup`page; used to check the original definition, conditions and evidence of that part.|
+|Results and digestion|`===== PDF p.7 =====`in PDF p.7,`paper/paper-v1.txt`|`5 Ablation`page; used to check the original definition, conditions and evidence of that part.|
+|Restrictions and borders|`===== PDF p.4 =====`in PDF p.4,`paper/paper-v1.txt`|`Discussion`page; used to check the original definition, conditions and evidence of that part.|
 
-## 官方代码
+# Official code
 
-| Method 实现 | 核对范围 |
+|Method Achieved|Check scope|
 | --- | --- |
-| `marble/main.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `marble/engine/engine_planner.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `marble/graph/agent_graph.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `marble/evaluator/env_evaluation_prompts.json` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `marble/evaluator/evaluator_prompts.json` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `multiagentbench/jsonl2yaml.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `multiagentbench/runjsonl2yaml.sh` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `tests/test_model_prompting.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `tests/test_short_term_memory.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `marble/agent/base_agent.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `marble/agent/werewolf_agent.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `marble/agent/__init__.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
+| `marble/main.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `marble/engine/engine_planner.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `marble/graph/agent_graph.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `marble/evaluator/env_evaluation_prompts.json` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `marble/evaluator/evaluator_prompts.json` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `multiagentbench/jsonl2yaml.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `multiagentbench/runjsonl2yaml.sh` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `tests/test_model_prompting.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `tests/test_short_term_memory.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `marble/agent/base_agent.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `marble/agent/werewolf_agent.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `marble/agent/__init__.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
 
-代码位置均以 `source-packet.json` 固定的官方代码 revision 为准；论文页码以本地 PDF 为准。
+The code location is based on the`source-packet.json`fixed official code; the paper page number is based on the local PDF.

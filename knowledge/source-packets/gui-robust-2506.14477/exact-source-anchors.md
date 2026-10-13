@@ -1,26 +1,26 @@
 # Exact source anchors
 
-## 论文
+# Papers
 
-| 核对对象 | 精确位置 | 可支持的判断 |
+|Check Object|Exact Location|Supportable judgement|
 | --- | --- | --- |
-| 方法与系统设计 | PDF p.6，`paper/paper-v1.txt` 中的 `===== PDF p.6 =====` | `method` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 实验设置 | PDF p.7，`paper/paper-v1.txt` 中的 `===== PDF p.7 =====` | `5.1 Experiment Setup` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 结果与消融 | PDF p.7，`paper/paper-v1.txt` 中的 `===== PDF p.7 =====` | `results` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 限制与边界 | PDF p.2，`paper/paper-v1.txt` 中的 `===== PDF p.2 =====` | `limitations` 所在页；用于核对该部分的原始定义、条件与证据。 |
+|Methodology and system design|`===== PDF p.6 =====`in PDF p.6,`paper/paper-v1.txt`|`method`page; used to check the original definition, conditions and evidence of that part.|
+|Experiment Settings|`===== PDF p.7 =====`in PDF p.7,`paper/paper-v1.txt`|`5.1 Experiment Setup`page; used to check the original definition, conditions and evidence of that part.|
+|Results and digestion|`===== PDF p.7 =====`in PDF p.7,`paper/paper-v1.txt`|`results`page; used to check the original definition, conditions and evidence of that part.|
+|Restrictions and borders|`===== PDF p.2 =====`in PDF p.2,`paper/paper-v1.txt`|`limitations`page; used to check the original definition, conditions and evidence of that part.|
 
-## 官方代码
+# Official code
 
-| Method 实现 | 核对范围 |
+|Method Achieved|Check scope|
 | --- | --- |
-| `model/qwen2_5_vl_model.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `model/ui_tars_model.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `model/prompt_UTS_step_given.txt` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `model/prompt_UTS_task_given.txt` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `model/prompt_UTS_task_given_abnormal.txt` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `model/prompt_step.txt` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `model/prompt_task.txt` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `model/prompt_task_abnormal.txt` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `evaluation.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
+| `model/qwen2_5_vl_model.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `model/ui_tars_model.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `model/prompt_UTS_step_given.txt` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `model/prompt_UTS_task_given.txt` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `model/prompt_UTS_task_given_abnormal.txt` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `model/prompt_step.txt` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `model/prompt_task.txt` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `model/prompt_task_abnormal.txt` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `evaluation.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
 
-代码位置均以 `source-packet.json` 固定的官方代码 revision 为准；论文页码以本地 PDF 为准。
+The code location is based on the`source-packet.json`fixed official code; the paper page number is based on the local PDF.

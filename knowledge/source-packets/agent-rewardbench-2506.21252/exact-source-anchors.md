@@ -1,18 +1,18 @@
 # Exact source anchors
 
-## 论文
+## paper
 
-| 核对对象 | 精确位置 | 可支持的判断 |
+|Check objects|precise location|supportable judgment|
 | --- | --- | --- |
-| 方法与系统设计 | PDF p.4，`paper/paper-v1.txt` 中的 `===== PDF p.4 =====` | `method` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 结果与消融 | PDF p.9，`paper/paper-v1.txt` 中的 `===== PDF p.9 =====` | `5 Analysis` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 限制与边界 | PDF p.2，`paper/paper-v1.txt` 中的 `===== PDF p.2 =====` | `Failure` 所在页；用于核对该部分的原始定义、条件与证据。 |
+|Methods and System Design|PDF p.4,`===== PDF p.4 =====`in`paper/paper-v1.txt`|The page where`method`is located; used to check the original definition, conditions and evidence of this section.|
+|Results and ablation|PDF p.9,`===== PDF p.9 =====`in`paper/paper-v1.txt`|The page where`5 Analysis`is located; used to check the original definition, conditions and evidence of this section.|
+|limits and boundaries|PDF p.2,`===== PDF p.2 =====`in`paper/paper-v1.txt`|The page where`Failure`is located; used to check the original definition, conditions and evidence of this section.|
 
-## 官方代码
+## Official code
 
-| Method 实现 | 核对范围 |
+|Method implementation|Check scope|
 | --- | --- |
-| `performance.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `run.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
+| `performance.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `run.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
 
-代码位置均以 `source-packet.json` 固定的官方代码 revision 为准；论文页码以本地 PDF 为准。
+The code location is based on the fixed official code revision of`source-packet.json`; the paper page number is based on the local PDF.

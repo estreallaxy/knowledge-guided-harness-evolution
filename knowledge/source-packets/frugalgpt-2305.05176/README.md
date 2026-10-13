@@ -1,38 +1,38 @@
 # FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance
 
-| 内容 | 位置 |
+|Contents|Location|
 | --- | --- |
-| 来源元数据 | [source-packet.json](source-packet.json) |
-| 论文 v1 | [paper/paper-v1.pdf](paper/paper-v1.pdf) · [文本](paper/paper-v1.txt) |
-| 官方核心代码 | [`official-code/`](official-code/)（`src/FrugalGPT/llmcascade.py` 与 `optimizer.py`） |
-| 论文与代码定位 | [exact-source-anchors.md](exact-source-anchors.md) |
-| 配置和运行入口 | [configs-and-examples.md](configs-and-examples.md) |
-| 测试与论文结果 | [tests-and-reported-results.md](tests-and-reported-results.md) |
+|Source metadata| [source-packet.json](source-packet.json) |
+|Thesis v1|[paper/paper-v1.pdf] (paper/paper-v1.pdf) [text] (paper/paper-v1.txt)|
+|Official core code|[`official-code/`](official-code/) (`src/FrugalGPT/llmcascade.py`and `optimizer.py`)|
+|Thesis and code positioning| [exact-source-anchors.md](exact-source-anchors.md) |
+|Configure and run the portal| [configs-and-examples.md](configs-and-examples.md) |
+|Tests and papers| [tests-and-reported-results.md](tests-and-reported-results.md) |
 
-## 这篇论文解决什么
+# What does this paper solve
 
-论文先把「用 LLM」的降本手段归纳为三类：**prompt adaptation**（换更短/更合适的提示）、
-**LLM approximation**（缓存或微调小模型去逼近大模型）、**LLM cascade**（按序调用多个模型，
-用打分函数决定是否升级到更强的模型）。FrugalGPT 是 cascade 的一个具体实例：用回归式打分函数
-（如 DistilBERT）判断小模型的答案是否够用，不够才调用下一个模型。
+The paper begins with three categories of “lower copies of LLM”: **prompt information** (for shorter/more appropriate tips),
+**LLM approximation** (Cache or fine-tuned small models to approach large models),**LM cascade** (sequenced multiple models)
+Use a scoring function to decide whether to upgrade to a stronger model. FrugalGPT is a specific example of a cascade: a retrograde scoring function
+(e.g. DistilBERT) Determines whether the answer to the small model is sufficient to call the next model.
 
-与我们 harness 的关系：这是「模型选择与资源分配」方向的第一个来源，提供的是
-**成本—质量权衡的协议与打分器训练方式**，不是可以直接搬进执行 harness 的提示技巧。
+Relationships to our naturals: this is the first source of model selection and resource allocation, and it's provided
+** Cost-Quality Balance Agreement and Scorer Training Method** is not a prompting technique that can be moved directly into the execution of Harness.
 
-## 快照状态
+# Scratch state
 
-`official-code/` 已入库，固定 revision `2b23e6acbd4b39f71912816640dcc59e45aa4b5e`（2026-10-13 取得）。
-**明确缺失与过时项**：
+`official-code/`has been entered in the library to fix review`2b23e6acbd4b39f71912816640dcc59e45aa4b5e`(2026-10-13 obtained).
+**Specify missing and obsolete items**:
 
-- 纳入 `summary/`（作者实验结果 CSV/XLSX）、`src/visualize/visualize_tradeoffs_newmodels.ipynb`
-  （复现论文 cost-performance 权衡图）与 `figures/`；仅未纳入 `data/`（约 13 MB 第三方公开数据集，
-  可按上游说明重新下载）与运行缓存。
-- 论文表 1 的 12 个商业 API 与其价格是 2023 年状态；`config/serviceinfo.json` 需按当前价格重填，
-  **不能直接沿用论文里的成本数字**。
-- 复跑需要多家供应商的 API 凭据（只走本地环境变量或本地配置文件，不入库）。
-- 上游未提供单元测试目录，测试入口记为未知。
+- Include`summary/`(author's test results CSV/XLSX), `src/visualize/visualize_tradeoffs_newmodels.ipynb`
+`figures/`; only `data/` is not included (approximately 13 MB Third Party Open Data Set)
+Redownloadable as upstream) and run the cache.
+- 12 commercial APIs in Table 1 and their prices are 2023;`config/serviceinfo.json`has to be refilled at current prices,
+** Cost figures from the paper cannot be used directly**.
+- Rerun requires a number of suppliers ' API certificates (only local environment variables or local configuration files, not a library).
+- The module test catalogue is not provided upstream and the test entry is unknown.
 
-## 与本地实验的关系
+# Relationship to local experiments
 
-本包只保存论文与官方代码，不含本地运行结果。方法实现（Method）尚未分配，本阶段不做本地 demo。
-要在本 harness 生效，还需共同协议放开单一执行模型。
+This package saves only papers and official codes and does not contain local results. Method realization (Method) has not yet been distributed and is not local demo at this stage.
+A common agreement to liberalize the single implementation model is required for entry into force in this habitat.

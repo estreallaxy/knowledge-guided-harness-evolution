@@ -1,38 +1,38 @@
 # Tests and reported results
 
-## 论文报告证据
+## Paper report evidence
 
-| 证据 | 位置 | 状态 |
+|evidence|Location|state|
 | --- | --- | --- |
-| 论文表格 | PDF p.5 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.7 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.8 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.9 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.10 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.22 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.24 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.25 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.26 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.30 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.31 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.32 | 论文报告值；本仓库尚未复跑。 |
+|Paper form| PDF p.5 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.7 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.8 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.9 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.10 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.22 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.24 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.25 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.26 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.30 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.31 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.32 |The value reported in the paper; this repository has not yet resumed operation.|
 
-## 官方验证入口
+## Official verification entrance
 
-| 文件 | 核对对象 |
+|document|Check objects|
 | --- | --- |
-| `data/agent_task_test.jsonl` | 官方评测、测试或结果计算入口 |
-| `data/attack_tools_test.jsonl` | 官方评测、测试或结果计算入口 |
-| `scripts/res_retrieval.py` | 官方评测、测试或结果计算入口 |
-| `scripts/res_retrieval_pot.py` | 官方评测、测试或结果计算入口 |
-| `pyopenagi/tools/simulated_tools/performance_evaluator.py` | 官方评测、测试或结果计算入口 |
+| `data/agent_task_test.jsonl` |Official review, test or result calculation portal|
+| `data/attack_tools_test.jsonl` |Official review, test or result calculation portal|
+| `scripts/res_retrieval.py` |Official review, test or result calculation portal|
+| `scripts/res_retrieval_pot.py` |Official review, test or result calculation portal|
+| `pyopenagi/tools/simulated_tools/performance_evaluator.py` |Official review, test or result calculation portal|
 
-## 当前核验状态
+## Current verification status
 
-| 项目 | 状态 |
+|project|state|
 | --- | --- |
-| 顶会录用页 | 已记录并与论文题目核对。 |
-| PDF 与分页文本 | 已下载并可解析，共 36 页。 |
-| 官方代码 | 已固定 revision，并保存核心代码、配置、示例与测试入口。 |
-| 大型数据与模型权重 | 未纳入来源包。 |
-| 官方端到端实验复跑 | 尚未执行；不得把论文报告结果表述为本地复跑结果。 |
+|Dinghui admission page|Documented and checked against thesis title.|
+|PDF and paginated text|Downloaded and parsable, 36 pages.|
+|official code|The revision has been fixed and the core code, configuration, examples and test entries have been saved.|
+|Large data and model weights|Not included in the source package.|
+|Official end-to-end experiment rerun|It has not been implemented yet; the results of the paper report must not be expressed as the results of local reruns.|

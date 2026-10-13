@@ -1,49 +1,49 @@
 # Tests and reported results
 
-## 论文报告证据
+## Paper report evidence
 
-| 证据 | 位置 | 状态 |
+|evidence|Location|state|
 | --- | --- | --- |
-| 论文表格 | PDF p.2 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.3 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.4 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.5 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.7 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.8 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.9 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.10 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.15 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.16 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.17 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.18 | 论文报告值；本仓库尚未复跑。 |
+|Paper form| PDF p.2 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.3 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.4 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.5 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.7 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.8 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.9 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.10 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.15 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.16 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.17 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.18 |The value reported in the paper; this repository has not yet resumed operation.|
 
-## 官方验证入口
+## Official verification entrance
 
-| 文件 | 核对对象 |
+|document|Check objects|
 | --- | --- |
-| `agentboard/environment/pddl_env/pddlgym/downward_translate/regression-tests/README` | 官方评测、测试或结果计算入口 |
-| `agentboard/environment/pddl_env/pddlgym/downward_translate/tests/test_scripts.py` | 官方评测、测试或结果计算入口 |
-| `agentboard/eval_main.py` | 官方评测、测试或结果计算入口 |
-| `eval_configs/main_results_all_tasks.yaml` | 官方评测、测试或结果计算入口 |
-| `eval_configs/.ipynb_checkpoints/main_results_all_tasks-checkpoint.yaml` | 官方评测、测试或结果计算入口 |
-| `agentboard/environment/browser_env/evaluation_function.py` | 官方评测、测试或结果计算入口 |
-| `agentboard/environment/pddl_env/pddlgym/tests/test_inference.py` | 官方评测、测试或结果计算入口 |
-| `agentboard/environment/pddl_env/pddlgym/tests/test_parser.py` | 官方评测、测试或结果计算入口 |
-| `agentboard/environment/pddl_env/pddlgym/tests/test_pddlenv.py` | 官方评测、测试或结果计算入口 |
-| `agentboard/environment/pddl_env/pddlgym/tests/test_searchandrescue.py` | 官方评测、测试或结果计算入口 |
-| `agentboard/environment/pddl_env/pddlgym/tests/test_spaces.py` | 官方评测、测试或结果计算入口 |
-| `agentboard/environment/pddl_env/pddlgym/tests/test_system.py` | 官方评测、测试或结果计算入口 |
-| `agentboard/environment/pddl_env/pddlgym/tests/__init__.py` | 官方评测、测试或结果计算入口 |
-| `agentboard/environment/pddl_env/pddlgym/downward_translate/tests/test_normalization.py` | 官方评测、测试或结果计算入口 |
-| `agentboard/environment/pddl_env/pddlgym/downward_translate/tests/__init__.py` | 官方评测、测试或结果计算入口 |
-| `scripts/evaluate.sh` | 官方评测、测试或结果计算入口 |
+| `agentboard/environment/pddl_env/pddlgym/downward_translate/regression-tests/README` |Official review, test or result calculation portal|
+| `agentboard/environment/pddl_env/pddlgym/downward_translate/tests/test_scripts.py` |Official review, test or result calculation portal|
+| `agentboard/eval_main.py` |Official review, test or result calculation portal|
+| `eval_configs/main_results_all_tasks.yaml` |Official review, test or result calculation portal|
+| `eval_configs/.ipynb_checkpoints/main_results_all_tasks-checkpoint.yaml` |Official review, test or result calculation portal|
+| `agentboard/environment/browser_env/evaluation_function.py` |Official review, test or result calculation portal|
+| `agentboard/environment/pddl_env/pddlgym/tests/test_inference.py` |Official review, test or result calculation portal|
+| `agentboard/environment/pddl_env/pddlgym/tests/test_parser.py` |Official review, test or result calculation portal|
+| `agentboard/environment/pddl_env/pddlgym/tests/test_pddlenv.py` |Official review, test or result calculation portal|
+| `agentboard/environment/pddl_env/pddlgym/tests/test_searchandrescue.py` |Official review, test or result calculation portal|
+| `agentboard/environment/pddl_env/pddlgym/tests/test_spaces.py` |Official review, test or result calculation portal|
+| `agentboard/environment/pddl_env/pddlgym/tests/test_system.py` |Official review, test or result calculation portal|
+| `agentboard/environment/pddl_env/pddlgym/tests/__init__.py` |Official review, test or result calculation portal|
+| `agentboard/environment/pddl_env/pddlgym/downward_translate/tests/test_normalization.py` |Official review, test or result calculation portal|
+| `agentboard/environment/pddl_env/pddlgym/downward_translate/tests/__init__.py` |Official review, test or result calculation portal|
+| `scripts/evaluate.sh` |Official review, test or result calculation portal|
 
-## 当前核验状态
+## Current verification status
 
-| 项目 | 状态 |
+|project|state|
 | --- | --- |
-| 顶会录用页 | 已记录并与论文题目核对。 |
-| PDF 与分页文本 | 已下载并可解析，共 38 页。 |
-| 官方代码 | 已固定 revision，并保存核心代码、配置、示例与测试入口。 |
-| 大型数据与模型权重 | 未纳入来源包。 |
-| 官方端到端实验复跑 | 尚未执行；不得把论文报告结果表述为本地复跑结果。 |
+|Dinghui admission page|Documented and checked against thesis title.|
+|PDF and paginated text|Downloaded and parsable, 38 pages.|
+|official code|The revision has been fixed and the core code, configuration, examples and test entries have been saved.|
+|Large data and model weights|Not included in the source package.|
+|Official end-to-end experiment rerun|It has not been implemented yet; the results of the paper report must not be expressed as the results of local reruns.|

@@ -1,28 +1,28 @@
 # Configs and examples
 
-## 环境与配置入口
+# Environment and configuration portal
 
-| 文件 | 用途 |
+|Documentation|Purpose|
 | --- | --- |
-| `README.md` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `requirements.txt` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `tasks/envs/pddl_env/pddlgym/demo.py` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `tasks/envs/pddl_env/pddlgym/demo_planning.py` | 核心方法所需的依赖、参数、配置或最小示例。 |
-| `tasks/envs/pddl_env/pddlgym/downward_translate/regression-tests/README` | 核心方法所需的依赖、参数、配置或最小示例。 |
+| `README.md` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `requirements.txt` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `tasks/envs/pddl_env/pddlgym/demo.py` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `tasks/envs/pddl_env/pddlgym/demo_planning.py` |Dependence, parameters, configuration or minimum example required for the core approach.|
+| `tasks/envs/pddl_env/pddlgym/downward_translate/regression-tests/README` |Dependence, parameters, configuration or minimum example required for the core approach.|
 
-## Method 接入入口
+# Method Access
 
-| 文件 | 使用方式 |
+|Documentation|Usage|
 | --- | --- |
-| `mas/memory/__init__.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `mas/memory/common.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `mas/memory/utils.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `mas/memory/mas_memory/GMemory.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `mas/memory/mas_memory/__init__.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `mas/memory/mas_memory/chatdev.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `mas/memory/mas_memory/generative.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
-| `mas/memory/mas_memory/memory_base.py` | 方法实现或直接执行入口；按官方 README 补齐模型、数据与外部服务。 |
+| `mas/memory/__init__.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `mas/memory/common.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `mas/memory/utils.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `mas/memory/mas_memory/GMemory.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `mas/memory/mas_memory/__init__.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `mas/memory/mas_memory/chatdev.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `mas/memory/mas_memory/generative.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
+| `mas/memory/mas_memory/memory_base.py` |The method achieves or directly executes the portal; the model, data and external services are supplemented by the official README.|
 
-## 本地保存范围
+# Local Save Range
 
-`official-code/` 仅保存论文方法的核心实现、直接依赖接口、最小配置/示例/测试和许可证。大型外部数据、通用框架副本、缓存与论文实验输出未纳入。
+`official-code/` retains only the core implementation of the paper method, directly required interfaces, minimal configurations, examples, tests, and licenses. Large external datasets, generic framework copies, caches, and paper experiment artifacts are excluded.

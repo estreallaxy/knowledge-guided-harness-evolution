@@ -26,8 +26,8 @@
 
 | Method | 抽象设计思路 | 负责人 | 详解 |
 | --- | --- | --- | --- |
-| 证据约束的反例演化 | 把每次 Harness 修改视为可反驳假设：外部方法提供机制先验，trace 提供当前故障证据，真实反例持续收紧因果解释、接入条件和适用范围。 | 待分配 | [完整 Method](evidence-constrained-counterexample-evolution-detailed.md) |
-| 程序结构库与渐增拓扑协同演化 | 把 Harness 表示为带类型、状态与副作用的程序图；检索可复用结构 motif，并让组件内容与调用拓扑在反例约束下共同生长。 | 待分配 | [完整 Method](program-structure-and-incremental-topology-coevolution-detailed.md) |
-| 条件化案例与优化器组合 | 把外部经验组织为条件案例，把不同优化策略组织成可组合程序；根据当前失败区域选择互补策略，并对生成、接入、激活和效果分层分配信用。 | 待分配 | [完整 Method](conditional-cases-and-optimizer-portfolio-detailed.md) |
-| 实验驱动的干预版本空间演化 | 把候选修改表示为带前提、预测和 typed holes 的干预假设；维护仍与证据一致的版本空间，通过判别实验逐步排除、特化或重组假设。 | 待分配 | [完整 Method](empirical-intervention-version-space-evolution-detailed.md) |
+| 科学发现驱动的反例演化 | 把 Harness 演化视为科学发现：外部方法给出机制先验，trace 与 probe 检验故障解释，真实反例持续推翻或收紧方法迁移、代码接入和适用范围。 | 待分配 | [完整 Method](scientific-discovery-counterexample-evolution-detailed.md) |
+| 开放式架构协同演化 | 突破固定工作流边界，把 Harness 作为可生长的带类型程序图，使组件内容、调用拓扑和可复用架构原语在执行约束与反例下协同演化。 | 待分配 | [完整 Method](open-ended-architecture-coevolution-detailed.md) |
+| 情境自适应的优化生态演化 | 把条件案例与多类优化器组成可重组生态，依据当前任务、失败区域和证据缺口动态组队，并对生成、接入、激活和效果分层归因。 | 待分配 | [完整 Method](context-adaptive-optimizer-ecosystem-evolution-detailed.md) |
+| 主动实验驱动的假设空间演化 | 把外部方法和自主修改统一为结构化干预假设，主动选择能够区分竞争解释的实验，以 witness 持续排除、特化、拆分或重组假设空间。 | 待分配 | [完整 Method](active-experimentation-hypothesis-space-evolution-detailed.md) |
 | 决策论驱动的信念演化 | 用显式 belief 表示故障原因、方法迁移、候选效果和评测可靠性；统一比较取证、计算、修改、回滚与停止动作，只执行最可能改变最终 Harness 选择的动作。 | 待分配 | [完整 Method](decision-theoretic-belief-evolution-detailed.md) |

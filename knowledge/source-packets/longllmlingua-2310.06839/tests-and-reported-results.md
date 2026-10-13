@@ -1,45 +1,45 @@
 # Tests and reported results
 
-## 论文报告证据
+# Paper reporting evidence
 
-| 证据 | 位置 | 状态 |
+|Evidence|Location|Status|
 | --- | --- | --- |
-| 论文表格 | PDF p.6 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.7 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.8 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.13 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.14 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.15 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.16 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.17 | 论文报告值；本仓库尚未复跑。 |
+|Paper table| PDF p.6 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.7 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.8 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.13 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.14 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.15 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.16 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.17 |Value reported in the paper; it has not been rerun in this repository.|
 
-## 官方验证入口
+# Official validation entry points
 
-| 文件 | 核对对象 |
+|Documentation|Check Object|
 | --- | --- |
-| `examples/Retrieval.ipynb` | 官方评测、测试或结果计算入口 |
-| `experiments/llmlingua2/evaluation/scripts/compress.sh` | 官方评测、测试或结果计算入口 |
-| `experiments/llmlingua2/evaluation/scripts/evaluate.sh` | 官方评测、测试或结果计算入口 |
-| `tests/test_llmlingua.py` | 官方评测、测试或结果计算入口 |
-| `tests/test_llmlingua2.py` | 官方评测、测试或结果计算入口 |
-| `tests/test_longllmlingua.py` | 官方评测、测试或结果计算入口 |
-| `.github/workflows/unittest.yml` | 官方评测、测试或结果计算入口 |
-| `experiments/llmlingua2/evaluation/compress.py` | 官方评测、测试或结果计算入口 |
-| `experiments/llmlingua2/evaluation/eval_bbh.py` | 官方评测、测试或结果计算入口 |
-| `experiments/llmlingua2/evaluation/eval_gsm8k.py` | 官方评测、测试或结果计算入口 |
-| `experiments/llmlingua2/evaluation/eval_longbench.py` | 官方评测、测试或结果计算入口 |
-| `experiments/llmlingua2/evaluation/eval_meetingbank_qa.py` | 官方评测、测试或结果计算入口 |
-| `experiments/llmlingua2/evaluation/eval_meetingbank_summary.py` | 官方评测、测试或结果计算入口 |
-| `experiments/llmlingua2/evaluation/eval_zero_scrolls.py` | 官方评测、测试或结果计算入口 |
-| `experiments/llmlingua2/evaluation/metrics.py` | 官方评测、测试或结果计算入口 |
-| `experiments/llmlingua2/evaluation/utils.py` | 官方评测、测试或结果计算入口 |
+| `examples/Retrieval.ipynb` |Official assessment, test or result calculation portal|
+| `experiments/llmlingua2/evaluation/scripts/compress.sh` |Official assessment, test or result calculation portal|
+| `experiments/llmlingua2/evaluation/scripts/evaluate.sh` |Official assessment, test or result calculation portal|
+| `tests/test_llmlingua.py` |Official assessment, test or result calculation portal|
+| `tests/test_llmlingua2.py` |Official assessment, test or result calculation portal|
+| `tests/test_longllmlingua.py` |Official assessment, test or result calculation portal|
+| `.github/workflows/unittest.yml` |Official assessment, test or result calculation portal|
+| `experiments/llmlingua2/evaluation/compress.py` |Official assessment, test or result calculation portal|
+| `experiments/llmlingua2/evaluation/eval_bbh.py` |Official assessment, test or result calculation portal|
+| `experiments/llmlingua2/evaluation/eval_gsm8k.py` |Official assessment, test or result calculation portal|
+| `experiments/llmlingua2/evaluation/eval_longbench.py` |Official assessment, test or result calculation portal|
+| `experiments/llmlingua2/evaluation/eval_meetingbank_qa.py` |Official assessment, test or result calculation portal|
+| `experiments/llmlingua2/evaluation/eval_meetingbank_summary.py` |Official assessment, test or result calculation portal|
+| `experiments/llmlingua2/evaluation/eval_zero_scrolls.py` |Official assessment, test or result calculation portal|
+| `experiments/llmlingua2/evaluation/metrics.py` |Official assessment, test or result calculation portal|
+| `experiments/llmlingua2/evaluation/utils.py` |Official assessment, test or result calculation portal|
 
-## 当前核验状态
+# Current verification status
 
-| 项目 | 状态 |
+|Item|Status|
 | --- | --- |
-| 顶会录用页 | 已记录并与论文题目核对。 |
-| PDF 与分页文本 | 已下载并可解析，共 20 页。 |
-| 官方代码 | 已固定 revision，并保存核心代码、配置、示例与测试入口。 |
-| 大型数据与模型权重 | 未纳入来源包。 |
-| 官方端到端实验复跑 | 尚未执行；不得把论文报告结果表述为本地复跑结果。 |
+|Conference acceptance page|The title of the paper was recorded and checked.|
+|PDF Text with Page Break|Downloaded and parsed, 20 pages in total.|
+|Official code|Revision is fixed and the core code, configuration, example and test entry is saved.|
+|Large data and model weights|Not included in source package.|
+|Official-to-end experiment rerun|Not implemented; paper-reported results must not be presented as a local rerun.|

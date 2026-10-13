@@ -1,27 +1,27 @@
 # Exact source anchors
 
-## 论文
+# Papers
 
-| 核对对象 | 精确位置 | 可支持的判断 |
+|Check Object|Exact Location|Supportable judgement|
 | --- | --- | --- |
-| 方法与系统设计 | PDF p.3，`paper/paper-v1.txt` 中的 `===== PDF p.3 =====` | `approach` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 结果与消融 | PDF p.2，`paper/paper-v1.txt` 中的 `===== PDF p.2 =====` | `results` 所在页；用于核对该部分的原始定义、条件与证据。 |
+|Methodology and system design|`===== PDF p.3 =====`in PDF p.3,`paper/paper-v1.txt`|`approach`page; used to check the original definition, conditions and evidence of that part.|
+|Results and digestion|`===== PDF p.2 =====`in PDF p.2,`paper/paper-v1.txt`|`results`page; used to check the original definition, conditions and evidence of that part.|
 
-## 官方代码
+# Official code
 
-| Method 实现 | 核对范围 |
+|Method Achieved|Check scope|
 | --- | --- |
-| `agents/item_retrieval_agent.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `core/hierarchical_planning/__init__.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `core/hierarchical_planning/hierarchical_planner.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `main.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `manager.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `agents/base_agent.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `agents/evaluate_agent.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `agents/interact_agent.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `agents/searcher_agent.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `agents/task_interpreter_agent.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `agents/__init__.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `core/manager_core.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
+| `agents/item_retrieval_agent.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `core/hierarchical_planning/__init__.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `core/hierarchical_planning/hierarchical_planner.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `main.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `manager.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `agents/base_agent.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `agents/evaluate_agent.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `agents/interact_agent.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `agents/searcher_agent.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `agents/task_interpreter_agent.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `agents/__init__.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `core/manager_core.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
 
-代码位置均以 `source-packet.json` 固定的官方代码 revision 为准；论文页码以本地 PDF 为准。
+The code location is based on the`source-packet.json`fixed official code; the paper page number is based on the local PDF.

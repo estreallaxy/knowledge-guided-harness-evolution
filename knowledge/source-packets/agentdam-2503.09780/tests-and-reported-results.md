@@ -1,33 +1,33 @@
 # Tests and reported results
 
-## 论文报告证据
+## Paper report evidence
 
-| 证据 | 位置 | 状态 |
+|evidence|Location|state|
 | --- | --- | --- |
-| 论文表格 | PDF p.2 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.3 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.6 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.7 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.8 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.9 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.13 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.14 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.17 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.18 | 论文报告值；本仓库尚未复跑。 |
+|Paper form| PDF p.2 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.3 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.6 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.7 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.8 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.9 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.13 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.14 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.17 |The value reported in the paper; this repository has not yet resumed operation.|
+|Paper form| PDF p.18 |The value reported in the paper; this repository has not yet resumed operation.|
 
-## 官方验证入口
+## Official verification entrance
 
-| 文件 | 核对对象 |
+|document|Check objects|
 | --- | --- |
-| `agentdam/privacy_eval.py` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
-| `agentdam/llama3x/llama_test_vllm.py` | 与核心方法直接相关的官方评测、测试或结果计算入口。 |
+| `agentdam/privacy_eval.py` |Entry to official reviews, tests, or result calculations directly related to core methods.|
+| `agentdam/llama3x/llama_test_vllm.py` |Entry to official reviews, tests, or result calculations directly related to core methods.|
 
-## 当前核验状态
+## Current verification status
 
-| 项目 | 状态 |
+|project|state|
 | --- | --- |
-| 顶会录用页 | 已记录并与论文题目核对。 |
-| PDF 与分页文本 | 已下载并可解析，共 26 页。 |
-| 官方代码 | 已固定 revision，并保存核心代码、配置、示例与测试入口。 |
-| 大型数据与模型权重 | 未纳入来源包。 |
-| 官方端到端实验复跑 | 尚未执行；不得把论文报告结果表述为本地复跑结果。 |
+|Dinghui admission page|Documented and checked against thesis title.|
+|PDF and paginated text|Downloaded and parsable, 26 pages.|
+|official code|The revision has been fixed and the core code, configuration, examples and test entries have been saved.|
+|Large data and model weights|Not included in the source package.|
+|Official end-to-end experiment rerun|It has not been implemented yet; the results of the paper report must not be expressed as the results of local reruns.|

@@ -1,30 +1,30 @@
 # Configs and examples
 
-以下内容取自 `official-code/`（revision `f72f75d8c3eb842f2bbbab096a12206ff66e270f`），
-**未在本机执行**：需要自备 `AgentFold-30B-A3B` 权重与多卡 vLLM 服务。
+The following content is taken from`official-code/`(revision`f72f75d8c3eb842f2bbbab096a12206ff66e270f`),
+**Not executed on this machine**: You need to prepare your own`AgentFold-30B-A3B`weight and multi-card vLLM service.
 
-## 运行前提
+## Running prerequisites
 
-| 项目 | 要求 | 来源 |
+|project|Require|source|
 | --- | --- | --- |
-| GPU/服务 | vLLM 多实例（默认 8000–8005 目标模型，8006 `gpt-oss-120b`） | `AgentFold/serve.sh` |
-| 模型权重 | 论文的 AgentFold-30B-A3B；**仓库未提供下载地址与权重** | `serve.sh` 中 `MODEL_PATH` 为空 |
+|GPU/Service|vLLM multi-instance (default 8000–8005 target model, 8006`gpt-oss-120b`)| `AgentFold/serve.sh` |
+|Model weight|AgentFold-30B-A3B of the paper; **The download address and weight are not provided in the repository**|`MODEL_PATH`in`serve.sh`is empty|
 | Tokenizer | `AutoTokenizer.from_pretrained("qwen3-30b-a3b")` | `AgentFold/infer.py` |
-| 依赖 | 见仓库根 `requirements.txt` | 仓库根 |
-| 外部工具 | 搜索/访问工具（`inference/tool_search.py`、`tool_visit.py`），可能需外部检索服务凭据 | `AgentFold/infer.py` 的 sys.path 与 import |
-| 评测数据 | BrowseComp、BrowseComp-ZH、WideSearch-en、GAIA | 论文 §5，PDF p.7 |
+|rely|See repository root`requirements.txt`|repository root|
+|external tools|Search/access tools (`inference/tool_search.py`,`tool_visit.py`), may require external retrieval of service credentials|sys.path and import of`AgentFold/infer.py`|
+|Evaluation data| BrowseComp, BrowseComp-ZH, WideSearch-en, GAIA |Paper §5, PDF p.7|
 
-## 上游示例命令
+## Upstream example commands
 
 ```bash
-# 1) 起模型服务（需先填 MODEL_PATH）
+# 1) Start model service (you need to fill in MODEL_PATH first)
 bash AgentFold/serve.sh
 
-# 2) 跑推理（脚本通过 importlib 选择 agent，入口在 AgentFold/infer.py）
+# 2) Run inference (the script selects the agent through importlib, and the entry is in AgentFold/infer.py)
 python AgentFold/infer.py
 ```
 
-`serve.sh` 原文（节选）：
+`serve.sh`Original text (excerpt):
 
 ```bash
 MODEL_PATH=""
@@ -32,12 +32,12 @@ MODEL_NAME="all_moreturn_0920"
 CUDA_VISIBLE_DEVICES=0 vllm serve ${MODEL_PATH} --host 0.0.0.0 --port 8000 \
   --trust-remote-code --gpu-memory-utilization 0.95 --tensor-parallel-size 1 \
   --served-model-name ${MODEL_NAME} --disable-log-requests &
-# …8001–8005 同构；8006 用 gpt-oss-120b（tensor-parallel-size 2）
+# …8001–8005 isomorphic; 8006 uses gpt-oss-120b (tensor-parallel-size 2)
 ```
 
-## 未确认项（写为未知）
+## Unconfirmed items (written as unknown)
 
-- `AgentFold/infer.py` 的确切命令行参数：本包未逐一核对 `argparse` 定义与论文设置的对应关系。
-- 论文的实验 seed、温度、最大轮数（论文提到 100 轮评测上限与 500 轮扩展）在代码中的默认值。
-- 训练侧：SFT 数据构造、超参与训练脚本均不在本快照内。
-- 折叠指令的提示词全文：论文有描述，代码中的模板位置需进一步定位（`infer.py` 内的提示拼接）。
+- The exact command line parameters of`AgentFold/infer.py`: This package does not check the correspondence between the`argparse`definition and the paper settings one by one.
+- The paper's experimental seed, temperature, and maximum number of rounds (the paper mentions an upper limit of 100 rounds of evaluation and 500 rounds of expansion) are the default values in the code.
+- Training side: SFT data structure and hyper-participation training script are not included in this snapshot.
+- The full text of the prompt word for the folding instruction: the paper has a description, and the template position in the code needs to be further positioned (prompt splicing within`infer.py`).

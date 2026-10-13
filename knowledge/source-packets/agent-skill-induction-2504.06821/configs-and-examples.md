@@ -1,38 +1,38 @@
 # Configs and examples
 
-## 论文实验配置
+## Paper experiment configuration
 
-| 设置 | 取值 | 位置 |
+|set up|value|Location|
 | --- | --- | --- |
-| Benchmark | WebArena（六个站点：Shop、Admin、Reddit、GitLab、Maps、Multi） | §3.1，PDF p.5 |
-| 环境框架 | BrowserGym，观测为 webpage accessibility tree | §3.1，PDF p.5 |
-| 动作空间 | WebArena 默认 15 个原语动作 | Appendix A.1，PDF p.14，Table 7 |
-| 主干模型 | `claude-3.5-sonnet`，同时用于 agent policy π、评估器 V 与归纳模块 I | §3.1，PDF p.5 |
-| 评估器 | 论文自带 program-based evaluator 给 0/1 分 | §3.1，PDF p.5 |
-| 基线 | vanilla Claude + BrowserGym；AWM（文本 skill） | §3.1，PDF p.5 |
-| 最大步数 | 论文记为 H_max，未给具体数值 | §2.1，PDF p.3 |
+| Benchmark |WebArena (six sites: Shop, Admin, Reddit, GitLab, Maps, Multi)| §3.1, PDF p.5 |
+|environmental framework|BrowserGym, observed as webpage accessibility tree| §3.1, PDF p.5 |
+|action space|WebArena defaults to 15 primitive actions| Appendix A.1, PDF p.14, Table 7 |
+|Backbone model|`claude-3.5-sonnet`, used simultaneously for agent policy π, evaluator V and induction module I| §3.1, PDF p.5 |
+|Evaluator|The paper comes with a program-based evaluator and is awarded 0/1 points.| §3.1, PDF p.5 |
+|baseline|vanilla Claude + BrowserGym; AWM (text skill)| §3.1, PDF p.5 |
+|Maximum number of steps|The paper is recorded as H_max, and no specific value is given.| §2.1, PDF p.3 |
 
-**注意**：论文未给出 step 上限、温度、并发、重试与判分超时的具体数值；这些属于 `unknown`，
-迁移到本项目时必须自行固定并在结果中说明，不能声称与论文同条件。
+**Note**: The paper does not give specific values for step upper limit, temperature, concurrency, retry and judgment timeout; these belong to`unknown`,
+When migrating to this project, it must be fixed by itself and stated in the results, and cannot be claimed to be in the same condition as the paper.
 
-## 官方流程入口
+## Official process entrance
 
-论文指向的官方仓库：<https://github.com/zorazrw/agent-skill-induction>
-（固定 revision `377abe0623a37eaf7f03bdd26cb97bb5331acf47`）。
+The official repository pointed to by the paper: <https://github.com/zorazrw/agent-skill-induction>
+(Fixed revision`377abe0623a37eaf7f03bdd26cb97bb5331acf47`).
 
 ```bash
 git clone https://github.com/zorazrw/agent-skill-induction.git
 git -C agent-skill-induction checkout 377abe0623a37eaf7f03bdd26cb97bb5331acf47
 ```
 
-快照已入库（revision `377abe0623a37eaf7f03bdd26cb97bb5331acf47`，见 `official-code/`）。
-仓库根 README 与运行入口已随快照保存，但本包**未在本机执行**，因此不给出已验证的命令。
-运行前需补齐：环境安装、WebArena/BrowserGym 启动方式、诱导与验证脚本入口、评估命令；
-`official-code/asi/` 下的入口可直接从仓库根 README 与 `asi/run_demo.py` 入手阅读。
+The snapshot has been archived (revision`377abe0623a37eaf7f03bdd26cb97bb5331acf47`, see`official-code/`).
+The repository root README and run entry have been saved with the snapshot, but this package is not executed on the local machine, so no verified commands are given.
+Before running, you need to complete: environment installation, WebArena/BrowserGym startup method, induction and verification script entry, and evaluation command;
+The entry under`official-code/asi/`can be read directly from the repository root README and`asi/run_demo.py`.
 
-## 论文中的可复制片段
+## Copiable snippets from the paper
 
-Table 7（PDF p.14）列出全部原语动作，可直接作为动作空间对照表：
+Table 7 (PDF p.14) lists all primitive actions, which can be directly used as an action space comparison table:
 
 ```
 noop(wait_ms)  click(elem)  hover(elem)  fill(elem, value)
@@ -41,17 +41,16 @@ goto(url)  go_back()  go_forward()  new_tab()  tab_close()
 tab_focus(index)  send_msg_to_user(text)  report_infeasible(reason)
 ```
 
-三个 LM 组件（episode 评估、episode 清洗、skill induction）的提示词全文在
-Appendix A.2（PDF pp.14–16），迁移时可先用论文提示词打通流程，再用官方代码核对差异。
+The full text of the prompt words for the three LM components (episode evaluation, episode cleaning, and skill induction) is in
+Appendix A.2 (PDF pp.14–16), when migrating, you can first use the paper prompts to clear the process, and then use the official code to check the differences.
 
-## 本地保存范围
+## Local saving range
 
-保存论文 PDF/全文文本，以及 `official-code/` 中理解与复现机制所需的材料：
-`asi/{induce,autoeval,actions}`、`asi/agent.py`、`asi/custom_action_set.py`、
-`asi/config_files/generate_test_data.py`、`browsergym/` 的 `core/`、`experiments/` 源码，
-以及 `browsergym/.../benchmark/metadata/*.csv`（评测运行时按名加载的 task/split 元数据，无答案）。
+Save the PDF/full text of the paper, as well as the materials needed to understand and reproduce the mechanism in`official-code/`:
+`asi/{induce,autoeval,actions}`, `asi/agent.py`, `asi/custom_action_set.py`,
+`asi/config_files/generate_test_data.py`,`browsergym/`'s`core/`,`experiments/`source code,
+and`browsergym/.../benchmark/metadata/*.csv`(evaluating task/split metadata loaded by name at runtime, no answer).
 
-未纳入：WebArena/BrowserGym 运行环境与站点数据、运行缓存、模型凭据，以及
-`asi/config_files/test.json`、`test.raw.json`（内嵌参考答案，属 benchmark 隐藏答案，可由
-`generate_test_data.py` 重新生成）。因此本包不含可直接用于刷分的答案。
-
+Not included: WebArena/BrowserGym runtime environment and site data, run cache, model credentials, and
+`asi/config_files/test.json`,`test.raw.json`(embedded reference answers, belong to benchmark hidden answers, can be
+`generate_test_data.py`regenerated). Therefore, this package does not contain answers that can be used directly to increase scores.

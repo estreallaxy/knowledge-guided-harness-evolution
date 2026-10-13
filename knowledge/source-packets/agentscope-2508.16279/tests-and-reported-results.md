@@ -1,9 +1,9 @@
-# AgentScope 1.0 报告结果与复核边界
+# AgentScope 1.0 report results and review boundaries
 
-固定论文 `2508.16279v1`，原文定位：§3.1.4 / PDF pp.10–11；固定 v1.0.0 的 _agent_base.py、_agent_meta.py。
+Fixed paper`2508.16279v1`, original text positioning: §3.1.4 / PDF pp.10–11; fixed _agent_base.py, _agent_meta.py of v1.0.0.
 
-原文与固定代码证明 reply/observe/reasoning/acting/print 的 pre/post 接口存在；没有可独立量化的 hook 成功率或成本消融。整套框架表现不能归给回调机制。
+The original text and fixed code prove that the pre/post interface of reply/observe/reasoning/acting/printexists; there is no independently quantifiable hook success rate or cost ablation. The entire framework performance cannot be attributed to the callback mechanism.
 
-固定代码与本地适配的历史核对说明：固定版本 async_wrapper 的实例 hook 先于类 hook，pre 参数与 post 参数/输出都 deepcopy，post 在 original_func 正常返回后执行。本地保留该关键行为，增加通用函数 wrapper 和显式 shared registry，支持 bound function 与位置参数重绑定；不是安装 AgentScope，也没有用新版本 middleware 倒推旧接口。
+Historical verification of fixed code and local adaptation: the instance hook of the fixed version of async_wrapper precedes the class hook, the pre parameters and post parameters/output are all deepcopy, and post is executed after original_func returns normally. This key behavior is retained locally, a universal function wrapper and an explicit shared registry are added, and bound function and positional parameters are supported to be rebinded; AgentScope is not installed, and the old interface is not rolled back with the new version of middleware.
 
-官方测试的执行结果：未知；没有运行完整上游系统。固定 README 中的官方入口保存在 [配置与示例](configs-and-examples.md)。此前独立本地适配通过 5 项合成功能测试；这些测试既不是官方测试，也不是 H0 迁移、收益或完整论文复现。
+Execution results of the official test: unknown; the complete upstream system is not running. Fixed official entry in README saved in [configs-and-examples.md]. Previously independent local adaptation passed 5 synthetic functional tests; these tests are neither official tests nor H0 migrations, gains, or full paper reproductions.

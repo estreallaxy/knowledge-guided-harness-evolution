@@ -1,28 +1,28 @@
 # Exact source anchors
 
-## 论文
+# Papers
 
-| 核对对象 | 精确位置 | 可支持的判断 |
+|Check Object|Exact Location|Supportable judgement|
 | --- | --- | --- |
-| 方法与系统设计 | PDF p.17，`paper/paper-v2.txt` 中的 `===== PDF p.17 =====` | `approach` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 结果与消融 | PDF p.7，`paper/paper-v2.txt` 中的 `===== PDF p.7 =====` | `ablation` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 限制与边界 | PDF p.19，`paper/paper-v2.txt` 中的 `===== PDF p.19 =====` | `limitation` 所在页；用于核对该部分的原始定义、条件与证据。 |
+|Methodology and system design|`===== PDF p.17 =====`in PDF p.17,`paper/paper-v2.txt`|`approach`page; used to check the original definition, conditions and evidence of that part.|
+|Results and digestion|`===== PDF p.7 =====`in PDF p.7,`paper/paper-v2.txt`|`ablation`page; used to check the original definition, conditions and evidence of that part.|
+|Restrictions and borders|`===== PDF p.19 =====`in PDF p.19,`paper/paper-v2.txt`|`limitation`page; used to check the original definition, conditions and evidence of that part.|
 
-## 官方代码
+# Official code
 
-| Method 实现 | 核对范围 |
+|Method Achieved|Check scope|
 | --- | --- |
-| `python/sglang/lang/api.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `python/sglang/lang/chat_template.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `python/sglang/lang/choices.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `python/sglang/lang/interpreter.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `python/sglang/lang/ir.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `python/sglang/lang/tracer.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `python/sglang/lang/backend/anthropic.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `python/sglang/lang/backend/base_backend.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `python/sglang/lang/backend/crusoe.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `python/sglang/lang/backend/litellm.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `python/sglang/lang/backend/openai.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `python/sglang/lang/backend/runtime_endpoint.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
+| `python/sglang/lang/api.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `python/sglang/lang/chat_template.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `python/sglang/lang/choices.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `python/sglang/lang/interpreter.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `python/sglang/lang/ir.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `python/sglang/lang/tracer.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `python/sglang/lang/backend/anthropic.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `python/sglang/lang/backend/base_backend.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `python/sglang/lang/backend/crusoe.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `python/sglang/lang/backend/litellm.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `python/sglang/lang/backend/openai.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `python/sglang/lang/backend/runtime_endpoint.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
 
-代码位置均以 `source-packet.json` 固定的官方代码 revision 为准；论文页码以本地 PDF 为准。
+The code location is based on the`source-packet.json`fixed official code; the paper page number is based on the local PDF.

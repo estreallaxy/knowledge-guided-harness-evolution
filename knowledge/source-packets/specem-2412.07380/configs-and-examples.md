@@ -1,24 +1,24 @@
 # Configs and examples
 
-## 环境与配置入口
+# Environment and configuration portal
 
-| 文件 | 用途 |
+|Documentation|Purpose|
 | --- | --- |
-| `demo.py` | 依赖、参数、配置或运行示例入口 |
-| `README.md` | 依赖、参数、配置或运行示例入口 |
-| `model_configs/config_map.py` | 依赖、参数、配置或运行示例入口 |
-| `model_configs/model_loader.py` | 依赖、参数、配置或运行示例入口 |
-| `model_configs/__init__.py` | 依赖、参数、配置或运行示例入口 |
-| `utils/logger_config.py` | 依赖、参数、配置或运行示例入口 |
+| `demo.py` |Dependence, parameters, configuration or run example entry|
+| `README.md` |Dependence, parameters, configuration or run example entry|
+| `model_configs/config_map.py` |Dependence, parameters, configuration or run example entry|
+| `model_configs/model_loader.py` |Dependence, parameters, configuration or run example entry|
+| `model_configs/__init__.py` |Dependence, parameters, configuration or run example entry|
+| `utils/logger_config.py` |Dependence, parameters, configuration or run example entry|
 
-## 执行入口
+# Execute the entrance
 
-| 文件 | 使用方式 |
+|Documentation|Usage|
 | --- | --- |
-| `run_script/main.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `demo.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `run_script/run.sh` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `run_script/main.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `demo.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `run_script/run.sh` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
 
-## 本地保存范围
+# Local Save Range
 
-`official-code/` 保存官方仓库在固定 revision 下的核心源代码、配置、示例和测试入口。完整数据集、模型权重、缓存和论文实验输出需按官方 README 另行取得。
+`official-code/`saves the core source code, configuration, example and test portal of the official repository under fixed review. The complete data set, model weights, caches and theatrical outputs are to be obtained separately by official README.

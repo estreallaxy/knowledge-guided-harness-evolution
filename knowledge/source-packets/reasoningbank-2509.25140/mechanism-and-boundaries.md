@@ -1,32 +1,32 @@
-# 成败推理经验提取、检索与追加
+# Extracting, Retrieving, and Appending Reasoning Experience from Success and Failure
 
-2026-10-12：按阶段一要求补齐机制接口与逐条来源；原始论文和代码未修改。
+ReasoningBank extracts reusable experience from complete successful and failed trajectories, retrieves relevant memory before a new task, and appends newly extracted items afterward. Retrieval, judging, extraction, and consolidation are distinct operations; gains of the complete system cannot be assigned to a single memory item.
 
-| 字段 | 机制说明 |
+| Field | Mechanism |
 | --- | --- |
-| 目标瓶颈 | 重复任务中丢弃历史成败经验，重复同类推理错误 |
-| 作用模块 | 训练经验提取与执行前记忆检索 |
-| 输入 | 当前任务query；已有经验/embedding缓存；完整轨迹；成功/失败判断；judge/extractor与embedding模型接口 |
-| 触发条件 | 执行新任务前检索；一次任务结束后提取并追加。项目只允许train更新，dev/test前冻结是迁移设想。 |
-| 必要步骤 | 按query与缓存经验算相似度，取相关experience及memory items；judge区分成功与失败，按不同指令从轨迹提炼可复用经验；将新memory items简单追加；后续任务检索并作为指导 |
-| 状态变化 | 经验池和query embedding缓存追加；不含高级冲突消解/遗忘/压缩的已验证机制 |
-| 预期输出 | 相关经验与memory items；扩展后的经验池；项目使用时另记提取成本 |
-| 前提与限制 | 原论文在测试任务流持续学习；本项目dev/test冻结，不将原测试流更新照搬；固定代码检索experience后再取items；简单item级检索属于改编；judge/embedding真实运行和本地收益未知；系统收益不能归因于单条记忆 |
+| Target bottleneck | Historical successes and failures are discarded across repeated tasks, so similar reasoning errors recur. |
+| Role | Training-time experience extraction and pre-execution memory retrieval. |
+| Inputs | Current task query, existing experience and embedding cache, complete trajectory, success/failure judgment, and judge, extractor, and embedding-model interfaces. |
+| Trigger | Retrieve before a new task; extract and append after the task ends. In this project, only training runs may update memory, which is frozen before development and test evaluation. |
+| Required steps | Compute similarity between the query and cached experience; select relevant experiences and memory items; judge success or failure; use outcome-specific instructions to extract reusable experience from the trajectory; append new memory items; retrieve them for later tasks. |
+| State changes | The experience pool and query-embedding cache grow. The pinned mechanism does not provide validated higher-level conflict resolution, forgetting, compression, or retrospective verification. |
+| Outputs | Relevant experiences and memory items, an expanded experience pool, and separately accounted extraction cost. |
+| Preconditions and limits | The paper continues learning on a test-task stream, whereas this project freezes state for development and test evaluation. The pinned code retrieves experiences before selecting their items; a simpler item-level retrieval would be an adaptation. Actual judge and embedding behavior and local gains remain unverified. |
 
-## 逐条机制、条件与限制的证据
+## Mechanism-to-evidence mapping
 
-| 主张 | 论文位置 | 固定代码 | 支持范围 |
+| Claim | Paper location | Pinned code | Supported scope |
 | --- | --- | --- | --- |
-| RB1：query检索top-k experience，相关memory作为执行指导 | PDF p.5，§3.2 / Fig.2 | [official-code/reasoning-bank/WebArena/memory_management.py:138](https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/memory_management.py#L138-L170)（至170） | 论文机制与固定检索入口；不证明本地模型收益 |
-| RB2：成功/失败用不同提取指令，生成经验条目 | PDF p.5，§3.2 memory extraction | [official-code/reasoning-bank/WebArena/induce_memory.py:123](https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/induce_memory.py#L123-L166)（至166） | 固定代码判别与模型调用分支；judge有效性未知 |
-| RB3：整合是simple addition，代码追加jsonl而非高级维护 | PDF p.5，§3.2 memory consolidation | [official-code/reasoning-bank/WebArena/induce_memory.py:176](https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/induce_memory.py#L176-L186)（至186） | 原文追加机制与代码写入；不包含编辑/冲突解决 |
-| RB4：检索另需query embedding且会写入缓存 | PDF p.22，Appendix A.2 memory retrieval | [official-code/reasoning-bank/WebArena/memory_management.py:172](https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/memory_management.py#L172-L215)（至215） | 原文检索模型与固定缓存行为；缓存追加不等于memory item追加 |
-| RB5：40.5→48.8是WebArena/Gemini系统结果 | PDF p.7，Table 1 | 对应原实验代码位置未知；不以固定片段证明论文数值 | 仅论文结果；固定代码与论文实验commit对应未知，不归因于单条经验 |
+| RB1: retrieve top-k experiences by query and use their memories as execution guidance | PDF p.5 §3.2 / Fig.2 | [memory_management.py:138](https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/memory_management.py#L138-L170) | Supports the paper mechanism and pinned retrieval entry point; does not establish a gain with local models. |
+| RB2: use different extraction instructions for success and failure to generate experience entries | PDF p.5 §3.2, memory extraction | [induce_memory.py:123](https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/induce_memory.py#L123-L166) | Supports the pinned judgment branch and model calls; judge validity remains unknown. |
+| RB3: consolidation is simple addition, implemented as JSONL append rather than advanced maintenance | PDF p.5 §3.2, memory consolidation | [induce_memory.py:176](https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/induce_memory.py#L176-L186) | Supports append behavior in the paper and code; editing and conflict resolution are absent. |
+| RB4: retrieval requires a query embedding and writes to an embedding cache | PDF p.22 Appendix A.2, memory retrieval | [memory_management.py:172](https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/memory_management.py#L172-L215) | Supports the original retrieval model and pinned cache behavior; adding a cache entry is not the same as adding a memory item. |
+| RB5: 40.5→48.8 is a WebArena/Gemini system-level result | PDF p.7 Table 1 | The corresponding original experiment-code location is unknown. | Paper result only; the pinned code's correspondence to the experiment commit is unknown, and the result cannot be attributed to one experience item. |
 
-完整PDF文本行号、代码范围哈希及固定链接见 [机器可核对映射](claim-evidence-map.json)。
+Complete PDF line ranges, code ranges, and pinned links appear in [the evidence map](claim-evidence-map.json).
 
-## 方法关系
+## Method relationships and project-use boundary
 
-- `expel-2308.10144`：互补/可替代的经验表示。ReasoningBank保存成败推理经验，ExpeL维护投票规则；可共享训练来源，但重复建议与检索开销须去重。状态：**迁移设想，组合收益未测**。对应证据：本包claims RB1–RB3；ExpeL claims EX1–EX2。
+- [ExpeL](../expel-2308.10144/mechanism-and-boundaries.md): complementary or substitutable experience representations. ReasoningBank stores reasoning experience from successes and failures, whereas ExpeL maintains voted rules. They may share training sources, but duplicate advice and retrieval overhead must be controlled. Combined gains remain untested.
 
-本地接入、组合收益、完整上游运行均没有因本次文档补充而变为已验证。
+Local integration, combined gains, and a complete upstream reproduction remain unverified.

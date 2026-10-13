@@ -1,9 +1,9 @@
-# ExpeL 报告结果与复核边界
+# Express Report Results and Review Border
 
-固定论文 `2308.10144v3`，原文定位：§4.1–4.3 / PDF pp.3–5；Algorithms 1–3 / p.6；Table 2 / p.9；Table 3 / p.10。
+Fixed thesis`2308.10144v3`, original location: §4.1-4.3 / PDF pp. 3-5; Algorithms 1-3/p.6; Table 2/p.9; Table 3/p.10.
 
-Table 2：ALFWorld 首次尝试 ReAct+Reflexion 40.3%、ExpeL retrieve only 54.5%、ExpeL+Reflexion 59.0%。首次尝试列消除了当前题重试贡献，但训练阶段仍使用 Reflexion。59.0−54.5 的差额支持规则组件价值；59.0−40.3 不能全部归因于规则维护。原版规则提取与执行模型不同，全部离线提炼成本本轮未知。
+Table 2: on the first ALFWorld attempt, ReAct+Reflexion scores 40.3%, ExpeL retrieve-only scores 54.5%, and ExpeL+Reflexion scores 59.0%. The first-attempt column removes contributions from retries on the current task, although Reflexion is still used during training. The 59.0−54.5 gap supports the value of the rule component; the full 59.0−40.3 gap cannot be attributed solely to rule maintenance. The original work uses different models for rule extraction and execution, and the total offline refinement cost is unknown here.
 
-固定代码与本地适配的历史核对说明：论文术语为 UPVOTE/DOWNVOTE，固定代码 agent/expel.py 使用 AGREE/REMOVE。update_rules 先 REMOVE→AGREE→EDIT→ADD，文本子串识别已有规则，list_full 时 REMOVE 减 3，并按票数降序排序。本地改编采用论文基本票数规则、稳定 ID 和输入顺序，不实现满表 −3、上游文本解析/重排、Reflexion 采样。故不能称代码逐行复现或等价实现。
+A historical reconciliation between a fixed code and a local fit: Thesis term is UPVOTE/DOWNVOTE, fixed code agent/expel.py uses AGREE/REMOVE. Remove rules first REMOVE→AGREE→EDIT→ADD, text substring recognition already in place, list full when REMOVE minus 3 and in descending order. Local adaptation uses basic paper voting rules, stable ID and input order, without full table -3, upstream text resolution/reordering, and Reflexion sampling. Therefore, the code cannot be described as a recurrence or equivalent.
 
-官方测试的执行结果：未知；没有运行完整上游系统。固定 README 中的官方入口保存在 [配置与示例](configs-and-examples.md)。此前独立本地适配通过 5 项合成功能测试；这些测试既不是官方测试，也不是 H0 迁移、收益或完整论文复现。
+Results of implementation of official tests: unknown; complete upstream system not operational. The official entry in README is stored in [configuration and examples] (configs-and-examples.md). Previously, independent local adaptation passed 5 synthetic functional tests; these were neither official tests nor H0 migrations, returns or full dissertation.

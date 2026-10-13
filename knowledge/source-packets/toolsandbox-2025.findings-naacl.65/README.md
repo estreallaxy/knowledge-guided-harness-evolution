@@ -1,10 +1,10 @@
 # ToolSandbox: A Stateful, Conversational, Interactive Evaluation Benchmark for LLM Tool Use Capabilities
 
-| 内容 | 位置 |
+|Contents|Location|
 | --- | --- |
-| 来源元数据 | [source-packet.json](source-packet.json) |
-| 论文（Findings of NAACL 2025） | [paper/paper-v1.txt](paper/paper-v1.txt)（官方 PDF 未纳入，见 <https://aclanthology.org/2025.findings-naacl.65.pdf>） |
-| 官方核心代码 | [official-code/](official-code/) |
-| 论文与代码定位 | [exact-source-anchors.md](exact-source-anchors.md) |
-| 配置和运行入口 | [configs-and-examples.md](configs-and-examples.md) |
-| 测试与论文结果 | [tests-and-reported-results.md](tests-and-reported-results.md) |
+|Source metadata| [source-packet.json](source-packet.json) |
+|Papers of NAACL 2025|[paper/paper-v1.txt] (paper/paper-v1.txt) (official PDF not included; see <https://aclanthology.org/2025.findings-naacl.65.pdf> )|
+|Official core code| [official-code/](official-code/) |
+|Thesis and code positioning| [exact-source-anchors.md](exact-source-anchors.md) |
+|Configure and run the portal| [configs-and-examples.md](configs-and-examples.md) |
+|Tests and papers| [tests-and-reported-results.md](tests-and-reported-results.md) |

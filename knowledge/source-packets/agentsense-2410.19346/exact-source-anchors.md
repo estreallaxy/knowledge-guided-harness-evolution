@@ -1,29 +1,29 @@
 # Exact source anchors
 
-## 论文
+## paper
 
-| 核对对象 | 精确位置 | 可支持的判断 |
+|Check objects|precise location|supportable judgment|
 | --- | --- | --- |
-| 方法与系统设计 | PDF p.3，`paper/paper-v2.txt` 中的 `===== PDF p.3 =====` | `3.1 Framework` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 实验设置 | PDF p.6，`paper/paper-v2.txt` 中的 `===== PDF p.6 =====` | `4 Experiments` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 结果与消融 | PDF p.15，`paper/paper-v2.txt` 中的 `===== PDF p.15 =====` | `results` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 限制与边界 | PDF p.9，`paper/paper-v2.txt` 中的 `===== PDF p.9 =====` | `Limitations` 所在页；用于核对该部分的原始定义、条件与证据。 |
+|Methods and System Design|PDF p.3,`===== PDF p.3 =====`in`paper/paper-v2.txt`|The page where`3.1 Framework`is located; used to check the original definition, conditions and evidence of this section.|
+|Experimental setup|PDF p.6,`===== PDF p.6 =====`in`paper/paper-v2.txt`|The page where`4 Experiments`is located; used to check the original definition, conditions and evidence of this section.|
+|Results and ablation|PDF p.15,`===== PDF p.15 =====`in`paper/paper-v2.txt`|The page where`results`is located; used to check the original definition, conditions and evidence of this section.|
+|limits and boundaries|PDF p.9,`===== PDF p.9 =====`in`paper/paper-v2.txt`|The page where`Limitations`is located; used to check the original definition, conditions and evidence of this section.|
 
-## 官方代码
+## Official code
 
-| Method 实现 | 核对范围 |
+|Method implementation|Check scope|
 | --- | --- |
-| `SENSE/initialization.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `SENSE/metric.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `SENSE/run_eval.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `SENSE/simulation.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `SENSE/commands/example/gpt4o.sh` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `SENSE/commands/example/heter_gpt4o_gpt35.sh` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `SENSE/commands/example/llama3_8b.sh` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `SENSE/configs/judge_config.json` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `SENSE/configs/prompt_template.json` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `data_prepare/process_example.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `data_prepare/1_goal/llm.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `data_prepare/2_private_info/05_validate_info.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
+| `SENSE/initialization.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `SENSE/metric.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `SENSE/run_eval.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `SENSE/simulation.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `SENSE/commands/example/gpt4o.sh` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `SENSE/commands/example/heter_gpt4o_gpt35.sh` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `SENSE/commands/example/llama3_8b.sh` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `SENSE/configs/judge_config.json` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `SENSE/configs/prompt_template.json` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `data_prepare/process_example.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `data_prepare/1_goal/llm.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `data_prepare/2_private_info/05_validate_info.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
 
-代码位置均以 `source-packet.json` 固定的官方代码 revision 为准；论文页码以本地 PDF 为准。
+The code location is based on the fixed official code revision of`source-packet.json`; the paper page number is based on the local PDF.

@@ -1,25 +1,25 @@
 # Configs and examples
 
-## 环境与配置入口
+##Environment and configuration entry
 
-| 文件 | 用途 |
+|document|use|
 | --- | --- |
-| `rrutils/message_poller/src/setupTests.js` | 依赖、参数、配置或运行示例入口 |
-| `monitoring/experiments_setup_notebook.py` | 依赖、参数、配置或运行示例入口 |
-| `monitoring/problem_setup.py` | 依赖、参数、配置或运行示例入口 |
-| `elk/func_correct/config.json` | 依赖、参数、配置或运行示例入口 |
-| `rrutils/message_poller/README.md` | 依赖、参数、配置或运行示例入口 |
-| `elk/func_correct/exec/config.json` | 依赖、参数、配置或运行示例入口 |
-| `elk/func_correct/exec/Dockerfile` | 依赖、参数、配置或运行示例入口 |
-| `elk/func_correct/exec/setup_lines.py` | 依赖、参数、配置或运行示例入口 |
+| `rrutils/message_poller/src/setupTests.js` |Dependencies, parameters, configuration or running example entry|
+| `monitoring/experiments_setup_notebook.py` |Dependencies, parameters, configuration or running example entry|
+| `monitoring/problem_setup.py` |Dependencies, parameters, configuration or running example entry|
+| `elk/func_correct/config.json` |Dependencies, parameters, configuration or running example entry|
+| `rrutils/message_poller/README.md` |Dependencies, parameters, configuration or running example entry|
+| `elk/func_correct/exec/config.json` |Dependencies, parameters, configuration or running example entry|
+| `elk/func_correct/exec/Dockerfile` |Dependencies, parameters, configuration or running example entry|
+| `elk/func_correct/exec/setup_lines.py` |Dependencies, parameters, configuration or running example entry|
 
-## 执行入口
+## Execution entry
 
-| 文件 | 使用方式 |
+|document|Usage|
 | --- | --- |
-| `monitoring/run_code.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `rrutils/message_poller/src/App.js` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `monitoring/run_code.py` |Official code entry candidate; complete model, data and external services according to README before running.|
+| `rrutils/message_poller/src/App.js` |Official code entry candidate; complete model, data and external services according to README before running.|
 
-## 本地保存范围
+## Local saving range
 
-`official-code/` 保存官方仓库在固定 revision 下的核心源代码、配置、示例和测试入口。完整数据集、模型权重、缓存和论文实验输出需按官方 README 另行取得。
+`official-code/`saves the core source code, configuration, examples and test entries of the official repository under a fixed revision. The complete data set, model weights, cache and paper experimental output must be obtained separately from the official README.

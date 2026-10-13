@@ -1,27 +1,27 @@
 # Exact source anchors
 
-## 论文
+## paper
 
-| 核对对象 | 精确位置 | 可支持的判断 |
+|Check objects|precise location|supportable judgment|
 | --- | --- | --- |
-| 方法与系统设计 | PDF p.6，`paper/paper-v3.txt` 中的 `===== PDF p.6 =====` | `framework` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 实验设置 | PDF p.7，`paper/paper-v3.txt` 中的 `===== PDF p.7 =====` | `experiments` 所在页；用于核对该部分的原始定义、条件与证据。 |
+|Methods and System Design|PDF p.6,`===== PDF p.6 =====`in`paper/paper-v3.txt`|The page where`framework`is located; used to check the original definition, conditions and evidence of this section.|
+|Experimental setup|PDF p.7,`===== PDF p.7 =====`in`paper/paper-v3.txt`|The page where`experiments`is located; used to check the original definition, conditions and evidence of this section.|
 
-## 官方代码
+## Official code
 
-| Method 实现 | 核对范围 |
+|Method implementation|Check scope|
 | --- | --- |
-| `src/agentdojo/agent_pipeline/__init__.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `src/agentdojo/agent_pipeline/agent_pipeline.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `src/agentdojo/agent_pipeline/base_pipeline_element.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `src/agentdojo/agent_pipeline/basic_elements.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `src/agentdojo/agent_pipeline/errors.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `src/agentdojo/agent_pipeline/ground_truth_pipeline.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `src/agentdojo/agent_pipeline/pi_detector.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `src/agentdojo/agent_pipeline/planner.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `src/agentdojo/agent_pipeline/tool_execution.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `src/agentdojo/attacks/__init__.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `src/agentdojo/attacks/attack_registry.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `src/agentdojo/attacks/base_attacks.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
+| `src/agentdojo/agent_pipeline/__init__.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `src/agentdojo/agent_pipeline/agent_pipeline.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `src/agentdojo/agent_pipeline/base_pipeline_element.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `src/agentdojo/agent_pipeline/basic_elements.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `src/agentdojo/agent_pipeline/errors.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `src/agentdojo/agent_pipeline/ground_truth_pipeline.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `src/agentdojo/agent_pipeline/pi_detector.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `src/agentdojo/agent_pipeline/planner.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `src/agentdojo/agent_pipeline/tool_execution.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `src/agentdojo/attacks/__init__.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `src/agentdojo/attacks/attack_registry.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
+| `src/agentdojo/attacks/base_attacks.py` |Method implementation or call entry that directly corresponds to the core mechanism of the paper; check its input, state transition, output and dependencies.|
 
-代码位置均以 `source-packet.json` 固定的官方代码 revision 为准；论文页码以本地 PDF 为准。
+The code location is based on the fixed official code revision of`source-packet.json`; the paper page number is based on the local PDF.

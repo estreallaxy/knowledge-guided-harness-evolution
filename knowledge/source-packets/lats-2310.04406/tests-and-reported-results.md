@@ -1,44 +1,44 @@
 # Tests and reported results
 
-## 论文报告证据
+# Paper reporting evidence
 
-| 证据 | 位置 | 状态 |
+|Evidence|Location|Status|
 | --- | --- | --- |
-| 论文表格 | PDF p.3 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.6 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.7 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.8 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.9 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.16 | 论文报告值；本仓库尚未复跑。 |
-| 论文表格 | PDF p.17 | 论文报告值；本仓库尚未复跑。 |
+|Paper table| PDF p.3 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.6 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.7 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.8 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.9 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.16 |Value reported in the paper; it has not been rerun in this repository.|
+|Paper table| PDF p.17 |Value reported in the paper; it has not been rerun in this repository.|
 
-## 官方验证入口
+# Official validation entry points
 
-| 文件 | 核对对象 |
+|Documentation|Check Object|
 | --- | --- |
-| `programming/benchmarks/humaneval-go.jsonl` | 官方评测、测试或结果计算入口 |
-| `programming/benchmarks/humaneval-py.jsonl` | 官方评测、测试或结果计算入口 |
-| `programming/benchmarks/humaneval-py_hardest50.jsonl` | 官方评测、测试或结果计算入口 |
-| `programming/benchmarks/humaneval-rs-hardest50.jsonl` | 官方评测、测试或结果计算入口 |
-| `programming/benchmarks/humaneval-rs-sorted.jsonl` | 官方评测、测试或结果计算入口 |
-| `programming/benchmarks/humaneval-rs.jsonl` | 官方评测、测试或结果计算入口 |
-| `programming/human-eval/LICENSE` | 官方评测、测试或结果计算入口 |
-| `programming/human-eval/README.md` | 官方评测、测试或结果计算入口 |
-| `programming/human-eval/requirements.txt` | 官方评测、测试或结果计算入口 |
-| `programming/human-eval/setup.py` | 官方评测、测试或结果计算入口 |
-| `programming/human-eval/data/example_problem.jsonl` | 官方评测、测试或结果计算入口 |
-| `programming/human-eval/data/example_samples.jsonl` | 官方评测、测试或结果计算入口 |
-| `programming/root/testacc_humaneval_py/humaneval-py..gz_test-acc_1_gpt-4_pass_at_k_1_py.jsonl` | 官方评测、测试或结果计算入口 |
-| `programming/root/test_dfs/humaneval-py._dfs_8_gpt-3.5-turbo_pass_at_k_1_py.jsonl` | 官方评测、测试或结果计算入口 |
-| `programming/root/test_dfs_humaneval/humaneval-py._dfs_8_gpt-3.5-turbo_pass_at_k_1_py.jsonl` | 官方评测、测试或结果计算入口 |
-| `programming/root/test_dfs_humaneval2/humaneval-py._dfs_8_gpt-3.5-turbo_pass_at_k_1_py.jsonl` | 官方评测、测试或结果计算入口 |
+| `programming/benchmarks/humaneval-go.jsonl` |Official assessment, test or result calculation portal|
+| `programming/benchmarks/humaneval-py.jsonl` |Official assessment, test or result calculation portal|
+| `programming/benchmarks/humaneval-py_hardest50.jsonl` |Official assessment, test or result calculation portal|
+| `programming/benchmarks/humaneval-rs-hardest50.jsonl` |Official assessment, test or result calculation portal|
+| `programming/benchmarks/humaneval-rs-sorted.jsonl` |Official assessment, test or result calculation portal|
+| `programming/benchmarks/humaneval-rs.jsonl` |Official assessment, test or result calculation portal|
+| `programming/human-eval/LICENSE` |Official assessment, test or result calculation portal|
+| `programming/human-eval/README.md` |Official assessment, test or result calculation portal|
+| `programming/human-eval/requirements.txt` |Official assessment, test or result calculation portal|
+| `programming/human-eval/setup.py` |Official assessment, test or result calculation portal|
+| `programming/human-eval/data/example_problem.jsonl` |Official assessment, test or result calculation portal|
+| `programming/human-eval/data/example_samples.jsonl` |Official assessment, test or result calculation portal|
+| `programming/root/testacc_humaneval_py/humaneval-py..gz_test-acc_1_gpt-4_pass_at_k_1_py.jsonl` |Official assessment, test or result calculation portal|
+| `programming/root/test_dfs/humaneval-py._dfs_8_gpt-3.5-turbo_pass_at_k_1_py.jsonl` |Official assessment, test or result calculation portal|
+| `programming/root/test_dfs_humaneval/humaneval-py._dfs_8_gpt-3.5-turbo_pass_at_k_1_py.jsonl` |Official assessment, test or result calculation portal|
+| `programming/root/test_dfs_humaneval2/humaneval-py._dfs_8_gpt-3.5-turbo_pass_at_k_1_py.jsonl` |Official assessment, test or result calculation portal|
 
-## 当前核验状态
+# Current verification status
 
-| 项目 | 状态 |
+|Item|Status|
 | --- | --- |
-| 顶会录用页 | 已记录并与论文题目核对。 |
-| PDF 与分页文本 | 已下载并可解析，共 23 页。 |
-| 官方代码 | 已固定 revision，并保存核心代码、配置、示例与测试入口。 |
-| 大型数据与模型权重 | 未纳入来源包。 |
-| 官方端到端实验复跑 | 尚未执行；不得把论文报告结果表述为本地复跑结果。 |
+|Conference acceptance page|The title of the paper was recorded and checked.|
+|PDF Text with Page Break|Downloaded and parsed, 23 pages.|
+|Official code|Revision is fixed and the core code, configuration, example and test entry is saved.|
+|Large data and model weights|Not included in source package.|
+|Official-to-end experiment rerun|Not implemented; paper-reported results must not be presented as a local rerun.|

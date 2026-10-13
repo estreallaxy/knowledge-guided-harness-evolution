@@ -1,26 +1,26 @@
 # Configs and examples
 
-## 环境与配置入口
+##Environment and configuration entry
 
-| 文件 | 用途 |
+|document|use|
 | --- | --- |
-| `webarena/autoeval/requirements.txt` | 依赖、参数、配置或运行示例入口 |
-| `webarena/config_files/generate_test_data.py` | 依赖、参数、配置或运行示例入口 |
-| `webarena/config_files/test.json` | 依赖、参数、配置或运行示例入口 |
-| `webarena/config_files/test.raw.json` | 依赖、参数、配置或运行示例入口 |
-| `README.md` | 依赖、参数、配置或运行示例入口 |
-| `mind2web/README.md` | 依赖、参数、配置或运行示例入口 |
-| `mind2web/requirements.txt` | 依赖、参数、配置或运行示例入口 |
-| `webarena/README.md` | 依赖、参数、配置或运行示例入口 |
-| `webarena/requirements.txt` | 依赖、参数、配置或运行示例入口 |
+| `webarena/autoeval/requirements.txt` |Dependencies, parameters, configuration or running example entry|
+| `webarena/config_files/generate_test_data.py` |Dependencies, parameters, configuration or running example entry|
+| `webarena/config_files/test.json` |Dependencies, parameters, configuration or running example entry|
+| `webarena/config_files/test.raw.json` |Dependencies, parameters, configuration or running example entry|
+| `README.md` |Dependencies, parameters, configuration or running example entry|
+| `mind2web/README.md` |Dependencies, parameters, configuration or running example entry|
+| `mind2web/requirements.txt` |Dependencies, parameters, configuration or running example entry|
+| `webarena/README.md` |Dependencies, parameters, configuration or running example entry|
+| `webarena/requirements.txt` |Dependencies, parameters, configuration or running example entry|
 
-## 执行入口
+## Execution entry
 
-| 文件 | 使用方式 |
+|document|Usage|
 | --- | --- |
-| `mind2web/run_mind2web.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `webarena/run.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `mind2web/run_mind2web.py` |Official code entry candidate; complete model, data and external services according to README before running.|
+| `webarena/run.py` |Official code entry candidate; complete model, data and external services according to README before running.|
 
-## 本地保存范围
+## Local saving range
 
-`official-code/` 保存官方仓库在固定 revision 下的核心源代码、配置、示例和测试入口。完整数据集、模型权重、缓存和论文实验输出需按官方 README 另行取得。
+`official-code/`saves the core source code, configuration, examples and test entries of the official repository under a fixed revision. The complete data set, model weights, cache and paper experimental output must be obtained separately from the official README.

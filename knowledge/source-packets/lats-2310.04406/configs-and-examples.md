@@ -1,34 +1,34 @@
 # Configs and examples
 
-## 环境与配置入口
+# Environment and configuration portal
 
-| 文件 | 用途 |
+|Documentation|Purpose|
 | --- | --- |
-| `programming/human-eval/README.md` | 依赖、参数、配置或运行示例入口 |
-| `programming/human-eval/requirements.txt` | 依赖、参数、配置或运行示例入口 |
-| `programming/human-eval/setup.py` | 依赖、参数、配置或运行示例入口 |
-| `programming/human-eval/data/example_problem.jsonl` | 依赖、参数、配置或运行示例入口 |
-| `programming/human-eval/data/example_samples.jsonl` | 依赖、参数、配置或运行示例入口 |
-| `README.md` | 依赖、参数、配置或运行示例入口 |
-| `setup.py` | 依赖、参数、配置或运行示例入口 |
-| `hotpot/requirements.txt` | 依赖、参数、配置或运行示例入口 |
-| `programming/requirements.txt` | 依赖、参数、配置或运行示例入口 |
-| `webshop/requirements.txt` | 依赖、参数、配置或运行示例入口 |
-| `.github/workflows/jekyll-gh-pages.yml` | 依赖、参数、配置或运行示例入口 |
-| `programming/executors/cargo_harness/Cargo.toml` | 依赖、参数、配置或运行示例入口 |
+| `programming/human-eval/README.md` |Dependence, parameters, configuration or run example entry|
+| `programming/human-eval/requirements.txt` |Dependence, parameters, configuration or run example entry|
+| `programming/human-eval/setup.py` |Dependence, parameters, configuration or run example entry|
+| `programming/human-eval/data/example_problem.jsonl` |Dependence, parameters, configuration or run example entry|
+| `programming/human-eval/data/example_samples.jsonl` |Dependence, parameters, configuration or run example entry|
+| `README.md` |Dependence, parameters, configuration or run example entry|
+| `setup.py` |Dependence, parameters, configuration or run example entry|
+| `hotpot/requirements.txt` |Dependence, parameters, configuration or run example entry|
+| `programming/requirements.txt` |Dependence, parameters, configuration or run example entry|
+| `webshop/requirements.txt` |Dependence, parameters, configuration or run example entry|
+| `.github/workflows/jekyll-gh-pages.yml` |Dependence, parameters, configuration or run example entry|
+| `programming/executors/cargo_harness/Cargo.toml` |Dependence, parameters, configuration or run example entry|
 
-## 执行入口
+# Execute the entrance
 
-| 文件 | 使用方式 |
+|Documentation|Usage|
 | --- | --- |
-| `hotpot/run.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `programming/main.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `programming/run_dfs.sh` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `programming/run_lats_gpt3.sh` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `programming/run_lats_gpt4.sh` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `programming/run_reflexion.sh` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `webshop/run.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `hotpot/run.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `programming/main.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `programming/run_dfs.sh` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `programming/run_lats_gpt3.sh` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `programming/run_lats_gpt4.sh` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `programming/run_reflexion.sh` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `webshop/run.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
 
-## 本地保存范围
+# Local Save Range
 
-`official-code/` 保存官方仓库在固定 revision 下的核心源代码、配置、示例和测试入口。完整数据集、模型权重、缓存和论文实验输出需按官方 README 另行取得。
+`official-code/`saves the core source code, configuration, example and test portal of the official repository under fixed review. The complete data set, model weights, caches and theatrical outputs are to be obtained separately by official README.

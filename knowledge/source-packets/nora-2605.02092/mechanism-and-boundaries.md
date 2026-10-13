@@ -1,32 +1,32 @@
-# 宿主事件脚本与结构化会话交接
+# Host Event Hooks and Structured Session Handoff
 
-NORA 以宿主生命周期事件触发脚本，记录工具交互，并在 Stop 时写入记忆与交接文件。论文对意外终止和安全阻断的主张，超出公开脚本静态检查能够证明的范围。
+NORA invokes scripts on host lifecycle events, records tool interactions, and writes memory and handoff files at Stop. Its claims about unexpected termination and safety blocking extend beyond what static inspection of the public scripts can establish.
 
-| 字段 | 机制说明 |
+| Field | Mechanism |
 | --- | --- |
-| 目标瓶颈 | 长会话结束后缺少明确状态和下一步，工具使用缺少可追溯记录 |
-| 作用模块 | 宿主生命周期接线、工具日志与结构化交接 |
-| 输入 | 宿主工具事件、输入与结果、已有输出文件、review 状态、token 使用记录 |
-| 触发条件 | 配置中的 PreToolUse/PostToolUse/Stop；实际触发和事件输入合同依赖宿主 |
-| 必要步骤 | 读取事件输入；记录/检查工具调用；从输出与 review 文件汇集状态；更新 MEMORY.md；生成 handoff.json；下次会话读取交接信息 |
-| 状态变化 | 日志追加；记忆与交接文件被更新，保存 pipeline、review、experiment、paper、token 和 recovery 信息 |
-| 预期输出 | 可审阅日志、记忆与结构化交接；不保证它们完整或原子发布 |
-| 前提与限制 | 原接线依赖环境变量 argv，pre 仅匹配 Bash、exit 1；真实阻断未验证。Stop 为顺序复制/写入，不证明崩溃安全。固定上游许可证未知，复用或再分发许可保持未知 |
+| Target bottleneck | Long sessions end without a clear state or next action, and tool use lacks an auditable record. |
+| Role | Host lifecycle wiring, tool logging, and structured handoff. |
+| Inputs | Host tool events, tool inputs and results, existing output files, review state, and token-usage records. |
+| Trigger | Configured `PreToolUse`, `PostToolUse`, and `Stop` events; actual triggering and event-input contracts depend on the host. |
+| Required steps | Read the event input; log or inspect the tool call; aggregate state from outputs and review files; update `MEMORY.md`; generate `handoff.json`; load the handoff in the next session. |
+| State changes | Logs are appended; memory and handoff files are updated with pipeline, review, experiment, paper, token, and recovery information. |
+| Outputs | Reviewable logs, memory, and a structured handoff; completeness and atomic publication are not guaranteed. |
+| Preconditions and limits | The original wiring depends on environment variables and `argv`; the pre-hook matches only Bash and exits with status 1, but effective host-level blocking is unverified. Stop writes several files sequentially and does not establish crash safety. The pinned upstream license is unknown, so reuse and redistribution permissions remain unknown. |
 
-## 机制与证据对应
+## Mechanism-to-evidence mapping
 
-| 标识 | 主张 | 论文与固定代码 | 支持范围 |
+| ID | Claim | Paper and pinned code | Supported scope |
 | --- | --- | --- | --- |
-| NO1 | 配置声明宿主事件，并由 pre 脚本对输入做正则检查与日志记录 | PDF p.12 §4.1；`settings.json:hooks`、`pre_tool_use.sh` | 支持事件意图和公开脚本行为；不证明宿主实际有效阻断 |
-| NO2 | Stop 从已有文件生成记忆和结构化交接 | PDF pp.12–13 §4.1、§4.3；`stop_hook.sh` | 支持明确的文件保存实现；异常终止是否触发、恢复是否准确未知；多个文件没有事务合同 |
-| NO3 | Post 脚本记录结果，并按输入/结果文本判断是否更新实验状态 | `post_tool_use.sh` | 公开脚本启发式；不是独立评分器，不保证状态提取准确 |
-| NO4 | 去 hooks 分析来自同一 brief 的定性去组件实验 | PDF pp.73–74 Appendix E | 仅论文定性证据，独立 hook 增益、故障恢复率和本地收益未知 |
+| NO1 | Configuration declares host events, and the pre-hook applies regular-expression checks and logs the input. | PDF p.12 §4.1; `settings.json:hooks`, `pre_tool_use.sh` | Supports the event intent and behavior of the public script; does not prove effective blocking by the host. |
+| NO2 | Stop generates memory and a structured handoff from existing files. | PDF pp.12–13 §4.1, §4.3; `stop_hook.sh` | Supports explicit file-persistence behavior. Whether abnormal termination triggers it and whether recovery is accurate remain unknown; the multi-file write has no transaction contract. |
+| NO3 | The post-hook logs results and heuristically updates experiment state from input and result text. | `post_tool_use.sh` | Public-script behavior only; it is not an independent scorer and does not guarantee accurate state extraction. |
+| NO4 | The no-hooks comparison is a qualitative ablation from the same brief. | PDF pp.73–74 Appendix E | Qualitative paper evidence only; isolated hook gain, recovery rate, and local gain remain unknown. |
 
-精确来源范围见 [证据映射](claim-evidence-map.json)，宿主协议历史核对与许可边界见 [结果说明](tests-and-reported-results.md)。本包条件保留为生命周期编排和交接边界案例，不作为已验证安全门或可靠恢复机制。
+Exact source ranges appear in [the evidence map](claim-evidence-map.json), while host-protocol checks and permission boundaries appear in [the results notes](tests-and-reported-results.md). This packet preserves a lifecycle-orchestration and handoff case; it is not evidence of a validated safety gate or reliable recovery mechanism.
 
-## 方法关系与项目使用边界
+## Method relationships and project-use boundary
 
-- [AgentScope](../agentscope-2508.16279/mechanism-and-boundaries.md)：NO1 的宿主命令事件与 AS1 的函数包装触发方式不同，需要显式输入和错误合同；事件名称相近不证明可互换。
-- [AgentRewind](../agentrewind-2608.14380/mechanism-and-boundaries.md)：NO2 的文件交接描述进度，AR1–AR2 恢复上下文和工作区。交接文件不能代替检查点，也不证明能恢复进程或撤销外部副作用。
+- [AgentScope](../agentscope-2508.16279/mechanism-and-boundaries.md): NO1 uses host command events, whereas AS1 wraps in-process functions. Both require explicit input and error contracts; similar event names do not establish interchangeability.
+- [AgentRewind](../agentrewind-2608.14380/mechanism-and-boundaries.md): NO2 records progress in handoff files, whereas AR1–AR2 restore context and workspace state. A handoff file cannot replace a checkpoint or prove that a process can be resumed or external side effects undone.
 
-项目只允许在本人 harness 可编辑范围派生实现；不自动复制上游模型、permissions、通知或宿主配置。接线、许可证和迁移收益需后续分别核实，本次材料收尾不改变其未知状态。
+Project derivatives are limited to the editable Harness boundary. Upstream models, permissions, notifications, and host configuration are not copied automatically. Wiring, licensing, and transfer gain require separate verification.

@@ -1,28 +1,28 @@
 # Configs and examples
 
-## 环境与配置入口
+# Environment and configuration portal
 
-| 文件 | 用途 |
+|Documentation|Purpose|
 | --- | --- |
-| `examples/evaluation-plan.json` | 依赖、参数、配置或运行示例入口 |
-| `examples/openrouter.json` | 依赖、参数、配置或运行示例入口 |
-| `tests/test_config.py` | 依赖、参数、配置或运行示例入口 |
-| `src/llm_discussion/config.py` | 依赖、参数、配置或运行示例入口 |
-| `pyproject.toml` | 依赖、参数、配置或运行示例入口 |
-| `README.md` | 依赖、参数、配置或运行示例入口 |
-| `data/README.md` | 依赖、参数、配置或运行示例入口 |
-| `examples/math-suite.json` | 依赖、参数、配置或运行示例入口 |
-| `examples/mixed-models.json` | 依赖、参数、配置或运行示例入口 |
-| `examples/vision-suite.json` | 依赖、参数、配置或运行示例入口 |
-| `.github/workflows/tests.yml` | 依赖、参数、配置或运行示例入口 |
+| `examples/evaluation-plan.json` |Dependence, parameters, configuration or run example entry|
+| `examples/openrouter.json` |Dependence, parameters, configuration or run example entry|
+| `tests/test_config.py` |Dependence, parameters, configuration or run example entry|
+| `src/llm_discussion/config.py` |Dependence, parameters, configuration or run example entry|
+| `pyproject.toml` |Dependence, parameters, configuration or run example entry|
+| `README.md` |Dependence, parameters, configuration or run example entry|
+| `data/README.md` |Dependence, parameters, configuration or run example entry|
+| `examples/math-suite.json` |Dependence, parameters, configuration or run example entry|
+| `examples/mixed-models.json` |Dependence, parameters, configuration or run example entry|
+| `examples/vision-suite.json` |Dependence, parameters, configuration or run example entry|
+| `.github/workflows/tests.yml` |Dependence, parameters, configuration or run example entry|
 
-## 执行入口
+# Execute the entrance
 
-| 文件 | 使用方式 |
+|Documentation|Usage|
 | --- | --- |
-| `scripts/run_evaluation.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `src/llm_discussion/cli.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `scripts/run_evaluation.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `src/llm_discussion/cli.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
 
-## 本地保存范围
+# Local Save Range
 
-`official-code/` 保存官方仓库在固定 revision 下的核心源代码、配置、示例和测试入口。完整数据集、模型权重、缓存和论文实验输出需按官方 README 另行取得。
+`official-code/`saves the core source code, configuration, example and test portal of the official repository under fixed review. The complete data set, model weights, caches and theatrical outputs are to be obtained separately by official README.

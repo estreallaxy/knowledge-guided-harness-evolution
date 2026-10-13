@@ -1,41 +1,41 @@
 # Configs and examples
 
-## 环境与配置入口
+# Environment and configuration portal
 
-| 文件 | 用途 |
+|Documentation|Purpose|
 | --- | --- |
-| `examples/RAGLlamaIndex.ipynb` | 依赖、参数、配置或运行示例入口 |
-| `examples/Retrieval.ipynb` | 依赖、参数、配置或运行示例入口 |
-| `.pre-commit-config.yaml` | 依赖、参数、配置或运行示例入口 |
-| `pyproject.toml` | 依赖、参数、配置或运行示例入口 |
-| `README.md` | 依赖、参数、配置或运行示例入口 |
-| `setup.cfg` | 依赖、参数、配置或运行示例入口 |
-| `setup.py` | 依赖、参数、配置或运行示例入口 |
-| `examples/Code.ipynb` | 依赖、参数、配置或运行示例入口 |
-| `examples/CoT.ipynb` | 依赖、参数、配置或运行示例入口 |
-| `examples/LLMLingua2.ipynb` | 依赖、参数、配置或运行示例入口 |
-| `examples/OnlineMeeting.ipynb` | 依赖、参数、配置或运行示例入口 |
-| `examples/RAG.ipynb` | 依赖、参数、配置或运行示例入口 |
-| `.github/ISSUE_TEMPLATE/config.yml` | 依赖、参数、配置或运行示例入口 |
-| `.github/workflows/unittest.yml` | 依赖、参数、配置或运行示例入口 |
-| `experiments/llmlingua2/README.md` | 依赖、参数、配置或运行示例入口 |
-| `experiments/securitylingua/env_setup.sh` | 依赖、参数、配置或运行示例入口 |
+| `examples/RAGLlamaIndex.ipynb` |Dependence, parameters, configuration or run example entry|
+| `examples/Retrieval.ipynb` |Dependence, parameters, configuration or run example entry|
+| `.pre-commit-config.yaml` |Dependence, parameters, configuration or run example entry|
+| `pyproject.toml` |Dependence, parameters, configuration or run example entry|
+| `README.md` |Dependence, parameters, configuration or run example entry|
+| `setup.cfg` |Dependence, parameters, configuration or run example entry|
+| `setup.py` |Dependence, parameters, configuration or run example entry|
+| `examples/Code.ipynb` |Dependence, parameters, configuration or run example entry|
+| `examples/CoT.ipynb` |Dependence, parameters, configuration or run example entry|
+| `examples/LLMLingua2.ipynb` |Dependence, parameters, configuration or run example entry|
+| `examples/OnlineMeeting.ipynb` |Dependence, parameters, configuration or run example entry|
+| `examples/RAG.ipynb` |Dependence, parameters, configuration or run example entry|
+| `.github/ISSUE_TEMPLATE/config.yml` |Dependence, parameters, configuration or run example entry|
+| `.github/workflows/unittest.yml` |Dependence, parameters, configuration or run example entry|
+| `experiments/llmlingua2/README.md` |Dependence, parameters, configuration or run example entry|
+| `experiments/securitylingua/env_setup.sh` |Dependence, parameters, configuration or run example entry|
 
-## 执行入口
+# Execute the entrance
 
-| 文件 | 使用方式 |
+|Documentation|Usage|
 | --- | --- |
-| `experiments/securitylingua/run.sh` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `experiments/securitylingua/train_roberta.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `experiments/llmlingua2/evaluation/eval_bbh.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `experiments/llmlingua2/evaluation/eval_gsm8k.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `experiments/llmlingua2/evaluation/eval_longbench.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `experiments/llmlingua2/evaluation/eval_meetingbank_qa.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `experiments/llmlingua2/evaluation/eval_meetingbank_summary.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `experiments/llmlingua2/evaluation/eval_zero_scrolls.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `experiments/llmlingua2/model_training/train.sh` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `experiments/llmlingua2/model_training/train_roberta.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `experiments/securitylingua/run.sh` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `experiments/securitylingua/train_roberta.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `experiments/llmlingua2/evaluation/eval_bbh.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `experiments/llmlingua2/evaluation/eval_gsm8k.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `experiments/llmlingua2/evaluation/eval_longbench.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `experiments/llmlingua2/evaluation/eval_meetingbank_qa.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `experiments/llmlingua2/evaluation/eval_meetingbank_summary.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `experiments/llmlingua2/evaluation/eval_zero_scrolls.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `experiments/llmlingua2/model_training/train.sh` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `experiments/llmlingua2/model_training/train_roberta.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
 
-## 本地保存范围
+# Local Save Range
 
-`official-code/` 保存官方仓库在固定 revision 下的核心源代码、配置、示例和测试入口。完整数据集、模型权重、缓存和论文实验输出需按官方 README 另行取得。
+`official-code/`saves the core source code, configuration, example and test portal of the official repository under fixed review. The complete data set, model weights, caches and theatrical outputs are to be obtained separately by official README.

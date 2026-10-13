@@ -1,45 +1,45 @@
 # Configs and examples
 
-## 官方配置
+# Official configuration
 
-| 设置 | 配置目录 | 主要内容 |
+|Settings|Configure Directory|Main elements|
 | --- | --- | --- |
-| 主配置样例 | `official-code/config/config2.yaml`、`official-code/config/config2.example.yaml` | `llm.api_key="YOUR_API_KEY"` 占位；运行时复制为 config2.yaml 并填充真实 key。 |
-| 各家 LLM 样例 | `official-code/config/examples/`（9 个） | anthropic-claude-3-5-sonnet、aws-bedrock、google-gemini、groq-llama3-70b、huoshan_ark、openai-gpt-3.5-turbo、openai-gpt-4-turbo、openrouter-llama3-70b-instruct、spark_lite。 |
-| 组件配置 | `official-code/metagpt/configs/`（11 个） | llm/browser/embedding/file_parser/mermaid/models/redis/s3/search/workspace 等配置项。 |
+|Main Configuration Template| `official-code/config/config2.yaml`、`official-code/config/config2.example.yaml` |`llm.api_key="YOUR_API_KEY"`position; run-time copy as config2.yaml and fill in real key.|
+|Individual LLM samples|`official-code/config/examples/`(9)| anthropic-claude-3-5-sonnet、aws-bedrock、google-gemini、groq-llama3-70b、huoshan_ark、openai-gpt-3.5-turbo、openai-gpt-4-turbo、openrouter-llama3-70b-instruct、spark_lite。 |
+|Component Configuration|`official-code/metagpt/configs/`(11)|llm/browser/embedding/file_parser/mermaid/models/redis/s3/search/workspaceetc.|
 
-配置只能和对应论文版本、代码 revision 与模型环境一起解释。论文中的运行结果不能由单个 YAML 独立复现。
+The configuration can only be explained with the corresponding paper version, code review and model environment. The results of a run in a paper cannot be reproduced independently by a single YaML.
 
-## 官方流程入口
+# The official process entrance
 
-官方 README（本包内为 `official-code/README.upstream.md`）核对过的命令：
+The command verified by the official README (`official-code/README.upstream.md`in this package):
 
 ```bash
-# 安装（Python >=3.9,<3.12，见 README:64-66）
+# Install (Python >=3.9,<3.12; see README:64-66)
 pip install --upgrade metagpt
 
-# 生成配置后填入 API key
+# Generate the configuration, then add the API key
 metagpt --init-config
 
-# 运行示例
+# Run the example
 metagpt "Create a 2048 game"
 ```
 
-或代码入口 `generate_repo("Create a 2048 game")`（README:107；`official-code/metagpt/software_company.py:16-78`）。运行产物落在 `./workspace`。
+or code entry`generate_repo("Create a 2048 game")`(RAADME:107; `official-code/metagpt/software_company.py:16-78`). Run a product that falls on`./workspace`.
 
-带可执行反馈的完整流程 = `run_tests=True` 雇佣 QaEngineer：
+=`run_tests=True`Employment QaEngineer:
 
-1. WriteTest 生成 `{workspace}/tests/test_*.py`；
-2. RunCode 以 subprocess 运行 `python tests/…`（timeout=10s，`official-code/metagpt/actions/run_code.py:92-118`）；
-3. 失败则 DebugError 重写代码并重试（至多 3 次与论文 §3.3 对应）。
+1. WriterTest generation`{workspace}/tests/test_*.py`;
+2. Run `python tests/…` by RunCode (timeout=10 s, `official-code/metagpt/actions/run_code.py:92-118`;
+3 ... if it fails, DebugError rewrites the code and retrys it (up to 3 § 3.3).
 
-运行前提：
+Operating premise:
 
 - Python >=3.9,<3.12（README:64-66）。
-- OpenAI 兼容 API key（`official-code/metagpt/configs/llm_config.py:46-58`；默认读 `./config/config2.yaml` 与 `~/.metagpt/config2.yaml`）。
-- 快照不含 `metagpt/utils`、`tools`、`ext` 等被引用模块（`official-code/metagpt/team.py:24`、`official-code/metagpt/software_company.py:11` 引用 `metagpt.utils.*`），独立运行需完整安装上游包。
-- HumanEval/MBPP 评测脚本与 harness 不在本快照（`grep -ri humaneval|mbpp` 零命中），论文复现需上游 `examples/benchmark`。
+- OpenAI compatible API key (`official-code/metagpt/configs/llm_config.py:46-58`; default`./config/config2.yaml`and `~/.metagpt/config2.yaml`).
+- Quickshots do not contain`metagpt/utils`, `tools`, `ext`, etc. quoted modules (`official-code/metagpt/team.py:24`, `official-code/metagpt/software_company.py:11` cited `metagpt.utils.*`), which need to be fully installed on their own.
+- HumanEval/MBPP evaluates scripts and harness, which are not in the current snapshot (`grep -ri humaneval|mbpp`Z0XZ Z0XZ`examples/benchmark`) and repeats the paper.
 
-## 本地保存范围
+# Local Save Range
 
-`official-code/` 保存 `metagpt/` 核心包（team、roles 五角色、actions、environment 消息池、schema、configs）、`config/`（config2.yaml 占位与 9 个 LLM 样例）、`README.upstream.md`、`LICENSE`。上游的 utils/tools/ext、examples/benchmark、数据集与测试不在本目录中。
+`official-code/` Save `metagpt/` core packages (team, rolls five roles, actions, environment pool, schema, configs), `config/` (config2.yaml position with 9 LLM example), `README.upstream.md`, `LICENSE`. Upstream utils /tools/ext, examples/benchmark, data sets and tests are not in this directory.

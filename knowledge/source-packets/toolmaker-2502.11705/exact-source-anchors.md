@@ -1,26 +1,26 @@
 # Exact source anchors
 
-## 论文
+# Papers
 
-| 核对对象 | 精确位置 | 可支持的判断 |
+|Check Object|Exact Location|Supportable judgement|
 | --- | --- | --- |
-| 方法与系统设计 | PDF p.3，`paper/paper-v2.txt` 中的 `===== PDF p.3 =====` | `Method` 所在页；用于核对该部分的原始定义、条件与证据。 |
+|Methodology and system design|`===== PDF p.3 =====`in PDF p.3,`paper/paper-v2.txt`|`Method`page; used to check the original definition, conditions and evidence of that part.|
 
-## 官方代码
+# Official code
 
-| Method 实现 | 核对范围 |
+|Method Achieved|Check scope|
 | --- | --- |
-| `toolmaker/agent/__init__.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `toolmaker/agent/agent.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `toolmaker/agent/state.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `scripts/toolmaker_function_runner.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `toolmaker/cli.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `toolmaker/definition.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `toolmaker/run.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `toolmaker/__init__.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `toolmaker/__main__.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `tests/toolmaker/actions/test_actions.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `tests/toolmaker/actions/test_web.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
-| `tests/toolmaker/utils/test_bash.py` | 与论文核心机制直接对应的方法实现或调用入口；核对其输入、状态转换、输出与依赖。 |
+| `toolmaker/agent/__init__.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `toolmaker/agent/agent.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `toolmaker/agent/state.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `scripts/toolmaker_function_runner.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `toolmaker/cli.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `toolmaker/definition.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `toolmaker/run.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `toolmaker/__init__.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `toolmaker/__main__.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `tests/toolmaker/actions/test_actions.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `tests/toolmaker/actions/test_web.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
+| `tests/toolmaker/utils/test_bash.py` |A method to achieve or call access directly corresponding to the core mechanism of the paper; check its input, status conversion, output and dependence.|
 
-代码位置均以 `source-packet.json` 固定的官方代码 revision 为准；论文页码以本地 PDF 为准。
+The code location is based on the`source-packet.json`fixed official code; the paper page number is based on the local PDF.

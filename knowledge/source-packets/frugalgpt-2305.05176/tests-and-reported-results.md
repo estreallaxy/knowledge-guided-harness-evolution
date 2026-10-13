@@ -1,43 +1,43 @@
 # Tests and reported results
 
-论文报告值，**不是本仓库复跑结果**。
+The paper reports value,** not the result of the rerun of the repository**.
 
-> 数值来自 `paper/paper-v1.txt` 的文本提取；引用前请对照 `paper/paper-v1.pdf` 核对。
+> Values from`paper/paper-v1.txt`; check against`paper/paper-v1.pdf`before reference.
 
-## 主打主张（Abstract，PDF p.1）
+# Main claim (Abstract, PDF p. 1
 
-| 主张 | 数值 | 说明 |
+|Claim|Value|Annotations|
 | --- | --- | --- |
-| 匹配最佳单模型表现时的成本下降 | 最高 **98%** | 最好情况；不同数据集的实际区间见下 |
-| 同等成本下的准确率提升 | 最多 **+4%** | 相对最佳单模型 |
-| 总体成本节省区间 | **50%–98%** | 论文自述（PDF p.8） |
+|Cost decreases when matching the best single model performance|Highest ** 98%**|Best case; see in practice between different data sets Down|
+|Increased accuracy rate at equal cost|Maximum ** + 4%**|Relatively best single model|
+|Overall cost savings| **50%–98%** |Dissertation (PDF p.8)|
 
-## Table 3（PDF p.8）达到最佳单模型精度所需成本
+# Table 3 (PDF p.8) Costs to achieve the best single model accuracy
 
-| 数据集 | 最佳单模型 | 该模型成本 | FrugalGPT 成本 | 节省 |
+|Data Set|Best Single Model|Cost of the model|FrugalGPT cost|Savings|
 | --- | --- | ---: | ---: | ---: |
 | HEADLINES | GPT-4 | 33.1 | 0.6 | **98.3%** |
 | OVERRULING | GPT-4 | 9.7 | 2.6 | 73.3% |
 | COQA | GPT-3 | 72.5 | 29.6 | 59.2% |
 
-成本单位按论文为「达到同等精度所需的相对成本」，不是美元/千 token 的绝对价格。
+The unit of cost is the "relative cost required to achieve the same accuracy" as the paper and is not the absolute price of US$/thousands of token.
 
-## 其他报告值
+# Other reported values
 
-| 结论 | 数值 / 位置 | 说明 |
+|Conclusions|Value / Location|Annotations|
 | --- | --- | --- |
-| 供应商价格差异 | Table 1，PDF p.7 | 12 个商业 API / 5 家供应商；论文称同量输入价格可差 2 个数量级 |
-| 两两模型理论上限（MPI） | Figure 4，PDF p.7 | 论文明确说明这是**上界**，不保证可达 |
-| 准确率—成本权衡曲线 | Figure 5，PDF p.9 | 曲线点位未转录，需按 PDF 读图 |
-| 成本节省条件 | §3，PDF p.8 | 由「识别小模型能答对的查询、只对难查询调用强模型」实现 |
+|Vendor price variance| Table 1，PDF p.7 |12 commercial API / 5 suppliers; the paper stated that equivalent input prices could be different 2 quantities Level|
+|Two-two-model theoretical cap (MPI)| Figure 4，PDF p.7 |The paper made it clear that this was ** upper world**, not guaranteed.|
+|Accuracy rate - Cost balance curve| Figure 5，PDF p.9 |Curve point not transcribed, by PDF|
+|Cost savings| §3，PDF p.8 |By "Identifying small models to answer right queries, calling strong models only for difficult queries"|
 
-## 当前核验状态
+# Current verification status
 
-| 项目 | 状态 |
+|Item|Status|
 | --- | --- |
-| PDF 可解析 | 已通过，13 页，提取到 `paper/paper-v1.txt`（含分页标记） |
-| Abstract / §1 / §3 与 Table 1–3 | 已按本地文本核对 |
-| 数值可迁移性 | **已过时**：2023 年的 API 价格与供应商清单，不能作为当前预算依据 |
-| 官方端到端复跑 | **未执行**：需要多家供应商凭据与外部数据集 |
-| 官方单元测试 | **未知**：上游无 tests 目录 |
-| 迁移到本 harness 的收益 | **未验证**；且需共同协议放开单一执行模型 |
+|PDF Parsable|Adopted, 13 pages, extracted to`paper/paper-v1.txt`(with page breaks)|
+|Abstract / § 1 / § 3 and Table 1 - 3|Checked against local text|
+|Value transportability|** Obsolete**: API price and vendor list in 2023, not the basis for the current budget|
+|Official to End Rerun|** Not implemented**: multiple vendors required for supporting and external data Set|
+|Official module testing|** Unknown**: no tests upstream|
+|Proceeds from moving to Ben Harness|** Not validated**; common agreement to liberalize the single implementation model|

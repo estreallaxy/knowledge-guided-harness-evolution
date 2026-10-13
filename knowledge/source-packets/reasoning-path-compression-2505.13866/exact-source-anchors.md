@@ -1,20 +1,20 @@
 # Exact source anchors
 
-## 论文
+# Papers
 
-| 核对对象 | 精确位置 | 可支持的判断 |
+|Check Object|Exact Location|Supportable judgement|
 | --- | --- | --- |
-| 方法与系统设计 | PDF p.1，`paper/paper-v2.txt` 中的 `===== PDF p.1 =====` | `approach` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 实验设置 | PDF p.1，`paper/paper-v2.txt` 中的 `===== PDF p.1 =====` | `Experiments` 所在页；用于核对该部分的原始定义、条件与证据。 |
-| 结果与消融 | PDF p.9，`paper/paper-v2.txt` 中的 `===== PDF p.9 =====` | `4.5 Ablation` 所在页；用于核对该部分的原始定义、条件与证据。 |
+|Methodology and system design|`===== PDF p.1 =====`in PDF p.1,`paper/paper-v2.txt`|`approach`page; used to check the original definition, conditions and evidence of that part.|
+|Experiment Settings|`===== PDF p.1 =====`in PDF p.1,`paper/paper-v2.txt`|`Experiments`page; used to check the original definition, conditions and evidence of that part.|
+|Results and digestion|`===== PDF p.9 =====`in PDF p.9,`paper/paper-v2.txt`|`4.5 Ablation`page; used to check the original definition, conditions and evidence of that part.|
 
-## 官方代码
+# Official code
 
-| 文件 | 核对范围 |
+|Documentation|Check scope|
 | --- | --- |
-| `scripts/run_ifeval.sh` | 官方仓库固定 revision 中的实现、接口或配置入口；具体语义以文件内容为准。 |
-| `scripts/run_aime24.sh` | 官方仓库固定 revision 中的实现、接口或配置入口；具体语义以文件内容为准。 |
-| `scripts/run_livecodebench_v5.sh` | 官方仓库固定 revision 中的实现、接口或配置入口；具体语义以文件内容为准。 |
-| `eval/eval/eval.py` | 官方仓库固定 revision 中的实现、接口或配置入口；具体语义以文件内容为准。 |
+| `scripts/run_ifeval.sh` |The official repository fixes the realization, interface or configuration entry; the semantics are based on the content of the document.|
+| `scripts/run_aime24.sh` |The official repository fixes the realization, interface or configuration entry; the semantics are based on the content of the document.|
+| `scripts/run_livecodebench_v5.sh` |The official repository fixes the realization, interface or configuration entry; the semantics are based on the content of the document.|
+| `eval/eval/eval.py` |The official repository fixes the realization, interface or configuration entry; the semantics are based on the content of the document.|
 
-代码位置均以 `source-packet.json` 固定的上游 revision 为准；论文页码以本地 PDF 为准。
+The location of the code is based on the fixed upstream review of`source-packet.json`; the paper page number is based on the local PDF.

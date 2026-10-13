@@ -1,33 +1,33 @@
 # Configs and examples
 
-## 环境与配置入口
+# Environment and configuration portal
 
-| 文件 | 用途 |
+|Documentation|Purpose|
 | --- | --- |
-| `ASB_DRIFT/pyopenagi/agents/example/academic_agent/config.json` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/academic_agent/meta_requirements.txt` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/academic_agent_attack/config.json` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/academic_agent_attack/meta_requirements.txt` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/academic_search_agent/config.json` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/academic_search_agent/meta_requirements.txt` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/aerospace_engineer_agent/config.json` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/aerospace_engineer_agent/meta_requirements.txt` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/autonomous_driving_agent/config.json` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/autonomous_driving_agent/meta_requirements.txt` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/ecommerce_manager_agent/config.json` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/ecommerce_manager_agent/meta_requirements.txt` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/education_consultant_agent/config.json` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/education_consultant_agent/meta_requirements.txt` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/financial_analyst_agent/config.json` | 依赖、参数、配置或运行示例入口 |
-| `ASB_DRIFT/pyopenagi/agents/example/financial_analyst_agent/meta_requirements.txt` | 依赖、参数、配置或运行示例入口 |
+| `ASB_DRIFT/pyopenagi/agents/example/academic_agent/config.json` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/academic_agent/meta_requirements.txt` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/academic_agent_attack/config.json` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/academic_agent_attack/meta_requirements.txt` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/academic_search_agent/config.json` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/academic_search_agent/meta_requirements.txt` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/aerospace_engineer_agent/config.json` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/aerospace_engineer_agent/meta_requirements.txt` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/autonomous_driving_agent/config.json` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/autonomous_driving_agent/meta_requirements.txt` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/ecommerce_manager_agent/config.json` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/ecommerce_manager_agent/meta_requirements.txt` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/education_consultant_agent/config.json` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/education_consultant_agent/meta_requirements.txt` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/financial_analyst_agent/config.json` |Dependence, parameters, configuration or run example entry|
+| `ASB_DRIFT/pyopenagi/agents/example/financial_analyst_agent/meta_requirements.txt` |Dependence, parameters, configuration or run example entry|
 
-## 执行入口
+# Execute the entrance
 
-| 文件 | 使用方式 |
+|Documentation|Usage|
 | --- | --- |
-| `ASB_DRIFT/scripts/run.sh` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
-| `ASB_DRIFT/main_attacker.py` | 官方代码入口候选；运行前按 README 补齐模型、数据和外部服务。 |
+| `ASB_DRIFT/scripts/run.sh` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
+| `ASB_DRIFT/main_attacker.py` |Candidates for the official code entry; pre-run by README to complete models, data and external services.|
 
-## 本地保存范围
+# Local Save Range
 
-`official-code/` 保存官方仓库在固定 revision 下的核心源代码、配置、示例和测试入口。完整数据集、模型权重、缓存和论文实验输出需按官方 README 另行取得。
+`official-code/`saves the core source code, configuration, example and test portal of the official repository under fixed review. The complete data set, model weights, caches and theatrical outputs are to be obtained separately by official README.
