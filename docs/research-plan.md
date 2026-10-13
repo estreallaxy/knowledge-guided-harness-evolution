@@ -43,7 +43,16 @@
 
 H0 按 benchmark 定义：Terminal-Bench 2.0 使用固定版本的 Terminus 2；GAIA2 使用 Meta ARE 默认 agent；SWE-Bench Pro 使用 SWE-agent。若某篇 baseline 论文以不同 seed harness 起步，必须同时报告“论文原设置复现”和“统一 H0 对照”，不能把不同起点的结果直接比较。
 
-### 2.2 Benchmark
+### 2.2 统一模型配置
+
+| 角色 | 模型 | API 模型标识 | 使用要求 |
+| --- | --- | --- | --- |
+| 执行模型（solver） | DeepSeek V4.1 Flash | `deepseek-flash` | 所有 baseline 与后续方法统一使用。 |
+| 优化模型（proposer/optimizer） | DeepSeek V4.1 Flash | `deepseek-flash` | 与执行模型保持一致。 |
+
+统一通过 DeepSeek 官方 API 调用，并在每次实验记录调用日期和 API 返回的实际模型版本。沙箱后端独立于模型配置，服务器复现默认使用本地 Docker。
+
+### 2.3 Benchmark
 
 | Benchmark | 论文 | 共享代码位置 |
 | --- | --- | --- |
