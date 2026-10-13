@@ -23,6 +23,8 @@
 | 复现 `Meta-Harness × Terminal-Bench 2.0` | 五位成员分别在 `reproductions/<成员>/meta-harness/terminal-bench-2.0/` 保存源码、环境、配置、trace、分数、成本、失败记录和复现说明。 | 五个独立目录都能按各自说明启动，成功与失败运行均有完整记录。 |
 | 收集负责方向的论文 | 按 [knowledge/README.md](../knowledge/README.md) 的既有分工，每个方向整理 2 个合格 `SourcePacket`，放入 `knowledge/source-packets/<source-id>/`，并更新知识索引。 | 每个方向达到 `2 / 2`；论文、官方代码、来源锚点、配置、测试和报告结果齐全，缺失项明确标为未知。 |
 
+阶段一只完成表中两类任务。五份 Method 在阶段三正式分配并建立独立仓库之前，不在本仓库提前实现或制作派生 demo；各成员也不代替其他线路实现其负责方向。
+
 ## 阶段二：五条隔离线路独立扩展
 
 从本阶段开始，五条线路完全隔离并行。每位成员只在自己的 `reproductions/<成员>/` 中复现 baseline，只维护本线路负责的论文材料；任何其他线路的结果只能用于阅读，不能代替本线路复现或成为本线路实验结果。

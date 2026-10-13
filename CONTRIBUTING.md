@@ -60,6 +60,14 @@ git push origin HEAD
 
 `git add` 建议点名文件，避免把本地实验产物一起提交。不要直接向 `main` 推送开发提交。
 
+## 强制门禁
+
+- 所有开发改动必须通过 PR 进入 `main`。PR 作者不得自行合并，也不得绕过未处理的 review；只有 `zhangXY` 完成审核后可以执行合并。
+- SourcePacket 和复现目录不得提交 benchmark 任务实例、数据划分文件、带参考答案或评分规则的测试配置、登录状态、原始外部数据集。官方仓库同时包含机制代码和上述材料时，只保留复现机制必需的源码与轻量配置。
+- 论文结果、本地结果和推导结果必须分开。分数必须写清分母、未评分样本的处理方式以及采用 micro average 还是 macro average；机器可读结果中的数据来源必须指向实际 split，不能用首个任务路径代替整个任务集。
+- 文档、配置和结果中不保存对本地文件计算的 MD5、SHA 或其他 checksum。SourcePacket 用于固定官方代码版本的上游 Git revision 仍需保留。
+- 在 Method 完成分配并建立独立仓库之前，本仓库只收集和核验已分配方向的 SourcePacket，不提前提交 Method 实现、派生 demo，也不实现其他成员负责方向的内容。
+
 ## 合并前：rebase、PR、审阅
 
 准备合并时重新同步 `main`，并把自己的分支 rebase 到它的最新提交之后：
@@ -75,7 +83,7 @@ git push --force-with-lease origin HEAD
 
 `rebase` 会改写自己分支的提交历史，所以已推送过该分支时使用 `--force-with-lease` 更新；**只对本人负责的分支使用，不对 `main` 使用，也不要用普通的 `--force`**。如果别人也在同一分支提交过内容，先沟通并核对远端提交，再决定如何同步。
 
-随后在 GitHub 创建以 `main` 为目标、以自己分支为来源的 PR。PR 至少说明：改动目的、主要文件或机制、验证命令与结果；涉及实验时注明 baseline、benchmark、H0、模型、数据划分、预算和 `reproductions/<本人账号>/` 下的结果路径。PR 统一由 `zhangXY` 审阅，通过检查并处理意见后再合并。
+随后在 GitHub 创建以 `main` 为目标、以自己分支为来源的 PR。PR 至少说明：改动目的、主要文件或机制、验证命令与结果；涉及实验时注明 baseline、benchmark、H0、模型、数据划分、预算和 `reproductions/<本人账号>/` 下的结果路径。PR 统一由 `zhangXY` 审阅；只有 review 明确通过且所有修改意见已经处理时才能合并，PR 作者不得自行合并。
 
 遇到 rebase 冲突时：
 
