@@ -1,0 +1,68 @@
+# AutoSaddler V2 × Terminal-Bench 2.0 —— 赵星源（zhaoXY）线路
+#
+# 运行（插件已 editable 装进 ../../code/.venv，tb2 场景经官方 entry point 发现）：
+#   ../code/.venv/bin/python run_autosaddler_tb2.py \
+#       --config configs/tb2_terminus_deepseek.yaml --run-id <run-id> [--max-iterations N]
+#
+# 说明与偏差见 ../notes/README.md；卡点：优化器 provider 需本单元的 litellm 传输
+# （驱动脚本把 "litellm" 注册进私有 registry，vendored 代码保持逐字节原样）。
+#
+# 标注： [固定] 冻结条件 / [实测] 本机验证 / [偏差] 与上游或计划不同 / [待定] 未定
+
+schema_version: autosaddler/v2
+
+scenario:
+  type: tb2                                  # [固定] 本单元插件（entry point autosaddler.scenarios:tb2）
+  settings:
+    runner_tree: ../runner                   # [固定] 本单元自带的 TB2 运行入口（含 .venv）
+    baseline_prompt: ../runner/prompt-templates/terminus-kira.txt  # [固定] H0 prompt，sha256 校验
+    dataset_root: /data1/users/zhaoXY/benchmarks/tb2-split-v1      # [固定] 冻结划分根（train/dev/test）
+    # jobs_root / candidate_trees 缺省落在 <run_root>/<run-id>/{jobs,trees}，无需在此写死
+    model: deepseek/deepseek-v4-flash        # [固定] 执行模型（§2.2）
+    concurrency: 4                           # [实测] DeepSeek 并发上限 8~10，留余量
+    batch_timeout_s: 4200
+    train_case_ids:                          # [偏差] 见 notes：搜索集缩到 6 题（成本所迫）
+      - portfolio-optimization
+      - bn-fit-modify
+      - pytorch-model-cli
+      - mteb-retrieve
+      - custom-memory-heap-crash
+      - sanitize-git-repo
+    development_case_ids:                    # [待定] 取自冻结 dev 划分，成本未实测
+      - fix-git
+      - openssl-selfsigned-cert
+      - modernize-scientific-stack   # [实测] 换掉 filter-js-from-html：oracle 在本环境 25 分钟仍未结束（harbor 产物收集循环），时限也更重（900/1800s）
+      - git-leak-recovery
+      - circuit-fibsqrt
+      - db-wal-recovery
+    # test 划分（40 题）从不打开：ScenarioComponents 只接收 train/development 用例。
+
+optimization:
+  task_selection: {type: fixed, batch_size: 4, seed: 0}      # [固定] 每迭代 4 题 minibatch
+  acceptance: {type: matched_valid_strict_improvement}       # [固定] 上游默认
+  development: {type: full_on_accept}                        # [固定] 接受后才跑 dev 全量
+  ranking: {type: mean_development_score}                    # [固定]
+  budget:
+    max_rollouts: 40                                         # [固定] 每次候选×题×重复计 1
+    max_iterations: 2                                        # [待定] 首次付费运行的规模
+  diagnosis_patch_timeout_seconds: 1800                      # [待定] 与 TB2 单题时限同量级
+  selection_timeout_seconds: 300
+  reflection_timeout_seconds: 600
+  session_retries: 1
+  session_retry_backoff_seconds: 5
+
+provider:
+  type: litellm                                              # [偏差] 本单元传输（上游无此类型）
+  capabilities: [read_workspace, edit_workspace, load_skills]
+  settings:
+    model: deepseek/deepseek-v4-flash                        # [固定] 优化模型（§2.2）
+    api_key_env: DEEPSEEK_API_KEY
+    temperature: 0.7
+    max_turns: 40
+
+storage:
+  type: local
+  run_root: ../runs                                          # [固定] 原始产物不入库（gitignore 已挡）
+
+# 成本估算（[实测] 基于 GEPA/H0 的 TB2 单价）：种子 dev 6 + 2×迭代(2×4 train) + 被接受的 dev 全量
+# ≈ 6 + 8 + 6 + 8 (+6) ≈ 30–40 rollouts ≈ $4–7。开跑前先跑 oracle 预检（免费）。
