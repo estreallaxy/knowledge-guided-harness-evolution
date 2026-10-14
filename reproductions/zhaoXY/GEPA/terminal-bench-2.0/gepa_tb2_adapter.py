@@ -84,12 +84,17 @@ class ExampleResult:
     verifier_excerpt: str
     trace_excerpt: str
     job_name: str
+    tests_passed: int | None = None
+    tests_total: int | None = None
+    failed_tests: tuple[str, ...] = ()
 
     def to_output(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "reward": self.reward,
             "score": self.score,
+            "tests_passed": self.tests_passed,
+            "tests_total": self.tests_total,
             "exception_type": self.exception_type,
             "duration_s": self.duration_s,
             "cost_usd": self.cost_usd,
@@ -338,7 +343,7 @@ class TB2HarborAdapter(GEPAAdapter):
         agent_result = result.get("agent_result") or {}
         verifier_result = result.get("verifier_result") or {}
         reward = (verifier_result.get("rewards") or {}).get("reward")
-        score = float(reward) if isinstance(reward, (int, float)) else 0.0
+        binary_score = float(reward) if isinstance(reward, (int, float)) else 0.0
 
         exception_info = result.get("exception_info")
         exception_type = (
@@ -348,6 +353,17 @@ class TB2HarborAdapter(GEPAAdapter):
         )
         if result and result.get("finished_at") is None and not exception_type:
             exception_type = "IncompleteTrial"
+
+        # Search objective: fraction of verifier checks that pass (harbor writes the
+        # per-check breakdown to verifier/ctrf.json). The binary reward saturates on this
+        # task set -- the seed already solves most cheap tasks -- so the reflection loop
+        # needs this finer signal. Reporting stays binary; the final evaluation never
+        # reads this number.
+        passed, total, failed_tests = _ctrf_tests(trial / "verifier" / "ctrf.json")
+        if exception_type or not total:
+            score = binary_score
+        else:
+            score = passed / total if passed is not None else binary_score
 
         duration = None
         agent_exec = result.get("agent_execution") or {}
@@ -370,23 +386,33 @@ class TB2HarborAdapter(GEPAAdapter):
             verifier_excerpt=verifier_excerpt,
             trace_excerpt=trace_excerpt,
             job_name=job_name,
+            tests_passed=passed,
+            tests_total=total or None,
+            failed_tests=failed_tests,
         )
 
     @staticmethod
     def _outcome_label(output: dict[str, Any]) -> str:
-        if output.get("score"):
-            return "solved"
+        if output.get("reward"):
+            return "solved (all verifier checks passed)"
         if output.get("exception_type"):
             return f"failed ({output['exception_type']})"
+        passed, total = output.get("tests_passed"), output.get("tests_total")
+        if total:
+            return f"partially solved ({passed}/{total} verifier checks passed)"
         return "failed (verifier scored 0)"
 
     def _feedback(self, r: ExampleResult, proc_error: str | None) -> str:
         lines = [
             f"Task: {r.task_id}",
-            f"Score: {r.score:.1f}"
-            + (f" (reward={r.reward})" if r.reward is not None else ""),
+            f"Score (search objective, fraction of verifier checks passed): {r.score:.2f}"
+            + (f" (binary reward={r.reward})" if r.reward is not None else ""),
             f"Outcome: {self._outcome_label(r.to_output())}",
         ]
+        if r.failed_tests:
+            shown = ", ".join(r.failed_tests[:8])
+            more = "" if len(r.failed_tests) <= 8 else f" (+{len(r.failed_tests) - 8} more)"
+            lines.append(f"Failing verifier checks: {shown}{more}")
         if r.duration_s is not None:
             lines.append(f"Agent wall clock: {r.duration_s:.0f}s across {r.n_steps or '?'} steps")
         if proc_error:
@@ -417,6 +443,34 @@ def _tail(path: Path, limit: int) -> str:
         return ""
     text = path.read_text(encoding="utf-8", errors="replace")
     return text[-limit:].strip()
+
+
+def _ctrf_tests(path: Path) -> tuple[int | None, int, tuple[str, ...]]:
+    """Read harbor's per-check verifier breakdown (CTRF report).
+
+    Returns (passed, total, failed test names). Missing or malformed reports yield
+    (None, 0, ()), and the caller falls back to the binary reward.
+    """
+    if not path.exists():
+        return None, 0, ()
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None, 0, ()
+    results = report.get("results") or {}
+    summary = results.get("summary") or {}
+    passed, failed = summary.get("passed"), summary.get("failed")
+    total = summary.get("tests")
+    if not isinstance(passed, int) or not isinstance(failed, int):
+        return None, 0, ()
+    if not isinstance(total, int) or total <= 0:
+        total = passed + failed
+    names = tuple(
+        str(test.get("name"))
+        for test in (results.get("tests") or [])
+        if isinstance(test, dict) and test.get("status") == "failed"
+    )
+    return passed, total, names
 
 
 def _summarize_trajectory(path: Path) -> tuple[str, int | None]:

@@ -145,6 +145,47 @@ class TrialParsingTests(AdapterTestBase):
         self.assertIn("ModuleNotFoundError", r.verifier_excerpt)
         self.assertIn("gcc: error", r.trace_excerpt)
 
+    def test_partial_credit_from_ctrf(self):
+        adapter = self.make_adapter()
+        trial = _write_trial(adapter.jobs_dir / "job4", "portfolio-optimization", reward=0.0)
+        (trial / "verifier" / "ctrf.json").write_text(
+            json.dumps(
+                {
+                    "results": {
+                        "summary": {"tests": 4, "passed": 1, "failed": 3},
+                        "tests": [
+                            {"name": "test_outputs.py::test_baseline", "status": "passed"},
+                            {"name": "test_outputs.py::test_c_extension_exists", "status": "failed"},
+                            {"name": "test_outputs.py::test_correctness", "status": "failed"},
+                            {"name": "test_outputs.py::test_perf", "status": "failed"},
+                        ],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        r = adapter._read_trial("job4", "portfolio-optimization")
+        self.assertAlmostEqual(r.score, 0.25)          # search objective = checks passed
+        self.assertEqual(r.reward, 0.0)                # binary reward preserved for reporting
+        self.assertEqual((r.tests_passed, r.tests_total), (1, 4))
+        self.assertEqual(len(r.failed_tests), 3)
+        feedback = adapter._feedback(r, None)
+        self.assertIn("0.25", feedback)
+        self.assertIn("test_c_extension_exists", feedback)
+
+    def test_partial_credit_ignored_for_exceptions(self):
+        adapter = self.make_adapter()
+        trial = _write_trial(
+            adapter.jobs_dir / "job5", "gcode-to-text", reward=None,
+            exception_type="AgentTimeoutError",
+        )
+        (trial / "verifier" / "ctrf.json").write_text(
+            json.dumps({"results": {"summary": {"tests": 2, "passed": 1, "failed": 1}}}),
+            encoding="utf-8",
+        )
+        r = adapter._read_trial("job5", "gcode-to-text")
+        self.assertEqual(r.score, 0.0)  # timeouts stay at zero regardless of partial checks
+
     def test_timeout_exception_scores_zero(self):
         adapter = self.make_adapter()
         _write_trial(
