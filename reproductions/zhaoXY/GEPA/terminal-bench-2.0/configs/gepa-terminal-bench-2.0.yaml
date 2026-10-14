@@ -1,0 +1,82 @@
+# GEPA × Terminal-Bench 2.0 —— 赵星源（zhaoXY）线路 · 阶段二 baseline 矩阵第 2 格
+#
+# 依据：docs/team-execution-plan.md「Baseline 链」（4 baseline × 3 benchmark 各自独立复现）
+#       与 docs/research-plan.md §2.1（在相同 H0、数据划分、模型和评测器上运行）、
+#       §2.2（执行模型与优化模型统一 deepseek-flash）。
+# 标注： [固定] 冻结条件 / [实测] 本机验证过 / [待定] 尚未确定 / [偏差] 与上游或计划的差异
+#
+# 单元结构：
+#   code/                    本单元自带的 TB2 运行入口（独立于 meta-harness 单元；自带 .venv）
+#   gepa_tb2_adapter.py      GEPA ↔ harbor 适配器（上游同名适配器不可用，见 [偏差]）
+#   run_gepa_tb2.py          搜索驱动
+#   run_final_eval.sh        终评：搜索得到的最佳 prompt 在 train 30 题 × 2 次上评测
+#   runs/                    本地产物（jobs/、cost-ledger.jsonl、各 run 目录），不入库
+
+baseline:
+  name: GEPA
+  paper: https://arxiv.org/abs/2507.19457
+  upstream: https://github.com/gepa-ai/gepa
+  upstream_revision: 462e437a09be67d2acb59564cc0ea59132f5777c     # [固定] 见 ../../code/UPSTREAM.md
+  vendored_code: ../../code                                        # [固定] 官方源码，未修改
+  entry_point: gepa.optimize                                       # [固定] adapter 路线
+  optimized_component: instruction_prompt                          # [固定] 唯一文本组件
+  optimized_artifact: code/prompt-templates/terminus-kira.txt      # [固定] H0 prompt 原文为种子
+
+h0:                                                                # 与 H0 单元同一份，逐字节一致
+  source: ../H0/terminal-bench-2.0/code/terminus-kira/baseline_kira.py
+  sha256: e06b9273e2b900006a2072457dff2630ad04e589c48057d050219bdc791eb889   # [实测]
+  prompt_seed: runs/terminus-kira.h0.txt
+  prompt_sha256: adf2d40a4503965b307d348447f95141aa77db665c6571f3ab9512151894e6f6  # [实测]
+  note: 种子 prompt 由 adapter 在首次运行时从运行入口复制并校验 sha256；搜索结束自动还原 H0。
+
+execution:                                                         # 搜索与终评必须同条件
+  model: deepseek/deepseek-v4-flash                                # [固定] 经 HARBOR_MODEL
+  model_api_id: deepseek-flash                                     # [实测] API 实际服务模型
+  reflection_model: deepseek/deepseek-v4-flash                     # [固定] 优化模型（§2.2 要求统一）
+  api_key_env: DEEPSEEK_API_KEY                                    # [固定] 值只在 code/.env（600，gitignore 已挡）
+  environment: docker                                              # [固定] 本地沙箱
+  dataset_split: /data1/users/zhaoXY/benchmarks/tb2-split-v1/train # [固定] 冻结划分 train 30 题
+  n_attempts_per_task: 1（搜索） / 2（终评，与 H0 同协议）          # [固定]
+  temperature: 0.7                                                 # [固定] run_eval.sh 固定传参
+  n_concurrent: 5（搜索，上限=批大小） / 10（终评，与 H0 一致）      # [实测] DeepSeek 并发上限 8~10
+  test_split_isolated: true                                        # [固定] test 40 题从不进入搜索或终评
+
+search:                                                            # 搜索只在 train 的 5 题子集上进行
+  search_set: [portfolio-optimization, bn-fit-modify, pytorch-model-cli, mteb-retrieve, custom-memory-heap-crash]
+  search_set_rationale: >-
+    [实测] 由 H0（2026-10-13）逐题结果挑选：4 道"H0 两次只过一次"的便宜题（有改进梯度），
+    外加 1 道 H0 两次全过的题作回归探测器。全部单次成本 ≤ $0.21、agent 耗时 ≤ 713s。
+  excluded: >-
+    mcmc-sampling-stan 原在备选内，2026-10-14 oracle 预检实测其 **reward = 0.0**（验证器在本环境
+    不可满足）→ 不能提供信号，已剔除；同类"金标准也过不了"的题不应进入任何搜索集。
+  max_metric_calls: 20                                             # [固定] 1 metric call = 1 次单题 rollout
+  reflection_minibatch_size: 1                                     # [固定]
+  cache_evaluation: true                                           # [固定] 同候选同题不重复计费
+  cost_guard_usd: 4.0                                              # [固定] harbor + 反思 LM 合计上限
+  val_evaluation_policy: full_eval（GEPA 默认；候选被接受时才全量复评）
+
+final_evaluation:                                                  # 与 H0 单元完全同协议，唯一变量是 prompt
+  command: bash run_final_eval.sh <最佳 prompt 文件> <run 名>
+  dataset_split: 同上（train 30 题）; n_attempts: 2; concurrency: 10
+  comparand: H0 × TB2 2026-10-13：pass@2 = 19/30 = 0.6333，trial-level micro 33/60 = 0.5500
+  noise_floor: 同配置重跑浮动 ±3 题（pass@2 0.63~0.73），见 H0 单元 notes §4 —— 差异必须超过该幅度才有意义
+
+deviations:                                                        # [偏差] 必须在结果与 notes 中声明
+  - 上游 `gepa/adapters/terminal_bench_adapter/` 面向已废弃的 `tb` CLI 与 `terminal-bench-core`
+    包，对本仓库的 TB2（harbor 0.18.0 + terminal-bench 0.2.18 + 本地 Docker）不可用；
+    本单元改为自写 adapter（gepa_tb2_adapter.py），复用本仓库既有的 harbor 调用链。
+  - 上游论文设置未固定；本单元按团队协议改为 deepseek-flash 作执行与优化模型。
+  - 搜索集缩小到 train 的 5 题（上游 GEPA 每候选在完整 valset 上评估，本环境单题成本下不可行）。
+  - 上游示例用 `perfect_score=1.0`；本单元沿用，但额外设 `skip_perfect_score=True`。
+
+products:
+  runs_root: runs
+  run_dir: runs/<run-id>/（seed_prompt.txt、best_prompt.txt、run_meta.json、gepa_summary.json、gepa_state.bin）
+  jobs_dir: runs/jobs/<job-name>/（harbor 原始产物：逐 trial result.json、trajectory.json、verifier/）
+  cost_ledger: runs/cost-ledger.jsonl（逐批实际花费，跨 run 累计）
+  harbor_logs: runs/harbor-logs/<job-name>.log
+
+open_items:
+  - H0 对照口径：本单元用 2026-10-13 独立跑的 0.6333；meta-harness 线 Phase 0 同配置跑出 0.6667
+    （不同轮，噪声 ±3 题）。团队若统一到某一轮，需同步更新。
+  - GEPA 搜索集缩小属成本所迫的偏差；paper-scale（每候选全量 30 题）需追加预算（单候选 ≈ $3）。
