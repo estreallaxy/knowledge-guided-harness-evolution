@@ -61,9 +61,25 @@ bash run_final_eval.sh runs/gepa-tb2-search-1/best_prompt.txt gepa-tb2-final-1
 ## 4. 结果
 
 <!-- RESULTS:BEGIN -->
-（搜索进行中，终评完成后回填：种子分数轨迹、最佳候选 prompt 的 diff、train 30×2 的 pass@2 与
-trial-level micro、与 H0 0.6333 / 0.5500 的逐题对照、实际花费。）
+**本轮无终评分数**：搜索未产出候选（最佳候选 = 种子，逐字节相同），按事前决策门不执行 $9.5 终评。
+完整结论与依据见 `../results/README.md`；下方是搜索阶段的实测记录。
 <!-- RESULTS:END -->
+
+### 4.1 搜索阶段实测（2026-10-14，`gepa-tb2-search-1`）
+
+- 种子（H0 prompt）在 5 题搜索集上的 val 分数 = **0.8（4/5）**；
+- 迭代 1–6 全部命中 `All subsample scores perfect for parent 0. Skipping.`
+  → **未提出任何候选**（`skip_perfect_score=True` 的设计行为）；
+- 逐条实测的 minibatch 抽样（每批次单题）：pytorch-model-cli $0.084、bn-fit-modify $0.043、
+  portfolio-optimization $0.040、mteb-retrieve $0.126 —— **全部 1.0**，与 H0 的"两次只过一次"
+  不同，说明单次尝试（temp 0.7、无 seed）下这些题的通过率是抛硬币，且本轮偏向通过。
+
+**结构性结论（下轮设计依据）**：本环境里"便宜且对 H0 有梯度"的题集合 ≈ 空集——
+便宜的题（$0.03–0.2 / 3–12 分钟）在单次尝试下大多被种子解出；种子稳定失败的题
+（`sam-cell-seg`/`make-mips-interpreter`/`schemelike-metacircular-eval` 等）单次 $\ge$ 0.57、
+耗时 ≥25 分钟，且多为超时类。因此**小预算下的 GEPA 反思循环拿不到可靠信号**。
+下轮若要真正跑 GEPA：搜索集应选"种子稳定失败且非超时"的题（按 2 次尝试的 0/2 结果挑），
+并按 `minibatch ≥ 2`、每候选 ≥$0.6–1.0 估预算（即搜索预算需 $20–30 量级）。
 
 ## 5. 成本台账
 
@@ -71,8 +87,9 @@ trial-level micro、与 H0 0.6333 / 0.5500 的逐题对照、实际花费。）
 | --- | --- |
 | oracle 预检（不调 LLM） | $0 |
 | 单题冒烟 `gepa-tb2-smoke` | $0.0619 |
-| 搜索 `gepa-tb2-search-1` | 见 `runs/gepa-tb2-search-1/gepa_summary.json` 的 `cost` 字段 |
-| 终评 `gepa-tb2-final-1` | 见 `../results/summary.json` 的 `cost_usd` |
+| 搜索 `gepa-tb2-search-1`（11 次 metric call，71 分钟，优雅停止） | **$0.9053**（harbor；反思 LM $0 —— 从未提出候选） |
+| 终评 `gepa-tb2-final-1` | **未执行**（无候选；按决策门保留 $9.5 预算） |
+| 本轮合计 | **$0.9672** |
 
 明细（逐批复核用）：`runs/cost-ledger.jsonl`（每次 harbor 批次的题目、分数、花费、耗时）。
 
@@ -87,6 +104,8 @@ trial-level micro、与 H0 0.6333 / 0.5500 的逐题对照、实际花费。）
 
 ## 7. 待办
 
-- [ ] 终评完成后回填 §4 与 §5，并生成 `results/summary.{md,json}`。
-- [ ] 若搜索未产生改进：如实报告"本轮预算内无增益"，不追加搜索预算（等团队决定是否加码）。
+- [x] ~~回填 §4 与 §5~~ ✅ 2026-10-14：本轮无候选，已按此如实记录（`../results/README.md`）。
+- [ ] **下一轮**：按 §4.1 的建议重配搜索（稳定失败集 + minibatch ≥2 + $20–30 搜索预算），
+      跑出候选后执行 `run_final_eval.sh` 与 `compare_with_h0.py`；届时 `results/` 换成正式分数摘要。
 - [ ] H0 对照口径（0.6333 vs meta-harness Phase 0 的 0.6667）待团队统一，见 config `open_items`。
+- [ ] 本轮"搜索集饱和"的结构性结论建议同步给其他成员（他们复现 GEPA 时会撞到同一堵墙）。
