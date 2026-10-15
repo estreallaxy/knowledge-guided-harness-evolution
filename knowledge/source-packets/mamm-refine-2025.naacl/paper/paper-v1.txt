@@ -1,0 +1,1320 @@
+               MAMM-R EFINE: A Recipe for Improving Faithfulness in Generation with
+                                 Multi-Agent Collaboration
+
+                             David Wan Justin Chih-Yao Chen Elias Stengel-Eskin Mohit Bansal
+                                                     UNC Chapel Hill
+                                      {davidwan,cychen,esteng,mbansal}@cs.unc.edu
+
+
+
+                                         Abstract                             et al., 2023; Raunak et al., 2023; Jiang et al., 2023;
+                                                                              Gou et al., 2024; Wadhwa et al., 2024). However,
+                       Multi-agent collaboration among models has             these techniques have been found to be less effec-
+                       shown promise in reasoning tasks but is un-
+                                                                              tive without external feedback, as models require
+                       derexplored in long-form generation tasks like
+                       summarization and question-answering. We               external information to identify errors (Huang et al.,
+                       extend multi-agent multi-model reasoning to            2024a). One promising avenue for extending mod-
+                       generation, specifically to improving faithful-        els beyond their inherent capabilities is multi-agent
+                       ness through refinement, i.e., revising model-         debate (Chen et al., 2024a; Du et al., 2023; Liang
+                       generated outputs to remove factual inconsis-          et al., 2023), where multiple LLMs improve their
+                       tencies. We investigate how iterative collabo-         answers over the course of a debate or discussion.
+                       ration among multiple instances and types of
+                                                                              The agents can be multiple instances of the same
+                       large language models (LLMs) enhances sub-
+                       tasks in the refinement process, such as error
+                                                                              model or different models (i.e. multi-model).
+                       detection, critiquing unfaithful sentences, and           While several approaches focus on improving
+                       making corrections based on critiques. We de-          generation faithfulness through refinement, e.g. by
+                       sign intrinsic evaluations for each subtask, with      breaking down the refinement process into fine-
+                       our findings indicating that both multi-agent          grained subtasks (Liu et al., 2023b; Wadhwa et al.,
+                       (multiple instances) and multi-model (diverse          2024), past work has used a single instance of the
+                       LLM types) approaches benefit error detec-             same model for each of these subtasks, without
+                       tion and critiquing. Additionally, reframing
+                                                                              multi-agent collaboration. Different models, due to
+                       critiquing and refinement as reranking rather
+                       than generation tasks improves multi-agent per-        their diverse training data and methods, often ex-
+                       formance. We consolidate these insights into a         hibit different hallucination patterns (Rawte et al.,
+                       final “recipe” called Multi-Agent Multi-Model          2023; Guerreiro et al., 2023; Ye et al., 2023). There-
+                       Refinement (MAMM-R EFINE), where multi-                fore, adopting a multi-model, multi-agent frame-
+                       agent and multi-model collaboration signifi-           work could help systems achieve higher faithful-
+                       cantly boosts performance on three summariza-          ness by allowing models to revise their solutions
+                       tion datasets as well as on long-form question
+                                                                              based on diverse answers obtained through collab-
+                       answering, demonstrating the effectiveness and
+                       generalizability of our recipe.1
+                                                                              oration. In such collaborative settings, different
+                                                                              models’ hallucinations might cancel out.
+               1       Introduction                                              However, several challenges remain before
+                                                                              the promise of multi-agent and multi-model ap-
+               Large language models (LLMs) have achieved re-                 proaches can be realized in generation tasks: First,
+               markable performance in natural language genera-               multi-agent frameworks have shown great promise
+               tion but still suffer from hallucinations and a lack           for reasoning tasks (Chen et al., 2024a; Du et al.,
+               of faithfulness (Guerreiro et al., 2023; Zhang et al.,         2023; Liang et al., 2023) where the final answers
+               2023; Tang et al., 2023, 2024b; Liu et al., 2024),             are generally from a closed set and easily verified,
+               where the generated content is inconsistent with               leading to easy stopping criteria and enabling vot-
+               the input source or the world. To address this prob-           ing across agents. Applying multi-agent collabo-
+               lem, many studies have developed post-hoc self-                ration to generative tasks such as summary refine-
+               refinement techniques (Madaan et al., 2023; Gero               ment – where final answers are long and difficult
+                   1
+                   Our code is available at https://github.com/               to verify – is less straightforward. Additionally,
+               meetdavidwan/mammrefine.                                       due to the complexity and multitude of the design
+                                                                           9882
+Proceedings of the 2025 Conference of the Nations of the Americas Chapter of the Association for Computational Linguistics: Human Language Technologies
+                                                        (Volume 1: Long Papers), pages 9882–9901
+                                         April 29 - May 4, 2025 ©2025 Association for Computational Linguistics
+choices in generation and refinement tasks, it is       approach with other refinement baselines. Across
+not clear which components would benefit from a         different refinement pipelines that use various com-
+multi-agent framework. As verified by our empiri-       binations of subtasks, we show that selecting the
+cal results, naively applying multi-agent reasoning     best components from our intrinsic analysis gives
+to all subtasks might unnecessarily increase cost       us a generalizable recipe for improved refinement
+and could even hurt performance, as agents may          that holds across generation tasks and datasets, with
+lead each other down incorrect paths.                   gains on all three summarization tasks. We fur-
+   To extend multi-agent approaches to long-form        ther show that our recipe generalizes to long-form
+generation, we focus on the task of improving faith-    question answering, improving faithfulness in a
+fulness through refinement, as it is backed by exten-   non-summarization domain.
+sive literature on evaluation metrics and generation
+strategies. As illustrated in Figure 1, we conduct      2       Method
+a comprehensive analysis to determine which re-
+                                                        We begin refinement with a model-generated out-
+finement subtasks benefit most from a multi-agent
+                                                        put Y and optionally an input context X (e.g., a
+pipeline. Focusing on the three-subtask approach
+                                                        summarization document or question-answering
+from Wadhwa et al. (2024), a state-of-the-art refine-
+                                                        context (Xu et al., 2023)). Using a refinement
+ment strategy, we consider D ETECT, C RITIQUE,
+                                                        prompt and model Mr , we transform Y into a re-
+and R EFINE subtasks, which can be recombined
+                                                        fined output Yr . We first outline common refine-
+into different pipelines (e.g., D ETECT-R EFINE,
+                                                        ment pipelines and their corresponding subtasks,
+C RITIQUE-R EFINE, R EFINE only). We apply
+                                                        and next illustrate how each adapts to our multi-
+multi-agent collaboration to these subtasks, fram-
+                                                        agent setting for generative tasks:
+ing C RITIQUE and R EFINE with two approaches:
+a discriminative method (R ERANK) that selects the      Direct Refinement. A single task directly prompts
+best option among multiple candidates, and G EN -       the refinement model to improve the summary
+ERATE , which updates the answer freely. Our re-
+                                                        based on the document: Yr = Mr (X, Y ).
+search addresses three core questions: (1) Which        D ETECT-C RITIQUE-R EFINE (DCR). As illus-
+refinement subtasks benefit from a multi-agent          trated in top left section of Figure 1, we follow
+approach? (2) Which subtasks benefit from a             Wadhwa et al. (2024)’s breakdown of refinement
+multi-model approach? (3) For which task type           into three steps, covering all components of the
+(G ENERATE or R ERANK) is the multi-agent ap-           refinement process. First, each output sentence
+proach most effective?                                  y i ∈ {y 0 , . . . , y N } is evaluated by a detection
+   To answer these, we perform an extensive in-         subtask Md (X, y i ), D ETECT, to produce a binary
+trinsic analysis to find the optimal setting for        faithfulness label, indicating whether the sentence
+each subtask, creating a “recipe”, Multi-Agent          requires refinement. We define faithfulness as
+Multi-Model Refinement (MAMM-R EFINE), that             whether the output is supported by the input, and
+combines the best configurations. Using TofuE-          measure it using a model given the prompt de-
+val (Tang et al., 2024c), a dataset with human-         scribed in Appendix D.2 In addition to a binary
+annotated sentence-level faithfulness judgments         label, the detection step produces a reasoning chain
+and critiques, we design intrinsic evaluation tasks     which can be treated as a critique of the sentence
+for each of the three subtasks, D ETECT, C RITIQUE,     (i.e. justifying why the sentence is unfaithful). For
+and R EFINE, as illustrated in Figure 2. Our findings   each sentence marked as unfaithful, we also op-
+show that multi-agent approaches generally out-         tionally employ a critique subtask Mc (X, y i ), C RI -
+perform single-model baselines, with multi-model        TIQUE , that generates a critique ci detailing the er-
+variants offering further gains, and for C RITIQUE      ror span (i.e. which tokens make the output unfaith-
+and R EFINE, multi-agent methods provide consis-        ful) and suggest a fix. Finally, based on the outputs
+tent gains with R ERANK but not with G ENERATE.         of D ETECT and C RITIQUE, we use R EFINE to gen-
+   Next, after determining the best configuration for   erate a refined summary Yr = Mr (X, Y, C), where
+each subtask from the intrinsic evaluations, we eval-   C is the set of critiques, either directly from D E -
+uate end-to-end performance on three summariza-         TECT ’s reasoning or from the explicit C RITIQUE
+tion datasets with MAMM-R EFINE, MediaSum               subtask. These three subtasks can be recombined
+(Zhu et al., 2021), MeetingBank (Hu et al., 2023),          2
+                                                            Note that this prompting process is not the same what is
+and UltraChat (Ding et al., 2023), comparing our        used as the final evaluation metrics described in Section 3.2.
+
+                                                    9883
+                      Refinement Pipeline                                                 Multi-Agent Debate for Detect
+             (Single Agent with Different Subtasks)
+                        Detect Subtask                Critique Subtask
+     Source                                                                                            Prediction:
+                                                                                Source
+                                                                                                        Faithful                           Consensus:
+                                Prediction:                   Critique
+                                Not Faithful                                                                                                Faithful
+     Output                                                                     Output                Prediction:
+                                                                                                      Not Faithful
+                            Refined
+                                                                                                                          x N round
+                            Output
+                                                        Refine Subtask                      Round 0                    w. conv. history
+
+  Multi-Agent Debate for Critique/Refine (Generate)                             Multi-Agent Debate for Critique/Refine (Rerank)
+
+                    Initial                                                 Candidate 1
+                                                             Refined                                  Prediction:
+                  Candidate 1                              Candidate 1                                Candidate2
+                                                                            Candidate 2                                                   Consensus:
+                                                                                                                                          Candidate2
+                   Initial                                                                            Prediction:
+                                                             Refined
+                 Candidate 2                               Candidate 2      Candidate 3               Condidate1
+                                      x N round                                                                         x N round
+   Round 0                         w. conv. history                                         Round 0                  w. conv. history
+
+
+Figure 1: Illustration of the refinement pipeline (top-left) and how multi-agent debate is applied to different subtasks.
+In the D ETECT subtask (top-right), agents collectively choose among a discrete set of options, such as making
+yes/no decisions or selecting the most faithful candidate. For the C RITIQUE and R EFINE subtasks, we explore
+two approaches. In the bottom-left panel, we frame the task as generative (using G ENERATE), where each agent
+updates its own critique or output based on other agents’ responses. In the bottom-right panel, we frame it as a
+discriminative task using R ERANK, where agents choose the best output from the candidates. While discriminative
+tasks converge to a single solution, generative tasks result in updated responses from each agent.
+
+
+into other variants, e.g. D ETECT-R EFINE (refining                         have converged to the same answer, evaluating and
+only on unfaithful generations), and C RITIQUE-                             matching long-form outputs is a challenging open
+R EFINE (Chern et al., 2023b) (refining based on                            problem (Huang et al., 2024a). Nevertheless, as
+critiques for all examples).                                                shown in the bottom left of Figure 1, we experiment
+                                                                            with a generative multi-agent variant (G ENERATE)
+Multi-agent Debate. We adapt the multi-agent
+                                                                            of C RITIQUE and R EFINE, where agents read oth-
+framework introduced by Chen et al. (2024a),
+                                                                            ers’ answers and update their own.
+which has shown strong performance on short-form
+                                                                               To better leverage the strength of multi-agent
+QA tasks such as commonsense and math reason-
+                                                                            systems on closed-set tasks, we implement an al-
+ing. Let A1 , . . . , An be a list of n agents partici-
+                                                                            ternative way to combine generations: R ERANK,
+pating in a discussion. In the initial round, we ask
+                                                                            as illustrated in bottom right of Figure 1. Here,
+each agent to generate its own output g0i . For each
+                                                                            we transform open-ended generative tasks into a
+subsequent round k, we ask each agent to update
+                                                                            discriminative ones by asking agents to select the
+its answer based on all agents’ responses from the
+                                                                            best generation from a set of candidates. Agents
+                             1 , . . . , g n ), forming
+last round, i.e., gki = Ai (gk−1          k−1                               in R ERANK produce item indices (a closed set),
+a conversational state. That is, for each subtask,
+                                                                            making the task a classification problem and sim-
+every agent can view the previous responses of the
+                                                                            plifying voting and convergence checks.
+other agents and update its answer accordingly. Dis-
+cussion ends when the maximum round is reached
+                                                                            3      Experimental Setup
+or when the agents have reached a consensus.
+Extending to Generative Tasks. While adapting                               3.1      Agent Setup
+multi-agent collaboration to a binary classification                        In all of our tasks, we use two strong agents of
+task like D ETECT is straightforward (see upper                             similar capability – GPT-4o (OpenAI, 2024) and
+right of Figure 2), extending it to long-form tasks                         Claude-3.5 Sonnet (Anthropic, 2024) when em-
+like C RITIQUE and R EFINE is challenging for two                           ploying multiple agents; for our main experiments,
+key reasons. First, evaluation is challenging as each                       we limit the number of agents to two to reduce com-
+agent produces its own answer; past work has ad-                            putational cost. In Section B.4, we also illustrate
+dressed this by averaging the performance of indi-                          the gains achieved by adding more agents. We use
+vidual agents (Du et al., 2023). Secondly, determin-                        the same prompts for all models, which are shown
+ing a stopping criterion is challenging. Unlike with                        in Appendix D. We consider the following combi-
+classification tasks, where it is clear when agents                         nations to evaluate the effectiveness of multi-agent
+                                                                         9884
+                      TofuEval                                     Detect Subtask                        Critique Subtask
+                BERMAN: Tensions building in Scotland                                                                      Generated
+                 this morning and much of the United                                                                        Critique:
+              Kingdom as voters get ready for an historic Document                               Document                  Error span:
+                                                                                  Prediction:                             "September
+               vote on whether to split from the rest of
+                                                                                  Not Faithful                              18th" …
+                        the United Kingdom…
+   Document
+                                                                                                                             LLM-
+                                                         Summary                    Label:     Summary                    Evaluation:
+                                                                                  Not Faithful         Gold Critique      Same Error
+
+                                                                 Rerank Subtask                              Refine Subtask
+     Summary 1        Summary 2    … Summary 5
+
+
+              Summary 2 Annotation                              Summary 1                        Document
+          Summary:                    Label:
+      Scots to decide on            Not Faithful                                                                           Refined
+ independence from U.K. in                                                                                                Summary
+                                     Critique:             Doc- Summary 2
+ historic vote on September
+                               The date of the vote as    ument
+             18th.
+                              "September 18th" is not                           Prediction:      Incorrect             LLM-Evaluation:
+                              mentioned in the source.                           System1
+                                                                Summary 3                        Summary                  Faithful
+
+
+Figure 2: Illustration of our setup for intrinsic evaluations for different subtasks. We convert TofuEval, a dataset of
+system summaries with human-annotated faithfulness labels and critiques, to tasks for evaluating the performance
+of different multi-agent setups for D ETECT, C RITIQUE, and R EFINE subtasks with R ERANK and G ENERATE.
+
+
+settings along three axes: agent, model, and task.                      sentence-level faithfulness judgments from anno-
+First, we differentiate between single-agent (SA)                       tators for summaries generated by five different
+and multi-agent (MA) settings based on the num-                         systems. For each sentence, annotators were asked
+ber of agents used. Second, within the MA setting,                      to provide a binary faithfulness judgment and, if
+we distinguish between single-model (SM), where                         deemed unfaithful, write a critique explaining the
+multiple instances of the same model are used, and                      error. We use this dataset to create intrinsic tasks
+multi-model (MM), where different models serve                          for evaluating D ETECT and C RITIQUE. An exam-
+as agents. From the pipeline perspective, we also                       ple is shown on the left side of Figure 2, where
+consider a single-agent multi-model setting, where                      summary 2 contains a hallucination regarding the
+different subtasks use different models. Finally,                       date of the vote. For all four intrinsic evaluations,
+we frame C RITIQUE and R EFINE as both genera-                          we use all 150 document-topic pairs (50 documents
+tive (via G ENERATE) and discriminative tasks (via                      × 3 topics). We randomly selected one summary
+R ERANK). For the two models we employ, this                            out of the five systems for each document-topic
+results in two instances of GPT-4o (2xG), two in-                       pair. We split the 50 documents into 10 for valida-
+stances of Claude (2xC), and the MAMM setting of                        tion and 40 for testing, resulting in 30 validation
+using one GPT-4o and one Claude (G+C). For fair                         and 120 test document-topic pairs. We tune all
+comparison between single-agent and multi-agent                         methods on the validation set. Our main research
+settings, we report the average performance of the                      questions for the intrinsic evaluations are: (1) Does
+single agents. For G ENERATE, which generates                           MA improve performance? (2) Does MM improve
+multiple outputs, we report the average scores, sim-                    performance? (3) How do different frameworks
+ilar to Du et al. (2023). For all tasks, we set the                     affect performance? Appendix B.2 further explores
+debate to run for a maximum of 10 rounds.                               how performance varies over debate iterations.
+                                                                        D ETECT Evaluation.          We use the human-
+3.2 Intrinsic Evaluation Tasks
+                                                                        annotated faithfulness label and evaluate whether
+We evaluate our methods using TofuEval (Tang                            our detection model outputs the same label as a dis-
+et al., 2024c), a topic-focused summarization task                      criminative task. This yields 81 validation and 324
+with annotations on two datasets: MediaSum (Zhu                         sentence-level test examples for MediaSum, and 85
+et al., 2021) and MeetingBank (Hu et al., 2023).                        validation and 328 test examples for MeetingBank.
+TofuEval contains 50 documents for each dataset,                        Following Laban et al. (2021), we use balanced ac-
+each paired with three topics. It also contains                         curacy (BACC) to account for class imbalance. As
+                                                                     9885
+baseline, we compare to strong automatic metrics,       ods for the refinement model using the same setup
+MiniCheck (Tang et al., 2024a) and AlignScore           as in the final evaluation. We primarily test the ef-
+(Zha et al., 2023), which are trained entailment        fect of various refinement methods when using the
+metrics between document chunks and summary             best detector from the intrinsic D ETECT evaluation
+sentences designed for summarization tasks.             (G+C) and the best critique models for both the
+R ERANK Evaluation. As an alternative to having         Gold critique (2xC) and D ETECT settings (2xG).
+agents directly debate their summaries, we aim to       We assess the faithfulness of the summaries using
+explore the best methods for reranking generated        MiniCheck (Tang et al., 2024a) and a GPT-4-based
+summaries. To achieve this, we use the human            Likert evaluation, following Wadhwa et al. (2024).
+labels for all the different systems. Because To-       Both metrics show high correlations with human
+fuEval contains no gold summaries, we bootstrap         judgments of faithfulness (Tang et al., 2024a; Liu
+this data by identifing cases where only one sys-       et al., 2023a; Chiang and Lee, 2023; Gao et al.,
+tem’s summary is judged by humans to be faithful,       2023), which we also verify in Section C.2. We cal-
+treating that summary as “gold”. We then create         culate the faithfulness of each summary sentence
+test scenarios where we present this faithful sum-      and then aggregate averaging across all sentences.
+mary along with two to four unfaithful summaries
+                                                        3.3    Extrinsic Refinement Setup
+randomly sampled from the remaining summaries,
+resulting in sets of three to five summaries. We ran-   While the intrinsic tasks are tuned on the validation
+domly shuffle the candidates to ensure the model        set of MediaSum and MeetingBank, we evaluate
+is not biased toward any position. For evaluation,      for the extrinsic evaluation on the test sets of Medi-
+we measure the accuracy of the model in ranking         aSum and MeetingBank, as well as on UltraChat
+the faithful summary highest from the set of candi-     (Ding et al., 2023) as a held-out, out-of-domain
+dates. We compare this to two baselines that use        setting. As baselines, we use each single agent
+MiniCheck and AlignScore for reranking, selecting       individually to perform each component task. We
+the output with the highest faithfulness score.         then combine identical models in a multi-agent
+                                                        setting (e.g., 2xG or 2xC) and also explore a multi-
+C RITIQUE Evaluation. To evaluate the perfor-
+                                                        model setting by combining Claude and GPT-4o.
+mance of the critique model, we consider two set-
+                                                        For tasks where a generative approach is applicable
+tings: Gold and Detect. These settings correspond
+                                                        (i.e., critique and refinement), we further investi-
+to generating critiques when the summary sentence
+                                                        gate G ENERATE, as detailed in Section 2. We use
+is considered unfaithful according to gold labels
+                                                        MiniCheck and Likert scores for evaluation.
+or model predictions, respectively. In the Gold set-
+ting, we use the human-provided faithfulness labels,    4     Results
+whereas in the Detect setting, we use the predicted
+faithfulness labels from the best model found in        We report the intrinsic and extrinsic results, and
+the intrinsic D ETECT evaluation (G+C). We also         examine how MAMM-R EFINE generalizes to long-
+evaluate the explanations generated by the D ETECT      form question-answering. We provide additional
+subtask as part of its chain-of-thought. To evaluate    discussions and show improvement from additional
+our approach, we adopt the methodology outlined         agents and how multi-agent performance changes
+by Wadhwa et al. (2024), which we further verify        after each round of discussion in Appendix B.
+with human evaluations in Section C.1. Specif-
+ically, we prompt GPT-4o to assess whether the          4.1    D ETECT Intrinsic Results
+generated critique aligns with the human-written        We present the best strategy for D ETECT, which
+critique. We instruct the model to select one of the    identifies hallucinating sentences and thus helps
+following options: (1) Error Match: The generated       the refinement systems to refine only where needed.
+critique identifies the same error as described by      We report BACC in the left side of Table 1. We first
+the human. (2) Error, No Match: The generated cri-      note that the single agents perform competitively
+tique discusses a different error than the one noted    compared to the baseline of using the MiniCheck
+by the human. (3) No Error Detected, No Match:          and AlignScore metrics to detect unfaithful sen-
+The generated critique states that there is no error,   tences, especially on MeetingBank.
+despite the human indicating otherwise.                 Effect of Multi-Agent. Using the same model does
+R EFINE Evaluation. We evaluate different meth-         not improve performance, except for a slight im-
+                                                    9886
+                                                 D ETECT                            R ERANK
+                                          MediaSum MeetingBank             MediaSum         MeetingBank
+  Category                   Method                                      2    3     4     2       3     4
+                             MiniCheck       72.8           69.8        56.7   46.7   53.3   80.0   53.3   76.7
+  Baseline
+                             AlignScore      70.8           71.6        56.7   46.7   46.7   70.0   63.3   70.0
+                             GPT-4o          72.1           76.5        73.1   38.5   53.8   62.5   65.6   53.1
+  Single Agent
+                             Claude          72.7           77.7        84.6   50.0   53.8   78.1   56.3   56.3
+                             2xG             72.5           75.5        83.3   46.2   40.0   62.5   66.7   50.0
+  Multi-Agent Single-Model
+                             2xC             72.5           76.1        92.3   46.2   58.3   81.3   56.3   56.3
+  Multi-Agent Multi-Model    G+C             74.3           80.2        92.3   53.8   45.5   81.3   68.8   62.5
+
+Table 1: Detection (left) and reranking (right) results. We report balanced accuracy for detection and accuracy
+of selecting the faithful candidate for reranking (Acc@1). Reranking performance is broken down by number of
+distractors (columns). We bold the method that we select as the best method for D ETECT and R ERANK.
+
+
+provement of 0.4% on MediaSum when using 2xG             improves reranking accuracy, showing the benefit
+over single GPT-4o. On MeetingBank, we observe           of such a framework for closed-set tasks.
+a decrease of 1% with both 2xG and Claude.
+                                                         4.3       C RITIQUE Intrinsic Results
+Effect of Multi-Model. Multi-model improves be-
+                                                         We present the results in Table 2, which analyzes
+yond the two base models. Specifically, G+C out-
+                                                         whether the generated critiques identify the same
+performs Claude, the best of the two single models,
+                                                         errors as the gold critiques. The critiques that come
+by 1.6% and 2.5% on MediaSum and Meeting-
+                                                         with the D ETECT’s CoT are overall worse than
+Bank, respectively. This indicates the effectiveness
+                                                         those from the dedicated critique subtask, where
+of multi-model in improving detection accuracy.
+                                                         the highest error matching score with the two-step
+Takeaway. Multi-agent single-model does not im-          approach under the Detect setting is 12% higher.
+prove D ETECT, but the multi-model variant helps.        This underscores the importance of having an ad-
+                                                         ditional critique step, so as not to overload LLMs
+4.2   R ERANK Intrinsic Results
+                                                         with two tasks at once (Wadhwa et al., 2024).
+Next, we determine the best combination for              Effect of Multi-Agent. For Gold critique case, we
+R ERANK, since it will be used for both critique         observe that reranking on Claude’s critiques per-
+and refinement. The accuracy of selecting the most       forms the best, almost achieving a perfect score.
+faithful summaries with different numbers of can-        This shows that 2xC can critique the correct prob-
+didates is shown on the right of Table 1.                lem if there is no error in D ETECT. Note that is
+Effect of Multi-Agent. Here, MA improves over            unrealistic, as the C RITIQUE will not have perfect
+its SA, specifically on MediaSum. However, we            D ETECT predictions and thus will not have 0% "No
+only observe an improvement of 3.2% with re-             Error" outputs, where C RITIQUE fails to find errors.
+ranking 2 candidates using 2xC on MeetingBank.           Using predictions from D ETECT gives us a more
+Effect of Multi-Model. Similar to D ETECT, we            realistic idea of what a model will do when the
+find that MAMM generally achieves high accuracy:         sentence is actually correct and C RITIQUE incor-
+it is tied with MASM with 2xC for the highest            rectly considers it having some faithfulness errors.
+accuracy when reranking two candidates, and out-         Interestingly, for the more realistic Detect scenario,
+performs all other variants when reranking three         reranking on 2xG critiques achieves the highest
+candidates on MediaSum and MeetingBank. This             performance. Compared to a single GPT-4o set-
+confirms the importance of having multiple mod-          ting, the multi-agent approach improves by 2.4%
+els. Among the different settings, we find that the      in terms of capturing the correct error. Multi-agent
+largest gain occurs when there are only two choices,     approach performs the best under the two settings.
+improving accuracy by 7.7% and 3.2% on Media-            Effect of Multi-Model. For both Gold and Detect
+Sum and MeetingBank, respectively. This aligns           settings, G+C is ranked second. As it performs
+with prior works showing that LLMs perform better        slightly worse than the 2xC for Gold and 2xG for
+in pairwise comparisons (Huang et al., 2024b).           Detect, MM still demonstrates its generalizability.
+Takeaway. The multi-model multi-agent approach           Effect of Task Framing. Finally, we also compare
+                                                     9887
+ Setting          Category   MC       EM↑    EMM↓   NE↓                     Category             MR        MCS↑     GL↑
+                             GPT-4o   54.0    7.3   38.8                     Original              -        78.3    3.8
+                  SA
+                             Claude   55.9    6.7   37.5
+  D ETECT’s                                                                                     GPT-4o      84.6    4.2
+  CoT                        2xG      51.9    8.7   39.6                  Single Agent
+                  MASM                                                                          Claude      82.8    4.2
+                             2xC      53.8    8.7   37.6
+                  MAMM       G+C      57.0    8.9   34.1              MASM w. R ERANK            2xG        84.9    4.2
+                             GPT-4o   95.1    5.0   0.0               MASM w. R ERANK            2xC        82.5    4.2
+  Gold            SA                                                  MAMM w. R ERANK            G+C        83.4    4.2
+                             Claude   98.5    1.6   0.0
+                  MASM       2xG      96.8    3.3   0.0             MASM w. G ENERATE            2xG        85.2    4.2
+  Gold                                                              MASM w. G ENERATE            2xC        79.1    4.2
+                  MASM       2xC      99.2    0.8   0.0
+  w. R ERANK                                                        MAMM w. G ENERATE            G+C        81.4    4.2
+                  MAMM       G+C      97.5    2.5   0.0
+                             GPT-4o   67.1    3.2   29.9
+  Detect          SA                                          Table 3: R EFINE results with 2xC critiques with
+                             Claude   68.3    2.5   29.3
+                  MASM       2xG      69.5    1.3   29.3      MiniCheck (MCS) and GPT-4o Likert score (GL). We
+  Detect                                                      bold the method that we select as the best method for
+                  MASM       2xC      68.3    2.5   29.3
+  w. R ERANK
+                  MAMM       G+C      68.9    1.9   29.3      R EFINE. Full table with scores on MediaSum and Meet-
+                  MASM       2xG      62.1    2.9   35.0      ingBank separately is shown in Table 6.
+  Detect
+                  MASM       2xC      67.5    0.9   31.6
+  w. G ENERATE
+                  MAMM       G+C      66.1    2.0   31.9
+                                                              Effect of Task Framing. We also compare
+Table 2: C RITIQUE Results under Gold and Detect set-         R ERANK with G ENERATE and find that the meth-
+ting, and using D ETECT’s CoT. EM = Error Match,
+                                                              ods using G ENERATE further hurt faithfulness
+EMM = Error Mismatch, and NE=No Error Found. We
+bold the best strategy for C RITIQUE for the two settings.
+                                                              when applied to 2xC and G+C, while providing
+                                                              a slight but not significant gain of 0.3% over the
+                                                              method using R ERANK.4 As mentioned in Sec-
+the generative task framing (G ENERATE) and the               tion 2, G ENERATE does not guarantee outputting
+discriminative framing (R ERANK) in the bottom                a single candidate. Considering the limited im-
+section of Table 2. Overall, the best generative              provement and the high computational cost of per-
+approach (2xC) has a lower error matching rate                forming multiple rounds of G ENERATE (since it
+than its reranking counterpart, which is the worst            requires generating outputs for all agents in each
+of the three multi-agent systems when reranked.               round) compared to only debating on the examples
+Takeaway. Though multi-model provides consis-                 where agents choose different best candidates in
+tent improvement across the two settings, using               R ERANK, we opt for 2xG with R ERANK.
+single-model multi-agent to rerank critiques per-             Takeaway. Overall, we recommend refining us-
+forms the best compared to other variants. G ENER -           ing 2xG with R ERANK on 2xC critiques, illustrat-
+ATE does not show improvement from multi-agent.               ing the need for multi-model approaches from the
+                                                              pipeline perspective, where different models excel
+4.4      R EFINE Intrinsic Results
+                                                              at different tasks; that is, Claude excels at generat-
+Next, we evaluate which method is best for refine-            ing critiques, and GPT-4o excels at refinement.
+ment. We present the results of using 2xC critiques,
+as they achieve higher faithfulness scores with the           4.5       Overall Result with Final Recipe
+validation set in Table 3 and report the results with         Finally, we evaluate MAMM-R EFINE on Media-
+2xG critiques in Appendix B.1.3                               Sum, MeetingBank, and the held-out dataset, Ul-
+Effect of Multi-Agent. The best setting, 2xG,                 traChat. We first focus on applying our best con-
+achieves only a 0.3% gain in MiniCheck. We hy-                figurations for each subtask to existing refinement
+pothesize that with good critiques, a strong LLM-             pipelines. As shown in Wadhwa et al. (2024), di-
+based refinement model can perform the task well.             rect refinement even degrades MiniCheck scores
+Effect of Multi-Model. For G+C variant with                   on MeetingBank and UltraChat, demonstrating the
+R ERANK, we similarly observe that it does not                necessity of a pipeline with more fine-grained sub-
+improve beyond the single-model performance. In               tasks. Nevertheless, we also evaluate direct re-
+fact, it achieves faithfulness scores between the two         finement and pipelines without all the fine-grained
+single-agent faithfulness scores.                             subtasks, showing that applying our best configura-
+                                                              tion of R EFINE and D ETECT subtasks improves the
+   3
+    The result with 2xG critiques show the same trends as
+                                                                  4
+with 2xC critiques.                                                   We use paired bootstrap test (Koehn, 2004).
+
+                                                           9888
+                                                                          MediaSum      MeetingBank     UltraChat
+     Method                       MD             MC           MR         MCS↑ GL↑       MCS↑ GL↑       MCS↑ GL↑
+     Original                      -             -             -         74.4†   4.1†   82.1†   3.6†   77.6    3.8†
+                                   -             -           GPT-4o      77.6    4.3    76.9†   3.6†   75.8    4.0†
+     R EFINE Only
+                                   -             -            2xG        78.3    4.3    77.9†   3.7†   76.7    4.1†
+                                 Claude          -           GPT-4o      77.4    4.3    81.9†   3.7†   78.3    4.0†
+     D ETECT + R EFINE
+                                  G+C            -           GPT-4o      77.8    4.3    81.1†   3.7†   78.3    4.0†
+                                   -        GPT-4o           GPT-4o      78.9    4.5    85.1    3.9    80.0     4.3
+     C RITIQUE + R EFINE           -        GPT-4o            2xG        78.9    4.5    85.2    4.0    80.6     4.3
+                                   -         2xC              2xG        81.7    4.5    86.7    4.0    80.8     4.3
+     Single-Agent Single-Model   GPT-4o     GPT-4o           GPT-4o      79.2    4.4    86.6    4.0    80.5    4.1†
+     Single-Agent Multi-Model    Claude     Claude           GPT-4o      78.7    4.4    86.1    4.0    81.3    4.2
+     Multi-Agent Single-Model     2xG        2xG              2xG        79.9    4.4    87.0    4.0    79.9    4.2
+     MAMM-R EFINE (Ours)          G+C        2xC              2xG        82.4    4.4    87.4    3.9    81.5    4.3
+
+Table 4: Results on MediaSum, MeetingBank and UltraChat with MiniCheck (MCS), GPT-4o Likert score (GL). We
+show the models used for D ETECT (MD ), C RITIQUE (MC ), and R EFINE (MR ). † denotes statistically significant
+improvement by MAMM-R EFINE over that entry (p < 0.05 using paired bootstrap test).
+
+
+      Method        MD     MC    MR    MCS↑          G-L↑          model configurations to single or multi-agent se-
+   Original          -      -     -       76.7        3.5†         tups – and evaluate these as an ablation study. For
+    SASM             G      G     G       80.1        3.9          MediaSum and MeetingBank, multi-agent is impor-
+   SAMM              C      C     G       80.9        4.0          tant, while on UltraChat, multi-model is important.
+   MASM             2xG    2xG   2xG      79.1        3.9
+                                                                   Nevertheless, we observe a consistent trend where
+ MAMM-R EFINE       G+C    2xC   2xG      82.0        4.1
+                                                                   both multi-agent and multi-model configurations
+   Table 5: Results on Long-form QA with context.                  are key to improving faithfulness.
+
+                                                                   4.6    Extending to Long-form QA
+results, with results shown in Table 4. Specifically,
+using 2xG for MR improves MiniCheck by 1% on                       Next, we also explore how the pipeline extends to
+MeetingBank and UltraChat, though still underper-                  other generation tasks, such as long-form question
+forming the original summaries, showing the need                   answering (LFQA). We use the ELI5 dataset (Fan
+for critique-based refinement. Additionally, when                  et al., 2019) collected in WebGPT (Nakano et al.,
+we add D ETECT, our best MAMM setting (G+C)                        2021), which includes questions, model-generated
+further improves over direct refinement. Similarly,                answers, and the corresponding supporting con-
+for the variants of C RITIQUE+R EFINE, switching                   text. From this data, we randomly select 100 ex-
+to MA MR yields a slight gain, as observed in Sec-                 amples and apply our refinement model. With the
+tion 4.4. Specifically, 2xC for MC and 2xG for                     supporting context, the task is essentially question-
+MR provides 2.8%, 0.8%, and 1.0% boosts over                       answering with retrieved evidence, i.e. retrieval-
+using only GPT-4o for MC and MR on MiniCheck                       augmented generation. Since evaluating the faith-
+compared to the C RITIQUE+R EFINE baseline.                        fulness of LFQA with context has the same setup
+   We finally examine the three-step approach us-                  as summarization (Xu et al., 2023), we employ
+ing all of our best configurations. Here, we observe               the same experimental setup and metrics. The re-
+the highest MiniCheck scores. In fact, MAMM-                       sults are shown in Table 5. We observe that multi-
+R EFINE is the only method among three-step ap-                    model and multi-agent approaches improve the
+proaches that has a statistically significant (p <                 faithfulness of the answers, and our recipe provides
+0.05) gain over the original summary on both Medi-                 the most faithful responses, improving 5.3% on
+aSum and MeetingBank, as measured by both met-                     MiniCheck and 0.6 points on the Likert score. We
+rics. On the UltraChat dataset, MAMM-R EFINE is                    similarly observe as an ablation that multi-model
+also the only three-step variant with a statistically              provides a stronger gain than multi-agent. This
+significant faithfulness improvement over the origi-               illustrates that our recipe can not only generalize to
+nal summary according to the GPT-4o Likert score.                  a held-out summarization dataset, but to a held-out
+We also test four settings – applying single or multi-             non-summarization generation task like long-form
+                                                              9889
+question answering. We also report the setup and         refinement approach. Our work is complementary
+results without the context in Appendix B.5.             to past refinement and multi-LLM work, as we mea-
+                                                         sure the effect of multi-agent approaches across the
+5   Related Work                                         components of the refinement pipeline. By testing
+                                                         MM and MA settings, we create a generalizable
+Multi-Agent systems with LLMs. A large body of           refinement recipe across generation tasks.
+research focuses on multi-agent systems for reason-
+ing tasks (Du et al., 2023; Liang et al., 2023; Yin
+                                                         6   Conclusion
+et al., 2023; Chen et al., 2024a; Kim et al., 2024;
+Haji et al., 2024; Tang et al., 2024d; Sun et al.,       We carefully curate components for incorporat-
+2024), where multiple LLMs engage in debates             ing multi-agent collaboration into generation, im-
+or discussions. Recent studies have also proposed        proving generation faithfulness through refinement.
+multi-agent systems for LLM evaluation, where            Through intrinsic evaluations, we find that em-
+agents either undergo a peer review process, ob-         ploying multiple agents, particularly multiple mod-
+taining a win rate by ranking each other (Li et al.,     els, benefits discriminative tasks like D ETECT and
+2023b), or engage in debates to determine the bet-       R ERANK. We then show how to apply R ERANK
+ter LLM response (Chan et al., 2023). To address         to C RITIQUE and R EFINE. In extrinsic evaluations,
+hallucination, Feng et al. (2024) propose using a        we find that the best variation for each compo-
+multi-agent system to identify knowledge gaps be-        nent improves several refinement methods, and our
+tween LLMs. The success of this paradigm hinges          final recipe shows gains on three summarization
+on the fact that reasoning tasks typically have well-    benchmarks and transfers to long-form question-
+defined solutions. In contrast, multi-agent systems      answering tasks, showing its generalizability.
+for generation tasks largely focus on enhancing
+creativity through role-playing (Wang et al., 2024;
+                                                         Limitations
+Lu et al., 2024; Li et al., 2023a), where evalua-
+tion metrics are less established. To the best of        First, our work primarily focuses on faithfulness,
+our knowledge, we are the first to propose a multi-      which is crucial to building user trust in LLMs
+agent long-form generation in the context of im-         and enabling safe model use. While there are
+proving faithfulness on summarization and long-          other aspects, such as coherence and relevance, that
+form question-answering.                                 could contribute to a comprehensive evaluation, we
+Refinement. Refinement has gained significant            choose to evaluate faithfulness due to its rich liter-
+focus, including leveraging human feedback (Saun-        ature and extensive experiments using the best au-
+ders, 2023) and automatic feedback through self-         tomatic evaluation metrics. Regarding evaluation,
+refinement from the same model (Madaan et al.,           although the automatic metrics we use have shown
+2023; Gero et al., 2023; Raunak et al., 2023), other     high correlations with human judgments of faithful-
+trained models (Xu et al., 2024; Akyurek et al.,         ness, a gap still exists, which could be addressed by
+2023; Paul et al., 2024; Chern et al., 2023a; Chen       conducting human evaluations. However, consider-
+et al., 2024b), or external tools (Jiang et al., 2023;   ing the trade-off between the high cost and unreli-
+Olausson et al., 2024; Gou et al., 2024; Chen et al.,    ability of using Mechanical Turk workers, we opt
+2024c). For improving faithfulness of summa-             to report statistical significance based on automatic
+rization, many post-processing approaches (Fabbri        evaluations for more reliable assessments. Finally,
+et al., 2022; Balachandran et al., 2022; Thorne and      refinement pipelines and multi-agent frameworks
+Vlachos, 2021) focus on training such refinement         involve additional steps that lead to higher compu-
+model, or using human-annotated numeric scores           tational costs. However, these costs tend to reduce
+as feedback (Stiennon et al., 2020; Wu et al., 2021;     over time, and applying multi-agent reasoning to
+Nguyen et al., 2022; Scheurer et al., 2024). More        open-ended generation tasks more broadly is a cru-
+recently, efforts have concentrated on using LLMs        cial area for which we lay the groundwork. We
+to directly refine generations, such as by utilizing     do not forsee any particular risks beyond those in-
+fine-grained feedback from a faithfulness detec-         herent to any text generation task. Since our work
+tor at the level of atomic, non-decomposable facts       focuses on improving faithfulness, it is aimed at
+(Wan et al., 2024), or employing a two-step (Liu         mitigating some of the risks associated with using
+et al., 2023b) or three-step (Wadhwa et al., 2024)       LLMs for generation.
+                                                     9890
+Acknowledgement                                           Justin Chih-Yao Chen, Archiki Prasad, Swarnadeep
+                                                            Saha, Elias Stengel-Eskin, and Mohit Bansal. 2024b.
+We thank the anonymous reviewers for their help-            Magicore: A multi-agent coarse-to-fine refine-
+ful comments. This work was supported by Google             ment framework for reasoning. arXiv preprint
+                                                            arXiv:2409.12147.
+PhD Fellowship, the Microsoft Accelerate Founda-
+tion Models Research (AFMR) grant program, an             Xinyun Chen, Maxwell Lin, Nathanael Schärli, and
+NSF-CAREER Award 1846185, DARPA ECOLE                       Denny Zhou. 2024c. Teaching large language mod-
+Program No. HR00112390060, and NSF-AI En-                   els to self-debug. In The Twelfth International Con-
+                                                            ference on Learning Representations.
+gage Institute DRL-2112635. Any opinions, find-
+ings, and conclusions or recommendations in this          I-Chun Chern, Steffi Chern, Shiqi Chen, Weizhe Yuan,
+work are those of the author(s) and do not neces-            Kehua Feng, Chunting Zhou, Junxian He, Graham
+                                                             Neubig, and Pengfei Liu. 2023a. Factool: Factu-
+sarily reflect the views of the sponsors.                    ality detection in generative ai – a tool augmented
+                                                             framework for multi-task and multi-domain scenar-
+                                                             ios. Preprint, arXiv:2307.13528.
+References
+                                                          I-chun Chern, Zhiruo Wang, Sanjan Das, Bhavuk
+Afra Feyza Akyurek, Ekin Akyurek, Ashwin Kalyan,             Sharma, Pengfei Liu, and Graham Neubig. 2023b.
+  Peter Clark, Derry Tanti Wijaya, and Niket Tandon.         Improving factuality of abstractive summarization
+  2023. RL4F: Generating natural language feedback           via contrastive reward learning. In Proceedings of
+  with reinforcement learning for repairing model out-       the 3rd Workshop on Trustworthy Natural Language
+  puts. In Proceedings of the 61st Annual Meeting of         Processing (TrustNLP 2023), pages 55–60, Toronto,
+  the Association for Computational Linguistics (Vol-        Canada. Association for Computational Linguistics.
+  ume 1: Long Papers), pages 7716–7733, Toronto,
+  Canada. Association for Computational Linguistics.      Cheng-Han Chiang and Hung-yi Lee. 2023. Can large
+                                                            language models be an alternative to human evalua-
+Anthropic. 2024. Introducing claude 3.5 sonnet.             tions? In Proceedings of the 61st Annual Meeting of
+                                                            the Association for Computational Linguistics (Vol-
+Vidhisha Balachandran, Hannaneh Hajishirzi, William         ume 1: Long Papers), pages 15607–15631, Toronto,
+  Cohen, and Yulia Tsvetkov. 2022. Correcting diverse       Canada. Association for Computational Linguistics.
+  factual errors in abstractive summarization via post-
+  editing and language model infilling. In Proceedings    Ning Ding, Yulin Chen, Bokai Xu, Yujia Qin,
+  of the 2022 Conference on Empirical Methods in Nat-       Shengding Hu, Zhiyuan Liu, Maosong Sun, and
+  ural Language Processing, pages 9818–9830, Abu            Bowen Zhou. 2023. Enhancing chat language mod-
+  Dhabi, United Arab Emirates. Association for Com-         els by scaling high-quality instructional conversa-
+  putational Linguistics.                                   tions. In Proceedings of the 2023 Conference on
+                                                            Empirical Methods in Natural Language Processing,
+Steven Bird, Ewan Klein, and Edward Loper. 2009. Nat-       pages 3029–3051, Singapore. Association for Com-
+   ural language processing with Python: analyzing text     putational Linguistics.
+   with the natural language toolkit. " O’Reilly Media,
+                                                          Yilun Du, Shuang Li, Antonio Torralba, Joshua B.
+   Inc.".
+                                                            Tenenbaum, and Igor Mordatch. 2023. Improving
+Meng Cao, Yue Dong, and Jackie Cheung. 2022. Hal-           factuality and reasoning in language models through
+ lucinated but factual! inspecting the factuality of        multiagent debate. arXiv preprint arXiv:2305.14325.
+ hallucinations in abstractive summarization. In Pro-     Alex Fabbri, Prafulla Kumar Choubey, Jesse Vig, Chien-
+ ceedings of the 60th Annual Meeting of the Associa-        Sheng Wu, and Caiming Xiong. 2022. Improving fac-
+ tion for Computational Linguistics (Volume 1: Long         tual consistency in summarization with compression-
+ Papers), pages 3340–3354, Dublin, Ireland. Associa-        based post-editing. In Proceedings of the 2022 Con-
+ tion for Computational Linguistics.                        ference on Empirical Methods in Natural Language
+                                                            Processing, pages 9149–9156, Abu Dhabi, United
+Chi-Min Chan, Weize Chen, Yusheng Su, Jianxuan Yu,          Arab Emirates. Association for Computational Lin-
+  Wei Xue, Shanghang Zhang, Jie Fu, and Zhiyuan             guistics.
+  Liu. 2023. Chateval: Towards better llm-based eval-
+  uators through multi-agent debate. arXiv preprint       Angela Fan, Yacine Jernite, Ethan Perez, David Grang-
+  arXiv:2308.07201.                                         ier, Jason Weston, and Michael Auli. 2019. Eli5:
+                                                            Long form question answering. arXiv preprint
+Justin Chen, Swarnadeep Saha, and Mohit Bansal.             arXiv:1907.09190.
+  2024a. ReConcile: Round-table conference im-
+  proves reasoning via consensus among diverse LLMs.      Shangbin Feng, Weijia Shi, Yike Wang, Wenxuan Ding,
+  In Proceedings of the 62nd Annual Meeting of the          Vidhisha Balachandran, and Yulia Tsvetkov. 2024.
+  Association for Computational Linguistics (Volume 1:      Don‘t hallucinate, abstain: Identifying LLM knowl-
+  Long Papers), pages 7066–7085, Bangkok, Thailand.         edge gaps via multi-LLM collaboration. In Proceed-
+  Association for Computational Linguistics.                ings of the 62nd Annual Meeting of the Association
+                                                      9891
+  for Computational Linguistics (Volume 1: Long Pa-          James Besley, Richard Powell, Zafarali Ahmed, Do-
+  pers), pages 14664–14690, Bangkok, Thailand. As-           minik Paulus, David Reitter, Zalan Borsos, Rishabh
+  sociation for Computational Linguistics.                   Joshi, Aedan Pope, Steven Hand, Vittorio Selo, Vi-
+                                                             han Jain, Nikhil Sethi, Megha Goel, Takaki Makino,
+Mingqi Gao, Jie Ruan, Renliang Sun, Xunjian Yin,             Rhys May, Zhen Yang, Johan Schalkwyk, Christina
+  Shiping Yang, and Xiaojun Wan. 2023. Human-like            Butterfield, Anja Hauth, Alex Goldin, Will Hawkins,
+  summarization evaluation with chatgpt. Preprint,           Evan Senter, Sergey Brin, Oliver Woodman, Mar-
+  arXiv:2304.02554.                                          vin Ritter, Eric Noland, Minh Giang, Vijay Bolina,
+                                                             Lisa Lee, Tim Blyth, Ian Mackinnon, Machel Reid,
+Gemini Team, Petko Georgiev, Ving Ian Lei, Ryan              Obaid Sarvana, David Silver, Alexander Chen, Lily
+  Burnell, Libin Bai, Anmol Gulati, Garrett Tanzer,          Wang, Loren Maggiore, Oscar Chang, Nithya At-
+  Damien Vincent, Zhufeng Pan, Shibo Wang, Soroosh           taluri, Gregory Thornton, Chung-Cheng Chiu, Os-
+  Mariooryad, Yifan Ding, Xinyang Geng, Fred Al-             kar Bunyan, Nir Levine, Timothy Chung, Evgenii
+  cober, Roy Frostig, Mark Omernick, Lexi Walker,            Eltyshev, Xiance Si, Timothy Lillicrap, Demetra
+  Cosmin Paduraru, Christina Sorokin, Andrea Tac-            Brady, Vaibhav Aggarwal, Boxi Wu, Yuanzhong Xu,
+  chetti, Colin Gaffney, Samira Daruki, Olcan Ser-           Ross McIlroy, Kartikeya Badola, Paramjit Sandhu,
+  cinoglu, Zach Gleicher, Juliette Love, Paul Voigt-         Erica Moreira, Wojciech Stokowiec, Ross Hems-
+  laender, Rohan Jain, Gabriela Surita, Kareem Mo-           ley, Dong Li, Alex Tudor, Pranav Shyam, Elahe
+  hamed, Rory Blevins, Junwhan Ahn, Tao Zhu, Korn-           Rahimtoroghi, Salem Haykal, Pablo Sprechmann,
+  raphop Kawintiranon, Orhan Firat, Yiming Gu, Yu-           Xiang Zhou, Diana Mincu, Yujia Li, Ravi Addanki,
+  jing Zhang, Matthew Rahtz, Manaal Faruqui, Natalie         Kalpesh Krishna, Xiao Wu, Alexandre Frechette,
+  Clay, Justin Gilmer, JD Co-Reyes, Ivo Penchev, Rui         Matan Eyal, Allan Dafoe, Dave Lacey, Jay Whang,
+  Zhu, Nobuyuki Morioka, Kevin Hui, Krishna Hari-            Thi Avrahami, Ye Zhang, Emanuel Taropa, Hanzhao
+  dasan, Victor Campos, Mahdis Mahdieh, Mandy Guo,           Lin, Daniel Toyama, Eliza Rutherford, Motoki Sano,
+  Samer Hassan, Kevin Kilgour, Arpi Vezer, Heng-             HyunJeong Choe, Alex Tomala, Chalence Safranek-
+  Tze Cheng, Raoul de Liedekerke, Siddharth Goyal,           Shrader, Nora Kassner, Mantas Pajarskas, Matt
+  Paul Barham, DJ Strouse, Seb Noury, Jonas Adler,           Harvey, Sean Sechrist, Meire Fortunato, Christina
+  Mukund Sundararajan, Sharad Vikram, Dmitry Lep-            Lyu, Gamaleldin Elsayed, Chenkai Kuang, James
+  ikhin, Michela Paganini, Xavier Garcia, Fan Yang,          Lottes, Eric Chu, Chao Jia, Chih-Wei Chen, Pe-
+  Dasha Valter, Maja Trebacz, Kiran Vodrahalli, Chu-         ter Humphreys, Kate Baumli, Connie Tao, Rajku-
+  layuth Asawaroengchai, Roman Ring, Norbert Kalb,           mar Samuel, Cicero Nogueira dos Santos, Anders
+  Livio Baldini Soares, Siddhartha Brahma, David             Andreassen, Nemanja Rakićević, Dominik Grewe,
+  Steiner, Tianhe Yu, Fabian Mentzer, Antoine He,            Aviral Kumar, Stephanie Winkler, Jonathan Caton,
+  Lucas Gonzalez, Bibo Xu, Raphael Lopez Kauf-               Andrew Brock, Sid Dalmia, Hannah Sheahan, Iain
+  man, Laurent El Shafey, Junhyuk Oh, Tom Hennigan,          Barr, Yingjie Miao, Paul Natsev, Jacob Devlin, Fer-
+  George van den Driessche, Seth Odoom, Mario Lucic,         yal Behbahani, Flavien Prost, Yanhua Sun, Artiom
+  Becca Roelofs, Sid Lall, Amit Marathe, Betty Chan,         Myaskovsky, Thanumalayan Sankaranarayana Pillai,
+  Santiago Ontanon, Luheng He, Denis Teplyashin,             Dan Hurt, Angeliki Lazaridou, Xi Xiong, Ce Zheng,
+  Jonathan Lai, Phil Crone, Bogdan Damoc, Lewis              Fabio Pardo, Xiaowei Li, Dan Horgan, Joe Stanton,
+  Ho, Sebastian Riedel, Karel Lenc, Chih-Kuan Yeh,           Moran Ambar, Fei Xia, Alejandro Lince, Mingqiu
+  Aakanksha Chowdhery, Yang Xu, Mehran Kazemi,               Wang, Basil Mustafa, Albert Webson, Hyo Lee, Ro-
+  Ehsan Amid, Anastasia Petrushkina, Kevin Swersky,          han Anil, Martin Wicke, Timothy Dozat, Abhishek
+  Ali Khodaei, Gowoon Chen, Chris Larkin, Mario              Sinha, Enrique Piqueras, Elahe Dabir, Shyam Upad-
+  Pinto, Geng Yan, Adria Puigdomenech Badia, Piyush          hyay, Anudhyan Boral, Lisa Anne Hendricks, Corey
+  Patil, Steven Hansen, Dave Orr, Sebastien M. R.            Fry, Josip Djolonga, Yi Su, Jake Walker, Jane La-
+  Arnold, Jordan Grimstad, Andrew Dai, Sholto Dou-           banowski, Ronny Huang, Vedant Misra, Jeremy
+  glas, Rishika Sinha, Vikas Yadav, Xi Chen, Elena Gri-      Chen, RJ Skerry-Ryan, Avi Singh, Shruti Rijh-
+  bovskaya, Jacob Austin, Jeffrey Zhao, Kaushal Patel,       wani, Dian Yu, Alex Castro-Ros, Beer Changpinyo,
+  Paul Komarek, Sophia Austin, Sebastian Borgeaud,           Romina Datta, Sumit Bagri, Arnar Mar Hrafnkels-
+  Linda Friso, Abhimanyu Goyal, Ben Caine, Kris              son, Marcello Maggioni, Daniel Zheng, Yury Sul-
+  Cao, Da-Woon Chung, Matthew Lamm, Gabe Barth-              sky, Shaobo Hou, Tom Le Paine, Antoine Yang,
+  Maron, Thais Kagohara, Kate Olszewska, Mia Chen,           Jason Riesa, Dominika Rogozinska, Dror Marcus,
+  Kaushik Shivakumar, Rishabh Agarwal, Harshal               Dalia El Badawy, Qiao Zhang, Luyu Wang, Helen
+  Godhia, Ravi Rajwar, Javier Snaider, Xerxes Doti-          Miller, Jeremy Greer, Lars Lowe Sjos, Azade Nova,
+  walla, Yuan Liu, Aditya Barua, Victor Ungureanu,           Heiga Zen, Rahma Chaabouni, Mihaela Rosca, Jiepu
+  Yuan Zhang, Bat-Orgil Batsaikhan, Mateo Wirth,             Jiang, Charlie Chen, Ruibo Liu, Tara Sainath, Maxim
+  James Qin, Ivo Danihelka, Tulsee Doshi, Martin             Krikun, Alex Polozov, Jean-Baptiste Lespiau, Josh
+  Chadwick, Jilin Chen, Sanil Jain, Quoc Le, Ar-             Newlan, Zeyncep Cankara, Soo Kwak, Yunhan Xu,
+  jun Kar, Madhu Gurumurthy, Cheng Li, Ruoxin                Phil Chen, Andy Coenen, Clemens Meyer, Katerina
+  Sang, Fangyu Liu, Lampros Lamprou, Rich Munoz,             Tsihlas, Ada Ma, Juraj Gottweis, Jinwei Xing, Chen-
+  Nathan Lintz, Harsh Mehta, Heidi Howard, Mal-              jie Gu, Jin Miao, Christian Frank, Zeynep Cankara,
+  colm Reynolds, Lora Aroyo, Quan Wang, Lorenzo              Sanjay Ganapathy, Ishita Dasgupta, Steph Hughes-
+  Blanco, Albin Cassirer, Jordan Griffith, Dipanjan          Fitt, Heng Chen, David Reid, Keran Rong, Hongmin
+  Das, Stephan Lee, Jakub Sygnowski, Zach Fisher,            Fan, Joost van Amersfoort, Vincent Zhuang, Aaron
+                                                      9892
+Cohen, Shixiang Shane Gu, Anhad Mohananey,                nan, David Kao, Parker Schuh, Axel Stjerngren, Gol-
+Anastasija Ilic, Taylor Tobin, John Wieting, Anna         naz Ghiasi, Gena Gibson, Luke Vilnis, Ye Yuan, Fe-
+Bortsova, Phoebe Thacker, Emma Wang, Emily                lipe Tiengo Ferreira, Aishwarya Kamath, Ted Kli-
+Caveness, Justin Chiu, Eren Sezener, Alex Kaskasoli,      menko, Ken Franko, Kefan Xiao, Indro Bhattacharya,
+Steven Baker, Katie Millican, Mohamed Elhawaty,           Miteyan Patel, Rui Wang, Alex Morris, Robin
+Kostas Aisopos, Carl Lebsack, Nathan Byrd, Hanjun         Strudel, Vivek Sharma, Peter Choy, Sayed Hadi
+Dai, Wenhao Jia, Matthew Wiethoff, Elnaz Davoodi,         Hashemi, Jessica Landon, Mara Finkelstein, Priya
+Albert Weston, Lakshman Yagati, Arun Ahuja, Isabel        Jhakra, Justin Frye, Megan Barnes, Matthew Mauger,
+Gao, Golan Pundak, Susan Zhang, Michael Azzam,            Dennis Daun, Khuslen Baatarsukh, Matthew Tung,
+Khe Chai Sim, Sergi Caelles, James Keeling, Ab-           Wael Farhan, Henryk Michalewski, Fabio Viola, Fe-
+hanshu Sharma, Andy Swing, YaGuang Li, Chenxi             lix de Chaumont Quitry, Charline Le Lan, Tom Hud-
+Liu, Carrie Grimes Bostock, Yamini Bansal, Zachary        son, Qingze Wang, Felix Fischer, Ivy Zheng, Elspeth
+Nado, Ankesh Anand, Josh Lipschultz, Abhijit Kar-         White, Anca Dragan, Jean baptiste Alayrac, Eric Ni,
+markar, Lev Proleev, Abe Ittycheriah, Soheil Has-         Alexander Pritzel, Adam Iwanicki, Michael Isard,
+sas Yeganeh, George Polovets, Aleksandra Faust,           Anna Bulanova, Lukas Zilka, Ethan Dyer, Deven-
+Jiao Sun, Alban Rrustemi, Pen Li, Rakesh Shivanna,        dra Sachan, Srivatsan Srinivasan, Hannah Mucken-
+Jeremiah Liu, Chris Welty, Federico Lebron, Anirudh       hirn, Honglong Cai, Amol Mandhane, Mukarram
+Baddepudi, Sebastian Krause, Emilio Parisotto, Radu       Tariq, Jack W. Rae, Gary Wang, Kareem Ayoub,
+Soricut, Zheng Xu, Dawn Bloxwich, Melvin John-            Nicholas FitzGerald, Yao Zhao, Woohyun Han, Chris
+son, Behnam Neyshabur, Justin Mao-Jones, Ren-             Alberti, Dan Garrette, Kashyap Krishnakumar, Mai
+shen Wang, Vinay Ramasesh, Zaheer Abbas, Arthur           Gimenez, Anselm Levskaya, Daniel Sohn, Josip
+Guez, Constant Segal, Duc Dung Nguyen, James              Matak, Inaki Iturrate, Michael B. Chang, Jackie Xi-
+Svensson, Le Hou, Sarah York, Kieran Milan, So-           ang, Yuan Cao, Nishant Ranka, Geoff Brown, Adrian
+phie Bridgers, Wiktor Gworek, Marco Tagliasacchi,         Hutter, Vahab Mirrokni, Nanxin Chen, Kaisheng
+James Lee-Thorp, Michael Chang, Alexey Guseynov,          Yao, Zoltan Egyed, Francois Galilee, Tyler Liechty,
+Ale Jakse Hartman, Michael Kwong, Ruizhe Zhao,            Praveen Kallakuri, Evan Palmer, Sanjay Ghemawat,
+Sheleem Kashem, Elizabeth Cole, Antoine Miech,            Jasmine Liu, David Tao, Chloe Thornton, Tim Green,
+Richard Tanburn, Mary Phuong, Filip Pavetic, Se-          Mimi Jasarevic, Sharon Lin, Victor Cotruta, Yi-Xuan
+bastien Cevey, Ramona Comanescu, Richard Ives,            Tan, Noah Fiedel, Hongkun Yu, Ed Chi, Alexan-
+Sherry Yang, Cosmo Du, Bo Li, Zizhao Zhang,               der Neitz, Jens Heitkaemper, Anu Sinha, Denny
+Mariko Iinuma, Clara Huiyi Hu, Aurko Roy, Shaan           Zhou, Yi Sun, Charbel Kaed, Brice Hulse, Swa-
+Bijwadia, Zhenkai Zhu, Danilo Martins, Rachel             roop Mishra, Maria Georgaki, Sneha Kudugunta,
+Saputro, Anita Gergely, Steven Zheng, Dawei Jia,          Clement Farabet, Izhak Shafran, Daniel Vlasic, An-
+Ioannis Antonoglou, Adam Sadovsky, Shane Gu,              ton Tsitsulin, Rajagopal Ananthanarayanan, Alen
+Yingying Bi, Alek Andreev, Sina Samangooei, Mina          Carin, Guolong Su, Pei Sun, Shashank V, Gabriel
+Khan, Tomas Kocisky, Angelos Filos, Chintu Ku-            Carvajal, Josef Broder, Iulia Comsa, Alena Repina,
+mar, Colton Bishop, Adams Yu, Sarah Hodkin-               William Wong, Warren Weilun Chen, Peter Hawkins,
+son, Sid Mittal, Premal Shah, Alexandre Moufarek,         Egor Filonov, Lucia Loher, Christoph Hirnschall,
+Yong Cheng, Adam Bloniarz, Jaehoon Lee, Pedram            Weiyi Wang, Jingchen Ye, Andrea Burns, Hardie
+Pejman, Paul Michel, Stephen Spencer, Vladimir            Cate, Diana Gage Wright, Federico Piccinini, Lei
+Feinberg, Xuehan Xiong, Nikolay Savinov, Char-            Zhang, Chu-Cheng Lin, Ionel Gog, Yana Kulizh-
+lotte Smith, Siamak Shakeri, Dustin Tran, Mary            skaya, Ashwin Sreevatsa, Shuang Song, Luis C.
+Chesus, Bernd Bohnet, George Tucker, Tamara von           Cobo, Anand Iyer, Chetan Tekur, Guillermo Gar-
+Glehn, Carrie Muir, Yiran Mao, Hideto Kazawa,             rido, Zhuyun Xiao, Rupert Kemp, Huaixiu Steven
+Ambrose Slone, Kedar Soparkar, Disha Shrivastava,         Zheng, Hui Li, Ananth Agarwal, Christel Ngani,
+James Cobon-Kerr, Michael Sharman, Jay Pavagadhi,         Kati Goshvadi, Rebeca Santamaria-Fernandez, Woj-
+Carlos Araya, Karolis Misiunas, Nimesh Ghelani,           ciech Fica, Xinyun Chen, Chris Gorgolewski, Sean
+Michael Laskin, David Barker, Qiujia Li, Anton            Sun, Roopal Garg, Xinyu Ye, S. M. Ali Eslami,
+Briukhov, Neil Houlsby, Mia Glaese, Balaji Laksh-         Nan Hua, Jon Simon, Pratik Joshi, Yelin Kim, Ian
+minarayanan, Nathan Schucher, Yunhao Tang, Eli            Tenney, Sahitya Potluri, Lam Nguyen Thiet, Quan
+Collins, Hyeontaek Lim, Fangxiaoyu Feng, Adria            Yuan, Florian Luisier, Alexandra Chronopoulou, Sal-
+Recasens, Guangda Lai, Alberto Magni, Nicola De           vatore Scellato, Praveen Srinivasan, Minmin Chen,
+Cao, Aditya Siddhant, Zoe Ashwood, Jordi Orbay,           Vinod Koverkathu, Valentin Dalibard, Yaming Xu,
+Mostafa Dehghani, Jenny Brennan, Yifan He, Kelvin         Brennan Saeta, Keith Anderson, Thibault Sellam,
+Xu, Yang Gao, Carl Saroufim, James Molloy, Xinyi          Nick Fernando, Fantine Huot, Junehyuk Jung, Mani
+Wu, Seb Arnold, Solomon Chang, Julian Schrit-             Varadarajan, Michael Quinn, Amit Raul, Maigo Le,
+twieser, Elena Buchatskaya, Soroush Radpour, Mar-         Ruslan Habalov, Jon Clark, Komal Jalan, Kalesha
+tin Polacek, Skye Giordano, Ankur Bapna, Simon            Bullard, Achintya Singhal, Thang Luong, Boyu
+Tokumine, Vincent Hellendoorn, Thibault Sottiaux,         Wang, Sujeevan Rajayogam, Julian Eisenschlos,
+Sarah Cogan, Aliaksei Severyn, Mohammad Saleh,            Johnson Jia, Daniel Finchelstein, Alex Yakubovich,
+Shantanu Thakoor, Laurent Shefey, Siyuan Qiao,            Daniel Balle, Michael Fink, Sameer Agarwal, Jing
+Meenu Gaba, Shuo yiin Chang, Craig Swanson, Biao          Li, Dj Dvijotham, Shalini Pal, Kai Kang, Jaclyn
+Zhang, Benjamin Lee, Paul Kishan Rubenstein, Gan          Konzelmann, Jennifer Beattie, Olivier Dousse, Diane
+Song, Tom Kwiatkowski, Anna Koop, Ajay Kan-               Wu, Remi Crocker, Chen Elkind, Siddhartha Reddy
+                                                   9893
+Jonnalagadda, Jong Lee, Dan Holtmann-Rice, Krys-          dharth Gopal, Megan Li, Asaf Aharoni, Trieu Trinh,
+tal Kallarackal, Rosanne Liu, Denis Vnukov, Neera         Jessica Lo, Norman Casagrande, Roopali Vij, Loic
+Vats, Luca Invernizzi, Mohsen Jafari, Huanjie Zhou,       Matthey, Bramandia Ramadhana, Austin Matthews,
+Lilly Taylor, Jennifer Prendki, Marcus Wu, Tom            CJ Carey, Matthew Johnson, Kremena Goranova, Ro-
+Eccles, Tianqi Liu, Kavya Kopparapu, Francoise            hin Shah, Shereen Ashraf, Kingshuk Dasgupta, Ras-
+Beaufays, Christof Angermueller, Andreea Marzoca,         mus Larsen, Yicheng Wang, Manish Reddy Vuyyuru,
+Shourya Sarcar, Hilal Dib, Jeff Stanway, Frank Per-       Chong Jiang, Joana Ijazi, Kazuki Osawa, Celine
+bet, Nejc Trdin, Rachel Sterneck, Andrey Khor-            Smith, Ramya Sree Boppana, Taylan Bilal, Yuma
+lin, Dinghua Li, Xihui Wu, Sonam Goenka, David            Koizumi, Ying Xu, Yasemin Altun, Nir Shabat,
+Madras, Sasha Goldshtein, Willi Gierke, Tong Zhou,        Ben Bariach, Alex Korchemniy, Kiam Choo, Olaf
+Yaxin Liu, Yannie Liang, Anais White, Yunjie Li,          Ronneberger, Chimezie Iwuanyanwu, Shubin Zhao,
+Shreya Singh, Sanaz Bahargam, Mark Epstein, Su-           David Soergel, Cho-Jui Hsieh, Irene Cai, Shariq
+joy Basu, Li Lao, Adnan Ozturel, Carl Crous, Alex         Iqbal, Martin Sundermeyer, Zhe Chen, Elie Bursztein,
+Zhai, Han Lu, Zora Tung, Neeraj Gaur, Alanna              Chaitanya Malaviya, Fadi Biadsy, Prakash Shroff, In-
+Walton, Lucas Dixon, Ming Zhang, Amir Glober-             derjit Dhillon, Tejasi Latkar, Chris Dyer, Hannah
+son, Grant Uy, Andrew Bolt, Olivia Wiles, Milad           Forbes, Massimo Nicosia, Vitaly Nikolaev, Somer
+Nasr, Ilia Shumailov, Marco Selvi, Francesco Pic-         Greene, Marin Georgiev, Pidong Wang, Nina Mar-
+cinno, Ricardo Aguilar, Sara McCarthy, Misha Khal-        tin, Hanie Sedghi, John Zhang, Praseem Banzal,
+man, Mrinal Shukla, Vlado Galic, John Carpen-             Doug Fritz, Vikram Rao, Xuezhi Wang, Jiageng
+ter, Kevin Villela, Haibin Zhang, Harry Richard-          Zhang, Viorica Patraucean, Dayou Du, Igor Mor-
+son, James Martens, Matko Bosnjak, Shreyas Ram-           datch, Ivan Jurin, Lewis Liu, Ayush Dubey, Abhi
+mohan Belle, Jeff Seibert, Mahmoud Alnahlawi,             Mohan, Janek Nowakowski, Vlad-Doru Ion, Nan
+Brian McWilliams, Sankalp Singh, Annie Louis,             Wei, Reiko Tojo, Maria Abi Raad, Drew A. Hud-
+Wen Ding, Dan Popovici, Lenin Simicich, Laura             son, Vaishakh Keshava, Shubham Agrawal, Kevin
+Knight, Pulkit Mehta, Nishesh Gupta, Chongyang            Ramirez, Zhichun Wu, Hoang Nguyen, Ji Liu, Mad-
+Shi, Saaber Fatehi, Jovana Mitrovic, Alex Grills,         havi Sewak, Bryce Petrini, DongHyun Choi, Ivan
+Joseph Pagadora, Dessie Petrova, Danielle Eisenbud,       Philips, Ziyue Wang, Ioana Bica, Ankush Garg,
+Zhishuai Zhang, Damion Yates, Bhavishya Mittal,           Jarek Wilkiewicz, Priyanka Agrawal, Xiaowei Li,
+Nilesh Tripuraneni, Yannis Assael, Thomas Brovelli,       Danhao Guo, Emily Xue, Naseer Shaik, Andrew
+Prateek Jain, Mihajlo Velimirovic, Canfer Akbulut,        Leach, Sadh MNM Khan, Julia Wiesinger, Sammy
+Jiaqi Mu, Wolfgang Macherey, Ravin Kumar, Jun             Jerome, Abhishek Chakladar, Alek Wenjiao Wang,
+Xu, Haroon Qureshi, Gheorghe Comanici, Jeremy             Tina Ornduff, Folake Abu, Alireza Ghaffarkhah, Mar-
+Wiesner, Zhitao Gong, Anton Ruddock, Matthias             cus Wainwright, Mario Cortes, Frederick Liu, Joshua
+Bauer, Nick Felt, Anirudh GP, Anurag Arnab, Dustin        Maynez, Andreas Terzis, Pouya Samangouei, Ri-
+Zelle, Jonas Rothfuss, Bill Rosgen, Ashish Shenoy,        ham Mansour, Tomasz K˛epa, François-Xavier Aubet,
+Bryan Seybold, Xinjian Li, Jayaram Mudigonda,             Anton Algymr, Dan Banica, Agoston Weisz, An-
+Goker Erdogan, Jiawei Xia, Jiri Simsa, Andrea Michi,      dras Orban, Alexandre Senges, Ewa Andrejczuk,
+Yi Yao, Christopher Yew, Steven Kan, Isaac Caswell,       Mark Geller, Niccolo Dal Santo, Valentin Anklin,
+Carey Radebaugh, Andre Elisseeff, Pedro Valen-            Majd Al Merey, Martin Baeuml, Trevor Strohman,
+zuela, Kay McKinney, Kim Paterson, Albert Cui, Eri        Junwen Bai, Slav Petrov, Yonghui Wu, Demis Has-
+Latorre-Chimoto, Solomon Kim, William Zeng, Ken           sabis, Koray Kavukcuoglu, Jeffrey Dean, and Oriol
+Durden, Priya Ponnapalli, Tiberiu Sosea, Christo-         Vinyals. 2024. Gemini 1.5: Unlocking multimodal
+pher A. Choquette-Choo, James Manyika, Brona              understanding across millions of tokens of context.
+Robenek, Harsha Vashisht, Sebastien Pereira, Hoi          Preprint, arXiv:2403.05530.
+Lam, Marko Velic, Denese Owusu-Afriyie, Kather-
+ine Lee, Tolga Bolukbasi, Alicia Parrish, Shawn Lu,    Zelalem Gero, Chandan Singh, Hao Cheng, Tristan Nau-
+Jane Park, Balaji Venkatraman, Alice Talbert, Lam-       mann, Michel Galley, Jianfeng Gao, and Hoifung
+bert Rosique, Yuchung Cheng, Andrei Sozanschi,           Poon. 2023. Self-verification improves few-shot clin-
+Adam Paszke, Praveen Kumar, Jessica Austin, Lu Li,       ical information extraction.
+Khalid Salama, Wooyeol Kim, Nandita Dukkipati,
+                                                       Zhibin Gou, Zhihong Shao, Yeyun Gong, yelong shen,
+Anthony Baryshnikov, Christos Kaplanis, Xiang-
+                                                         Yujiu Yang, Nan Duan, and Weizhu Chen. 2024.
+Hai Sheng, Yuri Chervonyi, Caglar Unlu, Diego
+                                                         CRITIC: Large language models can self-correct
+de Las Casas, Harry Askham, Kathryn Tunyasuvu-
+                                                         with tool-interactive critiquing. In The Twelfth Inter-
+nakool, Felix Gimeno, Siim Poder, Chester Kwak,
+                                                         national Conference on Learning Representations.
+Matt Miecnikowski, Vahab Mirrokni, Alek Dimitriev,
+Aaron Parisi, Dangyi Liu, Tomy Tsai, Toby Shevlane,    Nuno M. Guerreiro, Duarte M. Alves, Jonas Waldendorf,
+Christina Kouridi, Drew Garmon, Adrian Goedeck-          Barry Haddow, Alexandra Birch, Pierre Colombo,
+emeyer, Adam R. Brown, Anitha Vijayakumar, Ali           and André F. T. Martins. 2023. Hallucinations in
+Elqursh, Sadegh Jazayeri, Jin Huang, Sara Mc Carthy,     large multilingual translation models. Transactions
+Jay Hoover, Lucy Kim, Sandeep Kumar, Wei Chen,           of the Association for Computational Linguistics,
+Courtney Biles, Garrett Bingham, Evan Rosen, Lisa        11:1500–1517.
+Wang, Qijun Tan, David Engel, Francesco Pongetti,
+Dario de Cesare, Dongseong Hwang, Lily Yu, Jen-        Fatemeh Haji, Mazal Bethany, Maryam Tabar, Jason
+nifer Pullman, Srini Narayanan, Kyle Levin, Sid-         Chiang, Anthony Rios, and Peyman Najafirad. 2024.
+                                                   9894
+  Improving llm reasoning with multi-agent tree-of-          evaluation: Advances and challenges.       Preprint,
+  thought validator agent. Preprint, arXiv:2409.11527.       arXiv:2401.07103.
+Yebowen Hu, Timothy Ganter, Hanieh Deilamsalehy,          Tian Liang, Zhiwei He, Wenxiang Jiao, Xing Wang,
+  Franck Dernoncourt, Hassan Foroosh, and Fei Liu.          Yan Wang, Rui Wang, Yujiu Yang, Zhaopeng Tu, and
+  2023. MeetingBank: A benchmark dataset for meet-          Shuming Shi. 2023. Encouraging divergent thinking
+  ing summarization. In Proceedings of the 61st An-         in large language models through multi-agent debate.
+  nual Meeting of the Association for Computational         arXiv preprint arXiv:2305.19118.
+  Linguistics (Volume 1: Long Papers), pages 16409–
+  16423, Toronto, Canada. Association for Computa-        Yang Liu, Dan Iter, Yichong Xu, Shuohang Wang,
+  tional Linguistics.                                       Ruochen Xu, and Chenguang Zhu. 2023a. G-eval:
+                                                            NLG evaluation using gpt-4 with better human align-
+Jie Huang, Xinyun Chen, Swaroop Mishra,                     ment. In Proceedings of the 2023 Conference on
+   Huaixiu Steven Zheng, Adams Wei Yu, Xiny-                Empirical Methods in Natural Language Processing,
+   ing Song, and Denny Zhou. 2024a. Large language          pages 2511–2522, Singapore. Association for Com-
+   models cannot self-correct reasoning yet. In The         putational Linguistics.
+   Twelfth International Conference on Learning
+   Representations.                                       Yixin Liu, Budhaditya Deb, Milagro Teruel, Aaron Hal-
+                                                            faker, Dragomir Radev, and Ahmed Hassan Awadal-
+Kung-Hsiang Huang, Philippe Laban, Alexander Fab-           lah. 2023b. On improving summarization factual
+  bri, Prafulla Kumar Choubey, Shafiq Joty, Caiming         consistency from natural language feedback. In Pro-
+  Xiong, and Chien-Sheng Wu. 2024b. Embrace diver-          ceedings of the 61st Annual Meeting of the Associa-
+  gence for richer insights: A multi-document summa-        tion for Computational Linguistics (Volume 1: Long
+  rization benchmark and a case study on summarizing        Papers), pages 15144–15161, Toronto, Canada. As-
+  diverse information from news articles. In Proceed-       sociation for Computational Linguistics.
+  ings of the 2024 Conference of the North American
+  Chapter of the Association for Computational Lin-       Yixin Liu, Alexander Fabbri, Jiawen Chen, Yilun Zhao,
+  guistics: Human Language Technologies (Volume 1:          Simeng Han, Shafiq Joty, Pengfei Liu, Dragomir
+  Long Papers), pages 570–593, Mexico City, Mexico.         Radev, Chien-Sheng Wu, and Arman Cohan. 2024.
+  Association for Computational Linguistics.                Benchmarking generation and evaluation capabili-
+                                                            ties of large language models for instruction control-
+Shuyang Jiang, Yuhao Wang, and Yu Wang. 2023. Self-         lable summarization. In Findings of the Association
+  evolve: A code evolution framework via large lan-         for Computational Linguistics: NAACL 2024, pages
+  guage models. Preprint, arXiv:2306.02907.                 4481–4501, Mexico City, Mexico. Association for
+                                                            Computational Linguistics.
+Kyungha Kim, Sangyun Lee, Kung-Hsiang Huang,
+  Hou Pong Chan, Manling Li, and Heng Ji. 2024. Can       Li-Chun Lu, Shou-Jen Chen, Tsung-Min Pai, Chan-
+  llms produce faithful explanations for fact-checking?      Hung Yu, Hung yi Lee, and Shao-Hua Sun. 2024.
+  towards faithful explainable fact-checking via multi-      LLM discussion: Enhancing the creativity of large
+  agent debate. Preprint, arXiv:2402.07401.                  language models via discussion framework and role-
+Philipp Koehn. 2004. Statistical significance tests for      play. In First Conference on Language Modeling.
+  machine translation evaluation. In Proceedings of the
+                                                          Aman Madaan, Niket Tandon, Prakhar Gupta, Skyler
+  2004 Conference on Empirical Methods in Natural
+                                                           Hallinan, Luyu Gao, Sarah Wiegreffe, Uri Alon,
+  Language Processing, pages 388–395, Barcelona,
+                                                           Nouha Dziri, Shrimai Prabhumoye, Yiming Yang,
+  Spain. Association for Computational Linguistics.
+                                                           Shashank Gupta, Bodhisattwa Prasad Majumder,
+Philippe Laban, Tobias Schnabel, Paul N. Bennett, and      Katherine Hermann, Sean Welleck, Amir Yazdan-
+  Marti A. Hearst. 2021. Summac: Re-visiting nli-          bakhsh, and Peter Clark. 2023. Self-refine: Itera-
+  based models for inconsistency detection in summa-       tive refinement with self-feedback. In Advances in
+  rization. Preprint, arXiv:2111.09525.                    Neural Information Processing Systems, volume 36,
+                                                           pages 46534–46594. Curran Associates, Inc.
+Guohao Li, Hasan Hammoud, Hani Itani, Dmitrii
+  Khizbullin, and Bernard Ghanem. 2023a. Camel:           Reiichiro Nakano, Jacob Hilton, Suchir Balaji, Jeff Wu,
+  Communicative agents for" mind" exploration of            Long Ouyang, Christina Kim, Christopher Hesse,
+  large language model society. Advances in Neural          Shantanu Jain, Vineet Kosaraju, William Saunders,
+  Information Processing Systems, 36:51991–52008.           Xu Jiang, Karl Cobbe, Tyna Eloundou, Gretchen
+                                                            Krueger, Kevin Button, Matthew Knight, Benjamin
+Ruosen Li, Teerth Patel, and Xinya Du. 2023b.               Chess, and John Schulman. 2021. Webgpt: Browser-
+  Prd: Peer rank and discussion improve large lan-          assisted question-answering with human feedback.
+  guage model based evaluations. arXiv preprint             CoRR, abs/2112.09332.
+  arXiv:2307.02762.
+                                                          Duy-Hung Nguyen, Nguyen Viet Dung Nghiem, Bao-
+Zhen Li, Xiaohan Xu, Tao Shen, Can Xu, Jia-Chen             Sinh Nguyen, Dung Tien Tien Le, Shahab Sabahi,
+  Gu, Yuxuan Lai, Chongyang Tao, and Shuai Ma.              Minh-Tien Nguyen, and Hung Le. 2022. Make the
+  2024. Leveraging large language models for nlg            most of prior data: A solution for interactive text
+                                                      9895
+  summarization with preference feedback. In Find-          Xiaoxi Sun, Jinpeng Li, Yan Zhong, Dongyan Zhao,
+  ings of the Association for Computational Linguis-          and Rui Yan. 2024. Towards detecting llms hallu-
+  tics: NAACL 2022, pages 1919–1930, Seattle, United          cination via markov chain-based multi-agent debate
+  States. Association for Computational Linguistics.          framework. Preprint, arXiv:2406.03075.
+
+Theo X. Olausson, Jeevana Priya Inala, Chenglong            Liyan Tang, Tanya Goyal, Alex Fabbri, Philippe La-
+  Wang, Jianfeng Gao, and Armando Solar-Lezama.               ban, Jiacheng Xu, Semih Yavuz, Wojciech Kryscin-
+  2024. Is self-repair a silver bullet for code genera-       ski, Justin Rousseau, and Greg Durrett. 2023. Un-
+  tion? In The Twelfth International Conference on            derstanding factual errors in summarization: Errors,
+  Learning Representations.                                   summarizers, datasets, error detectors. In Proceed-
+                                                              ings of the 61st Annual Meeting of the Association for
+OpenAI. 2024. Hello gpt-4o.                                   Computational Linguistics (Volume 1: Long Papers),
+                                                              pages 11626–11644, Toronto, Canada. Association
+Debjit Paul, Mete Ismayilzada, Maxime Peyrard, Beat-          for Computational Linguistics.
+  riz Borges, Antoine Bosselut, Robert West, and Boi
+  Faltings. 2024. REFINER: Reasoning feedback on            Liyan Tang, Philippe Laban, and Greg Durrett. 2024a.
+  intermediate representations. In Proceedings of the         Minicheck: Efficient fact-checking of llms on ground-
+  18th Conference of the European Chapter of the As-          ing documents. In Proceedings of the 2024 Confer-
+  sociation for Computational Linguistics (Volume 1:          ence on Empirical Methods in Natural Language
+  Long Papers), pages 1100–1126, St. Julian’s, Malta.         Processing. Association for Computational Linguis-
+  Association for Computational Linguistics.                  tics.
+Vikas Raunak, Amr Sharaf, Yiren Wang, Hany                  Liyan Tang, Igor Shalyminov, Amy Wong, Jon Burnsky,
+  Awadalla, and Arul Menezes. 2023. Leveraging GPT-           Jake Vincent, Yu’an Yang, Siffi Singh, Song Feng,
+  4 for automatic translation post-editing. In Find-          Hwanjun Song, Hang Su, Lijia Sun, Yi Zhang, Saab
+  ings of the Association for Computational Linguis-          Mansour, and Kathleen McKeown. 2024b. TofuEval:
+  tics: EMNLP 2023, pages 12009–12024, Singapore.             Evaluating hallucinations of LLMs on topic-focused
+  Association for Computational Linguistics.                  dialogue summarization. In Proceedings of the 2024
+                                                              Conference of the North American Chapter of the
+Vipula Rawte, Swagata Chakraborty, Agnibh Pathak,             Association for Computational Linguistics: Human
+  Anubhav Sarkar, S.M Towhidul Islam Tonmoy,                  Language Technologies (Volume 1: Long Papers),
+  Aman Chadha, Amit Sheth, and Amitava Das. 2023.             pages 4455–4480, Mexico City, Mexico. Association
+  The troubling emergence of hallucination in large lan-      for Computational Linguistics.
+  guage models - an extensive definition, quantification,
+  and prescriptive remediations. In Proceedings of the      Liyan Tang, Igor Shalyminov, Amy Wong, Jon Burnsky,
+  2023 Conference on Empirical Methods in Natural             Jake Vincent, Yu’an Yang, Siffi Singh, Song Feng,
+  Language Processing, pages 2541–2573, Singapore.            Hwanjun Song, Hang Su, Justin Sun, Yi Zhang, Saab
+  Association for Computational Linguistics.                  Mansour, and Kathleen McKeown. 2024c. Tofueval:
+                                                              Evaluating hallucinations of llms on topic-focused
+Jarem Saunders. 2023. Improving automated predic-             dialogue summarization. In NAACL 2024.
+   tion of English lexical blends through the use of ob-
+   servable linguistic features. In Proceedings of the      Ziyi Tang, Ruilin Wang, Weixing Chen, Keze Wang,
+   20th SIGMORPHON workshop on Computational                  Yang Liu, Tianshui Chen, and Liang Lin. 2024d. To-
+   Research in Phonetics, Phonology, and Morphology,          wards causalgpt: A multi-agent approach for faithful
+   pages 93–97, Toronto, Canada. Association for Com-         knowledge reasoning via promoting causal consis-
+   putational Linguistics.                                    tency in llms. Preprint, arXiv:2308.11914.
+
+Jérémy Scheurer, Jon Ander Campos, Tomasz Kor-              James Thorne and Andreas Vlachos. 2021. Evidence-
+   bak, Jun Shern Chan, Angelica Chen, Kyunghyun              based factual error correction. In Proceedings of the
+   Cho, and Ethan Perez. 2024. Training language              59th Annual Meeting of the Association for Compu-
+   models with language feedback at scale. Preprint,          tational Linguistics and the 11th International Joint
+   arXiv:2303.16755.                                          Conference on Natural Language Processing (Vol-
+                                                              ume 1: Long Papers), pages 3298–3309, Online. As-
+Yixiao Song, Yekyung Kim, and Mohit Iyyer. 2024.              sociation for Computational Linguistics.
+  Veriscore: Evaluating the factuality of verifiable
+  claims in long-form text generation. Preprint,            Liam van der Poel, Ryan Cotterell, and Clara Meis-
+  arXiv:2406.19276.                                           ter. 2022. Mutual information alleviates hallucina-
+                                                              tions in abstractive summarization. In Proceedings
+Nisan Stiennon, Long Ouyang, Jeffrey Wu, Daniel               of the 2022 Conference on Empirical Methods in Nat-
+  Ziegler, Ryan Lowe, Chelsea Voss, Alec Radford,             ural Language Processing, pages 5956–5965, Abu
+  Dario Amodei, and Paul F Christiano. 2020. Learn-           Dhabi, United Arab Emirates. Association for Com-
+  ing to summarize with human feedback. In Ad-                putational Linguistics.
+  vances in Neural Information Processing Systems,
+  volume 33, pages 3008–3021. Curran Associates,            Manya Wadhwa, Xinyu Zhao, Junyi Jessy Li, and
+  Inc.                                                       Greg Durrett. 2024. Learning to refine with
+                                                        9896
+  fine-grained natural language feedback. Preprint,        Muru Zhang, Ofir Press, William Merrill, Alisa Liu, and
+  arXiv:2407.02397.                                         Noah A. Smith. 2023. How language model halluci-
+                                                            nations can snowball. Preprint, arXiv:2305.13534.
+David Wan, Koustuv Sinha, Srini Iyer, Asli Celikyil-
+  maz, Mohit Bansal, and Ramakanth Pasunuru. 2024.         Chenguang Zhu, Yang Liu, Jie Mei, and Michael Zeng.
+  ACUEval: Fine-grained hallucination evaluation and         2021. MediaSum: A large-scale media interview
+  correction for abstractive summarization. In Find-         dataset for dialogue summarization. In Proceedings
+  ings of the Association for Computational Linguistics:     of the 2021 Conference of the North American Chap-
+  ACL 2024, pages 10036–10056, Bangkok, Thailand.            ter of the Association for Computational Linguistics:
+  Association for Computational Linguistics.                 Human Language Technologies, pages 5927–5934,
+                                                             Online. Association for Computational Linguistics.
+Zhenhailong Wang, Shaoguang Mao, Wenshan Wu, Tao
+  Ge, Furu Wei, and Heng Ji. 2024. Unleashing the
+  emergent cognitive synergy in large language mod-
+                                                           A       Experimental Setup Details
+  els: A task-solving agent through multi-persona self-
+                                                           In our experiments, we first test multi-agent and
+  collaboration. In Proceedings of the 2024 Conference
+  of the North American Chapter of the Association for     multi-model approaches to each component sepa-
+  Computational Linguistics: Human Language Tech-          rately using intrinsic evaluations, and then combine
+  nologies (Volume 1: Long Papers), pages 257–279,         these components and measure end-to-end refine-
+  Mexico City, Mexico. Association for Computational       ment performance. Here, we describe the setup of
+  Linguistics.
+                                                           our intrinsic evaluations for the different subtasks,
+Jeff Wu, Long Ouyang, Daniel M. Ziegler, Nisan Sti-        as shown in Figure 2, and then detail our final eval-
+   ennon, Ryan Lowe, Jan Leike, and Paul Christiano.       uation setup on three summarization benchmarks.
+   2021. Recursively summarizing books with human
+   feedback. Preprint, arXiv:2109.10862.                   A.1       Models
+Fangyuan Xu, Yixiao Song, Mohit Iyyer, and Eunsol          We use the latest versions of GPT-4o and Claude
+  Choi. 2023. A critical evaluation of evaluations for     as of October 12, 2024. The number of parameters
+  long-form question answering. In Proceedings of the
+  61st Annual Meeting of the Association for Compu-        for these models has not been disclosed. We use
+  tational Linguistics (Volume 1: Long Papers), pages      the default decoding parameters for all models. For
+  3225–3245, Toronto, Canada. Association for Com-         sentence splitting for D ETECT, we utilize NLTK’s
+  putational Linguistics.                                  library (Bird et al., 2009).
+Wenda Xu, Daniel Deutsch, Mara Finkelstein, Juraj
+ Juraska, Biao Zhang, Zhongtao Liu, William Yang           A.2       Datasets
+ Wang, Lei Li, and Markus Freitag. 2024. LLMRefine:        We use annotations from TofuEval on the Media-
+ Pinpointing and refining large language models via
+                                                           Sum and MeetingBank, released under the MIT-0
+ fine-grained actionable feedback. In Findings of the
+ Association for Computational Linguistics: NAACL          license. UltraChat and WebGPT are released under
+ 2024, pages 1429–1445, Mexico City, Mexico. Asso-         the MIT license. We follow the authors’ instruc-
+ ciation for Computational Linguistics.                    tions to process the data. To our knowledge, the
+Hongbin Ye, Tong Liu, Aijia Zhang, Wei Hua, and
+                                                           authors of the datasets ensured that there are no
+  Weiqiang Jia. 2023. Cognitive mirage: A review of        harmful data. All datasets are in English.
+  hallucinations in large language models. Preprint,
+  arXiv:2309.06794.                                        A.3       Metrics
+Zhangyue Yin, Qiushi Sun, Cheng Chang, Qipeng              We use MiniCheck and AlignScore, following the
+  Guo, Junqi Dai, Xuanjing Huang, and Xipeng Qiu.          authors’ original repositories. For GPT-4 Likert,
+  2023. Exchange-of-thought: Enhancing large lan-          we use the gpt-4-0125 version of GPT-4. For
+  guage model capabilities through cross-model com-        VeriScore, we use the authors’ original code5 and
+  munication. In Proceedings of the 2023 Conference
+  on Empirical Methods in Natural Language Process-        employ GPT-4o for extracting and verifying claims.
+  ing, pages 15135–15153, Singapore. Association for
+  Computational Linguistics.                               B       Results Details
+Yuheng Zha, Yichi Yang, Ruichen Li, and Zhiting Hu.        B.1       Full R EFINE results
+  2023. AlignScore: Evaluating factual consistency
+  with a unified alignment function. In Proceedings        We report the full results with 2xG and 2xC cri-
+  of the 61st Annual Meeting of the Association for        tiques in Table 6. With 2xG critiques, we also
+  Computational Linguistics (Volume 1: Long Papers),       observe that R ERANK improves performance over
+  pages 11328–11348, Toronto, Canada. Association
+                                                               5
+  for Computational Linguistics.                                   https://github.com/Yixiao-Song/VeriScore
+
+                                                       9897
+                                                 2xG Critiques                              2xC Critiques
+                                   MediaSum      MeetingBank   Average        MediaSum      MeetingBank        Average
+        Method           MR        MCS↑ G↑       MCS↑ G↑ MCS↑ G↑              MCS↑ G↑       MCS↑ G↑           MCS↑ G↑
+        Original           -        74.4   4.1   82.1    3.6     78.3   3.8   74.4    4.1       82.1   3.6    78.3   3.8
+                        GPT-4o      79.6   4.4   86.9    4.0     83.2   4.2   82.1    4.4       87.0   3.9    84.6   4.2
+      Single Agent
+                        Claude      79.7   4.4   84.0    3.9     81.8   4.2   80.7    4.4       85.0   4.0    82.8   4.2
+  MASM w. R ERANK        2xG        79.9   4.4   87.0    4.0     83.5   4.2   82.4    4.4       87.4   3.9    84.9   4.2
+  MASM w. R ERANK        2xC        81.0   4.4   84.5    4.0     82.8   4.2   80.4    4.4       84.7   4.0    82.5   4.2
+  MAMM w. R ERANK        G+C        80.0   4.4   85.9    4.0     83.0   4.2   81.9    4.4       85.0   3.9    83.4   4.2
+ MASM w. G ENERATE       2xG        79.9   4.4   86.5    4.0     83.2   4.2   82.5    4.4       87.8   4.0    85.2   4.2
+ MASM w. G ENERATE       2xC        76.9   4.3   80.2    3.9     78.5   4.1   76.7    4.4       81.6   4.0    79.1   4.2
+ MAMM w. G ENERATE       G+C        78.0   4.3   82.6    3.9     80.3   4.1   78.9    4.4       83.9   4.0    81.4   4.2
+
+                               Table 6: Full refine results with 2xG and 2xC critiques.
+
+
+the single-agent baseline. Interestingly, in this set-                     Round     # Converged       BACC
+ting, we do not observe any average improvement                               0           751          76.2
+across both metrics using G ENERATE. This high-                               1            50          52.7
+                                                                              2            8           50.0
+lights the effectiveness and reliability of R ERANK                           3            3           50.0
+compared to G ENERATE.                                                        4            1            0.0
+
+B.2   Intrinsic Results on Multiple Iterations                 Table 7: Number of converged examples for each round
+                                                               and the corresponding BACC for the subset.
+D ETECT. For the multi-agent models, we also
+analyze the balanced accuracy across multiple it-
+erations, as the agents update their answers based             improves slightly across multiple iterations. How-
+on the other agent’s response. As shown in Fig-                ever, both multi-agent approaches (G+C and 2xC)
+ure 3, one round of discussion provides the largest            performance decreases. With G ENERATE, we ob-
+improvement, as the models show improvement in                 serve a large decrease in faithfulness score, high-
+all cases except when using 2xG on MeetingBank.                lighting the more reliable performance of R ERANK.
+The largest improvement is with the multi-model
+setting, showcasing the benefit of having diverse
+responses. Additional rounds only address a few                B.3   Analysis on Multi-Round for D ETECT
+examples (e.g., 10/324 examples) and do not neces-
+sarily improve performance. We find that these are             To investigate whether the subsequent rounds in-
+the harder examples on which the models have dif-              volve harder examples that the agents have diffi-
+ficulty converging to an answer. See Appendix B.3              culty agreeing on, we calculate the balanced ac-
+for more details.                                              curacy on the subset of examples, which the an-
+R ERANK. Examining how accuracy changes over                   swer from the two agents finally converges for each
+multiple rounds of debate, as shown on the right               round. We hypothesize that the model is unable
+of Figure 3, we find that agents improve the most              to converge because both agents do not know the
+during the second round and converge by then, ex-              correct answer and thus the correct reasoning, mak-
+cept for the multi-model multi-agent G+C method.               ing them incapable of convincing each other. We
+In this case, on MediaSum, we observe additional               present the number of examples and the correspond-
+improvement at round 3.                                        ing BACC for this subset in Table 7. We observe
+                                                               that for the 50 examples on which the agents con-
+C RITIQUE. We further show the performance of                  verge in the first iteration, the BACC is already
+the two frameworks across multiple iterations on               reduced from 76.2 to 52.7, and the remaining ex-
+the left of Figure 4. While reranking improves with            amples in the subsequent rounds only achieve ac-
+further iterations, asking the models to continue              curacy at random chance levels. This indicates that
+refining their generations degrades performance.               the multi-agent approach can help improve perfor-
+R EFINE. When looking at the improvement across                mance on more examples but cannot improve cases
+iterations on the right of Figure 4, 2xG consistently          where both agents are not confident.
+                                                        9898
+                                MediaSum                                MeetingBank                                           MediaSum                                  MeetingBank
+                  74                                                                                               90                                         80
+
+
+
+
+                                                                                                   Accuracy (%)
+                                                              80
+BACC (%)
+
+                  73                                          78                                                   80                                         70
+                  72
+                                                              76
+                        0       1      2        3     4            0     1       2         3   4                        0    1       2        3       4             0       1       2       3   4
+                                    Iteration                                 Iteration                                           Iteration                                     Iteration
+                                        G+C               2xG                   2xC                                                   G+C                     2xG                 2xC
+                                                  (a) D ETECT                                                                                 (b) R ERANK
+
+                                       Figure 3: Detect and rerank multi-agent performance across multiple iterations.
+
+                                      Rerank                             Generative                                                Rerank                               Generative
+Error Match (%)
+
+
+
+
+                                                                                                   Minicheck (%)
+                  67.5                                                                                             84
+                  65.0                                                                                             82
+                  62.5                                                                                             80
+                            0              1              2        0             1             2                        0     1       2       3           4     0       1          2        3   4
+                                      Iteration                              Iteration                                            Iteration                                     Iteration
+                                         G+C                  2xG              2xC                                                   G+C                      2xG                 2xC
+                                                (a) C RITIQUE                                                                                     (b) R EFINE
+
+                       Figure 4: Error match rate for C RITIQUE and faithfulness score for R EFINE across multiple iterations.
+
+
+                         MD            MC             MR               MCS↑       GL↑                        the variant where we use three agents for D ETECT
+                        G+C            2xC            2xG              84.9          4.2                     and the best configuration from our recipe for C RI -
+                     G+C              G+C            G+C               83.5          4.2                     TIQUE and R EFINE , indicating that having more
+                    G+C+B            G+C+B          G+C+B              84.2          4.3                     agents may reduce the need for comprehensive test-
+                    G+C+B             2xC            2xG               84.7          4.2                     ing to identify the best combination of subtasks.
+                                                                                                                The improvement observed with more agents
+Table 8: Results with using three agents: GPT-4o
+                                                                                                             can be attributed to more diverse outputs, each
+(G), Claude (C), and Gemini (B). MCS=MiniCheck,
+GL=GPT4o 1-5 point Likert score.                                                                             potentially containing different hallucinations due
+                                                                                                             to the training paradigm. Alternatively, it can be
+                                                                                                             thought of as the issue of hallucinations correlating
+B.4                    Refinement with more Agents                                                           with low confidence: Individual agents may pro-
+                                                                                                             duce hallucinations when they are less confident
+We also explore the use of three agents to assess                                                            (Cao et al., 2022; van der Poel et al., 2022). How-
+the effect of increased agent diversity. We include                                                          ever, the multi-agent framework mitigates halluci-
+Gemini-1.5-flash (Gemini Team et al., 2024) as the                                                           nations by enabling agents to collaborate and reach
+third model, which performs similar to GPT4-o                                                                a consensus agreed upon by all (i.e., achieving high
+and Claude. Since the subtask that benefits the                                                              confidence), thereby improving faithfulness.
+most from a multi-agent, multi-model approach is
+D ETECT, we experiment by adding the third agent                                                              B.5           LFQA Results without Context
+to D ETECT only, as well as adding it to both D E -                                                          For the case without context, the model must re-
+TECT and R EFINE (and using the R ERANK on the                                                               trieve information from its own parametric knowl-
+generations from the three agents). We present the                                                           edge. Here, we use VeriScore, a state-of-the-art
+results in Table 8. To measure the effect of adding                                                          verification model from Song et al. (2024).
+a third agent for all subtasks, we compare the per-                                                             For the “no context” setting, which is reported
+formance of using two agents across all subtasks                                                             in Table 9, though single agent and single model
+with that of using three agents. We observe that                                                             performs the best, our recipe improves over the
+using three agents provides additional gains in both                                                         original answers by 6.3%. Among the different
+the MiniCheck and Likert scores, indicating that                                                             variations, single-agent multi-model outperforms
+having more models can indeed help. The three-                                                               multi-agent single-model, indicating that there is
+agent version also achieves competitive scores with                                                          still benefit of using multiple models.
+                                                                                               9899
+                                                                       No Context     With Context
+                    Method               MD        MC          MR      VeriScore    MCS↑ G-Likert↑
+                    Original               -        -           -         62.8      76.7    3.5†
+           Single-Agent Single-Model    GPT-4o   GPT-4o       GPT-4o      71.9      80.1    3.9
+           Single-Agent Multi-Model     Claude   Claude       GPT-4o      71.4      80.9    4.0
+           Multi-Agent Single-Model      2xG      2xG          2xG        71.0      79.1    3.9
+            MAMM-R EFINE (Ours)          G+C      2xC          2xG        70.2      82.0    4.1
+
+                     Table 9: Results on Long-form QA for both with and without context.
+
+
+        Method          Detect          Critique          differing quality, especially in cases where the top-
+                        BACC     EM↑    EMM↓ NE↓          ics are marginal in TofuEval - when dealing with
+        GPT-4o           72.1    95.1     5.0    0.0      less frequently mentioned information.
+      Llama3.1-8B        62.2    67.2    32.8    0.0
+                                                             To verify this, we also test on MediaSum by
+ MAMM w. Llama3.1-8B     71.1    93.8    6.25    0.0      running both larger and smaller models, where
+                                                          the performance discrepancy is more pronounced.
+Table 10: MediasSum results with using smaller model,
+                                                          Specifically, we employ the Llama3.1-8B model
+Llama3.1-8b on D ETECT and C RITIQUE.
+                                                          and GPT-4o as two agents and evaluate them using
+                                                          D ETECT and the gold setting of C RITIQUE. The
+B.6   Additional Analysis                                 results are shown in Table 10. We observe that the
+                                                          smaller 8B model significantly underperforms com-
+We have observed that the initial performance of
+                                                          pared to GPT-4o. When combined in the MAMM
+each agent before the debate is crucial, as the de-
+                                                          setting, the overall performance is slightly lower
+bate outcomes are heavily influenced by these start-
+                                                          than that of GPT-4o alone. In cases where the two
+ing points. Specifically, when there is a large dis-
+                                                          models disagree, the smaller model agrees with
+crepancy between the agents’ performances, com-
+                                                          the larger model about 82% of the time, thus fail-
+bining them can help improve the weaker agent
+                                                          ing to contribute to performance improvements. In
+while maintaining similar (or slightly worse) per-
+                                                          the remaining 18% of cases, the larger model is
+formance for the better agent. This dynamic ex-
+                                                          persuaded to accept the incorrect answer from the
+plains why certain settings work better for specific
+                                                          smaller model. These findings underscore the im-
+subtasks. For instance, in the critique task, GPT-4o
+                                                          portance of using agents with similar performance
+and Claude single agents differ by 3.4 EM points,
+                                                          levels to achieve further improvements on subtasks.
+and MAMM averages their performances. How-
+ever, SMMA effectively enhances the performance           C      Human Evaluations
+of both agents, and since Claude performs better
+initially, the MASM achieves the highest overall          C.1       Critique Evaluation
+score by leveraging its stronger baseline.                We sampled 50 examples and asked two authors
+   In contrast, the refine task presents a scenario       to annotate the data using the same instructions
+where GPT-4o outperforms Claude as a single               provided to GPT, i.e., selecting from three choices.
+agent. Here, SMMA benefits more from GPT-4o’s             Annotators did not see the generated scores for any
+higher baseline, allowing it to refine and further        of the examples. We observed an inter-annotator
+improve its responses. Meanwhile, MAMM strug-             agreement of 0.80 using macro-F1 and the aver-
+gles due to Claude’s relatively lower performance,        age IAA between the GPT-predicted labels and
+which drags down the combined results. These ob-          our annotations is 0.61. This demonstrates that
+servations demonstrate that SMMA is better suited         the GPT-based metric is an efficient and effective
+for tasks where one agent consistently outperforms        automatic evaluation method.
+the other, as it capitalizes on the stronger model’s
+ability to refine its outputs during debate.              C.2       Faithfulness Metric Correlations
+   Qualitatively, we also find that generations from      We conducted a blind, Likert scale human evalua-
+the same models exhibit little variation, so MA of        tion on 25 samples from MediaSum with MAMM-
+the same model does not significantly aid in provid-      generated summaries, using the same prompt as
+ing options for reranking. Additionally, R ERANK          for the GPT-based metric. Our annotated Likert
+can make mistakes when faced with two choices of          scores achieved a Kendall correlation of 0.46 with
+                                                       9900
+ Method       Prompt
+ Direct       I summarized the following document on the topic ‘{Topic}’:
+ Refinement   {Document}
+              Summary of the above document on topic ‘{Topic}’:
+              {Summary}
+              If there are any factual inconsistencies in the summary then edit the summary such that the refinement doesn’t
+              have any inconsistencies. Consistency in this context implies that all information presented in the summary is
+              substantiated by the document. If the summary is consistent, then just the copy the same summary with no
+              changes. When refining, make the minimum number of changes.
+ D ETECT      Document:
+              {Document}
+              Sentence:
+              {Sentence}
+              Determine if the sentence is factually consistent with the document provided above. A sentence is factually
+              consistent if it can be entailed (either stated or implied) by the document. Please briefly explain the reason
+              within 50 words. Output your answer in json format, with the format as follows: {{“reasoning”: “”, “answer”:
+              “”}}. Please strictly output in JSON format. Only answer yes or no in the “answer” field.
+ R ERANK      Document:
+              {Document}
+              Summarize the provided document focusing on "Topic". The summary should be less than 50 words in length.
+              ### Summary 1: {Summary1}
+              ### Summary 2: {Summary2}
+              ...
+              Select the best summary that contains the least amount of factual inconsistencies. Consistency in this context
+              implies that all information presented in the summary is substantiated by the document. Please briefly explain
+              the reason within 50 words. Output your answer in json format, with the format as follows: {{“reasoning”: “”,
+              “answer”: “”}}. Please strictly output in JSON format. Only answer numbers in the "answer" field.
+ C RITIQUE    I summarized the following document on the topic: ‘{Topic}’:
+              {Document}
+              Summary of the above document on topic ‘{Topic}’:
+              {Summary}
+              Reason about the factually inconsistent span in the sentence. A span is factually inconsistent if it cannot be
+              substantiated by the document. Give reasons for the factual inconsistency, point to the error span by stating
+              “The error span: ⟨span from sentence⟩” and end your answer with a suggested fix to the summary.
+ R EFINE      I summarized the following document on the topic ‘{Topic}’:
+              {Document}
+              Summary of the above document on topic ‘{Topic}’:
+              {Summary}
+              Feedback for the above summary:
+              {Feedback}
+              Edit the user response such that the refinement doesn’t have any errors mentioned in the feedback. Make the
+              minimum number of changes when doing the refinement. Do not include a preamble.
+ Multi-       {Initial Prompt}
+ Agent        Carefully review the following solutions from other agents as additional information, and provide your own
+ Debate       answer and step-by-step reasoning to the question.
+              One agent’s answer: {{“reasoning”: {}, “answer”: {}}}
+              One agent’s answer: {{“reasoning”: {}, “answer”: {}}}
+
+                         Table 11: Prompts for different subtasks and multi-agent debate.
+
+
+the GPT Likert scores, which is comparable to the
+correlation reported in G-Eval (Liu et al., 2023a), a
+SOTA, Likert-based evaluation metric (0.43).
+
+D   Prompts
+We show the prompts for different pipelines in Ta-
+ble 11. We use the same 1-5 Likert prompt by
+Wadhwa et al. (2024), which contains a detailed
+rubric (Li et al., 2024).
+
+
+
+                                                          9901
+

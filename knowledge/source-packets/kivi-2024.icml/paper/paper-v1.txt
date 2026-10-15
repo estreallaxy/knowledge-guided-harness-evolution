@@ -1,0 +1,961 @@
+          KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache
+
+
+                         Zirui Liu * 1 Jiayi Yuan * 1 Hongye Jin 2 Shaochen (Henry) Zhong 1
+                            Zhaozhuo Xu 3 Vladimir Braverman 1 Beidi Chen 4 Xia Hu 1
+
+
+                         Abstract                                         model weight). This reduction in memory us-
+                                                                          age enables up to 4× larger batch size, bringing
+      Efficiently serving large language models (LLMs)
+                                                                          2.35× ∼ 3.47× throughput on real LLM infer-
+      requires batching many requests together to re-
+                                                                          ence workload. The source code is available at
+      duce the cost per request. Yet, the key-value (KV)
+                                                                          https://github.com/jy-yuan/KIVI.
+      cache, which stores attention keys and values
+      to avoid re-computations, significantly increases
+      memory demands and becomes the new bottle-                     1. Introduction
+      neck in speed and memory usage. This mem-
+      ory demand increases with larger batch sizes and               Large Language Models (LLMs) have demonstrated strong
+      longer context lengths. Additionally, the infer-               performance across a wide range of tasks (Brown et al.,
+      ence speed is limited by the size of KV cache,                 2020; Taylor et al., 2022; Yuan et al., 2023). However, their
+      as the GPU’s SRAM must load the entire KV                      deployment is very costly, requiring a large number of hard-
+      cache from the main GPU memory for each to-                    ware accelerators such as GPUs. Given these substantial
+      ken generated, causing the computational core                  costs, one natural way to reduce the cost per request is to
+      to be idle during this process. A straightforward              combine a sufficient number of requests together for batch
+      and effective solution to reduce KV cache size                 processing. However, in this batch inference scenario, the
+      is quantization, which decreases the total bytes               key-value cache (KV cache), which holds the attention keys
+      taken by KV cache. However, there is a lack of                 and values during generation to prevent re-computations, is
+      in-depth studies that explore the element distri-              becoming the new memory and speed bottleneck. This bot-
+      bution of KV cache to understand the hardness                  tleneck becomes more pronounced with larger batch sizes
+      and limitation of KV cache quantization. To fill               and longer context lengths. For instance, in 540B PaLM,
+      the gap, we conducted a comprehensive study on                 with a batch size of 512 and a context length of 2048, KV
+      the element distribution in KV cache of popular                cache alone can take 3TB. This is 3 times the size of the
+      LLMs. Our findings indicate that the key cache                 model’s parameters (Pope et al., 2023). Also, the GPU
+      should be quantized per-channel, i.e., group el-               SRAM has to load the whole KV cache from the GPU de-
+      ements along the channel dimension and quan-                   vice memory for every token generated, during which the
+      tize them together. In contrast, the value cache               computational cores are idle. Thus, reducing KV cache size
+      should be quantized per-token. From this anal-                 in LLMs while maintaining accuracy is important.
+      ysis, we developed a tuning-free 2bit KV cache
+                                                                     Existing works towards this problem can be roughly divided
+      quantization algorithm, named KIVI. With the
+                                                                     into three categories. First, some work suggests reducing
+      hardware-friendly implementation, KIVI can en-
+                                                                     the number of heads in KV cache, such as multi-query
+      able Llama (Llama-2), Falcon, and Mistral mod-
+                                                                     attention (Shazeer, 2019) and multi-group attention (Ainslie
+      els to maintain almost the same quality while us-
+                                                                     et al., 2023). However, these methods require either training
+      ing 2.6× less peak memory usage (including the
+                                                                     the model from scratch or fine-tuning the existing model.
+  *
+    Equal contribution. The order of authors is determined by        Second, another research line reduces KV cache size by
+flipping a coin. 1 Department of Computer Science, Rice Uni-         evicting unimportant tokens (Zhang et al., 2023). Third,
+versity 2 Department of Computer Science, Texas A&M Uni-             some other works try to solve this problem from the system
+versity 3 Department of Computer Science, Stevens Institute of       perspective, e.g., offloading KV cache (Sheng et al., 2023)
+Technology 4 Department of Electrical and Computer Engineer-
+ing, Carnegie Mellon University. Correspondence to: Zirui Liu        or extending virtual memory and paging techniques into the
+<zl105@rice.edu>, Jiayi Yuan <jy101@rice.edu>.                       attention mechanism (Kwon et al., 2023).
+
+Proceedings of the 41 st International Conference on Machine         To reduce the size of KV cache, the most simple and ef-
+Learning, Vienna, Austria. PMLR 235, 2024. Copyright 2024 by         fective way is to reduce the total bytes taken by KV cache,
+the author(s).                                                       namely, quantization. Unlike the well-studied weight quan-
+
+                                                                 1
+                              KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache
+
+                                                                     number of tokens in key cache can be arbitrary, our key idea
+                                                                     is to split key cache into two parts. The first part is the
+                                                                     grouped key cache, which contains several groups of tokens
+                                                                     and each group has a certain number of tokens. The second
+                                                                     part is the residual key cache, which does not have a suffi-
+                                                                     cient number of tokens to form a complete group. Similarly,
+                                                                     we split value cache into the grouped and residual parts to
+              per-token           per-channel                        maintain the accuracy. We only apply group-wise quanti-
+             quantization         quantization                       zation to the grouped key cache and value cache, while the
+                                                                     residual key cache and value cache are kept in full precision.
+Figure 1: Definition of per-token and per-channel quantiza-
+                                                                     The grouped and residual parts can be combined using tiled
+tion. X ∈ Rlprompt ×d is key/value cache where lprompt is the
+                                                                     matrix multiplication when computing attention scores. Our
+number of tokens and d is the number of channels. zX is
+                                                                     contributions are summarized as follows:
+the zero-point, sX is the scaling factor.
+
+tization (Lin et al., 2023; Xiao et al., 2023a; Zhao et al.,            • Extensive analysis regarding the outlier patterns
+2024), to the best of our knowledge, only a few studies                   and quantization error of KV cache in commonly-
+applied the vanilla 4bit round-to-nearest quantization to KV              used LLMs. Our observations suggest that key cache
+cache (Sheng et al., 2023; Zhang et al., 2023; Zhao et al.,               should be quantized per-channel and value cache
+2024) due to the streaming nature of KV cache or other                    should be quantized per-token. We also explain in
+complications. There is a lack of in-depth studies that ex-               depth why these caches require different quantization
+plore the element distribution of KV cache to understand                  approaches.
+the hardness and limitation of KV cache quantization. To
+fill the gap, we study the element distribution of KV cache.            • A new plug-and-play 2bit KV cache quantization
+Our analysis suggests:                                                    algorithm without any fine-tuning, KIVI, with
+                                                                          hardware-friendly implementation. We conduct an
+   • For the key cache, there are a few fixed channels whose              extensive evaluation for KIVI with Llama (Llama-
+     magnitudes are very large, which is consistent with                  2), Mistral, and Falcon on popular generation tasks.
+     previous finding (Lin et al., 2023; Xiao et al., 2023a).             KIVI can efficiently compress KV cache to 2bit and
+     Thus, as shown in Figure 1 right, key cache should be                bring 2.6× peak memory usage reduction for Llama-
+     quantized per-channel, i.e., group elements along the                2-7B, with little to no accuracy drop. With our efficient
+     channel dimension and quantize them together. In this                system implementation, this memory reduction, in re-
+     way, it can confine the error to each individual channel,            turn, enables up to 4× larger batch size and brings
+     without impacting the other normal channels.                         2.35× ∼ 3.47× throughput.
+   • For the value cache, there is no obvious outlier pat-
+     tern. Although value cache has no obvious outlier               2. Background: Attention Inference-Time
+     pattern, we experimentally show that it can only be                Workflow
+     quantized per-token because it is used to calculate the
+     attention output, which is essentially a value cache            The LLM attention inference-time workflow involves two
+     mixer. As shown in Figure 1 left, the per-token quan-           phases: i) the prefill phase, where the input prompt is used to
+     tization can confine the error inside each individual           generate KV cache for each transformer layer of LLMs; and
+     token and ensure that the quantization of one token             ii) the decoding phase, where the model uses and updates
+     does not adversely impact the others.                           KV cache to generate the next token, one at a time.
+
+Based on the above insights, we propose KIVI, a plug-and-            Prefill Phase. Let X ∈ Rb×lprompt ×d be the input tensor,
+play extreme low-bit KV cache quantization method. KIVI              where b is the batch size, lprompt is the length of the input
+quantizes key cache per-channel and quantizes value cache            prompt, and d is the model hidden size. For convenience,
+per-token. The per-token value cache quantization aligns             we ignore the layer index here. The key, value tensors can
+well with the streaming nature of auto-regressive inference,         be computed by
+allowing newly quantized tensors to be directly appended                           XK = XWK , XV = XWV ,
+to the existing quantized value cache by token dimension.
+However, for per-channel key cache quantization, the quan-           where WK , WV ∈ Rd×d are the key and value layer weight,
+tization process spans different tokens, which cannot be             respectively. After obtaining XK and XV , they are cached
+directly implemented in this streaming setting. Since the            in the memory for the ease of decoding.
+
+                                                                 2
+                               KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache
+
+Decoding Phase. Let t ∈ Rb×1×d be the current input                    Table 1: The results of simulated KV cache group-wise
+token embedding. Let tK = tWK and tV = tWV be the                      quantization with various configurations. The group size
+key and value layer output, respectively. We first update KV           is set as 32. C stands for per-channel quantization and T
+cache:                                                                 stands for per-token quantization. Please check the whole
+                XK ← Concat(XK , tK ),                                 evaluation in Table 3.
+                 XV ← Concat(XV , tV ),                                         Llama-2-13B           CoQA    TruthfulQA
+                                                                                16bit                 66.37      29.53
+then calculate the attention output as:                                         4bit (K - T, V - T)   66.48      29.51
+
+                  tQ = tWQ ,                                                    2bit (K - T, V - T)   52.93      24.98
+                                                                                2bit (K - C, V - C)    2.88       0.74
+                                   ⊤
+                   A = Softmax(tQ XK ),                                         2bit (K - T, V - C)    2.80       0.26
+                                                                                2bit (K - C, V - T)   63.53      28.60
+                  tO = AXV ,                                (1)
+
+where WQ is the weight matrix of the query layer. For ease
+of illustration, we ignore the attention output layer and the          most flexible way for quantizing KV cache is the round-
+other parts of the inference workflow.                                 to-nearest quantization. The B−bit integer quantization-
+                                                                       dequantization process can be expressed as:
+Memory and Speed Analysis. The above process is re-                                     X − zX
+                                                                           Q(X) = ⌊             ⌉, X ′ = Q(X) · sX + zX ,
+peated until a special token indicating the sentence’s con-                                sX
+clusion is reached. Let lgen be the number of generated                where zX = min X is the zero-point, sX = (max X −
+tokens. From the above analysis, the shape of KV cache is              min X)/(2B − 1) is the scaling factor, and ⌊·⌉ is the round-
+b × (lprompt + lgen ) × d. To get a sense of the scale, consider       ing operation. Here we ignore the batch size for ease of
+the OPT-175B model with a batch size b 512, a prompt                   understanding. As shown in Figure 1, X is quantized along
+length lprompt 512, and an output length lgen 32. The KV               either the token or channel dimension group-wisely.
+cache requires 1.2TB, which is 3.8 times the model weights
+(Sheng et al., 2023). Besides the memory, the inference                Considering the streaming nature of KV cache, previous
+speed is also decided by the KV cache size. The GPU needs              studies often apply per-token quantization to both key and
+to load KV cache from GPU main memory to GPU SRAM                      value cache since the newly quantized KV cache can be
+once for every token generated during which the computa-               naively added to the existing quantized one along the token
+tional core of the chip is essentially idle (Pope et al., 2023;        dimension (Sheng et al., 2023). While per-channel quanti-
+Kwon et al., 2023).                                                    zation is non-trivial, we have designed a padding method to
+                                                                       implement per-channel quantization to explore its effect on
+                                                                       both key and value cache.
+3. Methodology
+In scenarios with long contexts or batched inferences, the             Setting. In Table 1, we show the results of fake KV cache
+memory and speed bottlenecks are storing and loading KV                group-wise quantization with different configurations on the
+cache. The most simple and effective way to alleviate this             Llama-2-13B model for the CoQA and TruthfulQA tasks.
+problem is to reduce the total bytes occupied by KV cache,             We use a group size of 32 for all configurations. Here fake
+specifically, quantization. Following this motivation, we              quantization means we simulate the quantization process
+first evaluate the performance of the existing quantization            by first quantizing KV cache into lower precision and then
+method in Section 3.1. Our observations suggest that key               dequantizing it in the attention layer. For per-channel quan-
+and value cache should be quantized along different dimen-             tization, if the number of tokens is not divided evenly into
+sions. We analyze the rationale behind this observation                groups, we add zero-padding to ensure it can be grouped
+in Section 3.2. Then based on the analysis, we propose                 perfectly. In this way, we ensure that all tokens in KV cache
+KIVI, a new KV cache quantization method along with its                are quantized for a fair comparison. The detailed experi-
+streaming data structure, detailed in Section 3.3.                     mental setting can be found in Section 4.1. Specifically, we
+                                                                       observe that:
+3.1. Preliminary Study of KV Cache Quantization                        OB 1. When using the commonly used per-token quanti-
+                                                                       zation to both key and value caches, INT4 precision can
+As we analyzed in Section 2, KV cache functions as a
+                                                                       maintain accuracy. However, reducing it to INT2 results in
+streaming data structure, where the new tensor arrives se-
+                                                                       a notable accuracy drop.
+quentially. Thus, optimization-based methods like GPTQ
+(Frantar et al., 2022) are unsuitable for quantizing KV cache          OB 2. When value cache is quantized per-channel, the
+due to the overhead. To the best of our knowledge, the                 accuracy significantly worsens regardless of how key cache
+
+                                                                   3
+                                                          KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache
+
+
+                          Llama-2-13B Layer 16                                       Llama-2-13B Layer 16                   Llama-2-13B Layer 31                          Llama-2-13B Layer 31
+                            Head 0 Key Cache                                          Head 0 Value Cache                      Head 0 Key Cache                             Head 0 Value Cache
+
+
+
+                                                                                                                                                                   2.5
+
+
+
+                                                                  Absolute Value
+        Absolute Value
+
+
+
+
+                 12.5                                 2.0                              12.5
+                 10.0                                 1.5                              10.0                                                                        2.0
+                  7.5                                                                   7.5                                                                        1.5
+                  5.0
+                                                      1.0                               5.0                                                                        1.0
+                  2.5                             125 0.5                          125 2.5                           125                                           0.5                             125
+                  0.0 0                          100                              100   0.0 0                       100                                                                           100
+                                               75         0                     75                                75                                                     0 50                   75
+                           50 100                           50 100             50             50 100                                                                                           50
+
+
+
+
+                                                                                                              el
+
+
+
+
+                                                                                                                                                                                                      l
+                                              50                                                                 50
+                                                         l
+
+
+
+
+                                                                                                                                                           l
+
+
+
+
+                                                                                                                                                                                                   ne
+                                                     ne
+
+
+
+
+                                                                                                                                                        ne
+                                                                                                                                                                            Tok100
+
+
+
+
+                                                                                                             n
+                                            25               Token 150       25                                25                                                               en 150 200 0 25
+
+
+
+
+                                                                                                          an
+
+
+
+
+                                                                                                                                                                                                an
+                            Token 150                                                          Token 150
+                                                    an
+
+
+
+
+                                                                                                                                                      an
+                                                                                                       Ch
+
+
+
+
+                                                                                                                                                                                              Ch
+                                                                       200 0
+                                                Ch
+
+
+
+
+                                                                                                                                                  Ch
+                                      200 0                                                              200 0
+
+                          Falcon-7B Layer 16                                         Falcon-7B Layer 16                     Falcon-7B Layer 20                            Falcon-7B Layer 20
+                          Head 0 Key Cache                                           Head 0 Value Cache                     Head 0 Key Cache                              Head 0 Value Cache
+Absolute Value
+
+
+
+
+                                                              Absolute Value
+
+
+
+
+            10                                                           1.5                                       10.0                                           1.5
+             8                                                                                                      7.5
+             6                                                           1.0                                                                                      1.0
+             4                                                                                                      5.0
+             2                                           60              0.5                                  60    2.5                                    60     0.5                              60
+             0 0                                    40                             0 50                  40         0.0 0                             40                0 50                  40
+                          50 100                                                                                            50 100
+                                                        l
+
+
+
+
+                                                                                                              l
+
+
+
+
+                                                                                                                                                                                                   l
+                                                                                                                                                           l
+                                                     ne
+
+
+
+
+                                                                                                          ne
+
+
+
+
+                                                                                                                                                                                                ne
+                                                                                                                                                       ne
+                           Token 150           20                                     To100           20                                         20                        To100           20
+                                                    an
+
+
+
+
+                                                                                                        an
+
+
+
+
+                                                                                                                                                                                               an
+                                                                                                                             Token 150
+
+
+
+
+                                                                                                                                                      an
+                                       200 0                                            ken 150 200 0                                    200 0                               ken 150 200 0
+                                               Ch
+
+
+
+
+                                                                                                       Ch
+
+
+
+
+                                                                                                                                                                                              Ch
+                                                                                                                                                 Ch
+   Figure 2: Magnitude of key and value cache for Llama-2-13B and Falcon-7B. We observe (1) for key cache, there are a few
+   channels whose magnitudes are very large. (2) for value cache, there is no obvious outlier pattern.
+
+                                                                                                                                ′
+                                                                                                                         XK −XK
+   is quantized.                                                                                                       ∥   XK     ∥F , along with the relative attention score error
+                                                                                                                             ′                                 ′
+                                                                                                                                            ′                    ⊤
+   OB 3. When using a lower numerical precision such as                                                                ∥ A−A
+                                                                                                                          A    ∥F where A = Softmax(tQ XK ). We observe that
+   INT2, the most accurate approach is to quantize key cache                                                           the per-token quantization can lead to almost 5× larger at-
+   per-channel and value cache per-token.                                                                              tention score error than per-channel quantization, which is
+                                                                                                                       consistent with Figure 2.
+   3.2. Why Key and Value Cache Should Quantize Along
+        Different Dimensions?                                                                                          Table 2: The relative error statistics averaged over all layers
+                                                                                                                       and all heads
+   In Table 1, we observe that quantizing key cache per-channel
+   and value cache per-token to 2bit results in a very small accu-
+                                                                                                                             Llama-2-13B                        K Per-Token      K Per-Channel
+   racy drop. Here we analyze why this configuration delivers                                                                               ′
+                                                                                                                                      XK −XK
+   better accuracy. In Figure 2 we visualize the original KV                                                                 Avg. ∥    XK
+                                                                                                                                                 ∥F                13.67               4.55
+                                                                                                                                          ′
+   cache distribution at different layers. We observe that in                                                                Avg. ∥ A−A
+                                                                                                                                      A
+                                                                                                                                          ∥F                       47.0                 9.6
+   key cache, some fixed channels exhibit very large mag-                                                                    Attention sparsity                               84.3%
+   nitudes, whereas in value cache, there is no significant
+   pattern for outliers.                                                                                                                                        V Per-Token      V Per-Channel
+                                                                                                                                   X −X ′
+                                                                                                                             Avg. ∥ VXV V ∥F                       4.57                3.73
+   Analysis of Key Cache. The above observation for key                                                                      Avg. ∆                                3.55               49.89
+   cache aligns with previous findings that certain fixed
+   columns in activations exhibit larger outliers (Dettmers et al.,
+   2022; Lin et al., 2023). The persistence of outliers within                                                         Analysis of Value Cache. Unlike key cache, value cache
+   each channel means that per-channel quantization can con-                                                           does not show the channel-wise outlier pattern. Furthermore,
+   fine the quantization error to each individual channel with-                                                        Figure 2 alone cannot explain OB2, which indicates value
+   out impacting the other normal channels. Thus, Figure 2                                                             cache should only be quantized per-token. This is because
+   explains why key cache should be quantized per-channel.                                                             Figure 2 implies that errors should be comparable for both
+   In Table 2 we show key cache relative reconstruction error                                                          per-token and per-channel quantization, given the absence
+
+                                                                                                                   4
+                              KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache
+
+                                                        Full Precision Tensor
+                       Prefill Phase                                                          Decoding Phase*
+                                                       Low Precision Tensor
+                        Quantization by Channel
+
+
+                                                                                        MatMul
+                                                      KVCache                                                Concat
+
+
+
+                                                                                       Q_MatMul
+
+
+                         Quantization by Token                                           * we omit the value cache and
+                                                                                           attention output calculation
+
+Figure 3: The overview of KIVI algorithm. For ease of illustration, we omit the value cache and attention output parts. The
+detailed pseudo-code is provided in Algorithm 1. Here “Q_Matmul” is the mix-precision matrix multiplication which fuses
+the dequantization with matrix multiplication at the tiling level.
+
+of a clear pattern. As shown in Equation (1), value cache                XKg = XK [: l − r] and residual part XKr = XK [l − r :],
+is used to calculate the attention output tO . Instead of                where l is the number of tokens inside the current key cache
+analyzing the quantization error of value cache XV , in                  XK , r is the number of residual tokens, where l − r can be
+                                                        ′
+                                             AXV −AXV                    divisible by G.
+Table 2 we analyze the relative error ∆ = ∥ AX      V
+                                                          ∥F
+with different quantization configurations. Surprisingly, we             Since XKg can be evenly divided into (l − r)/G groups,
+observe that the per-token quantization error is almost 15×              we only store Q(XKg ) with group-wise quantization, while
+smaller than per-channel quantization, which explains why                XKr is kept in full precision. During the decoding process,
+OB2 happens. The intuition behind this observation stems                 each newly arrived key cache tK is added to XKr and once
+from the attention sparsity. Equation (1) can be written as:             XKr reaches R tokens, which is a hyperparameter - residual
+                            lprompt
+                            X                                            length, we quantize and concatenate it with the previously
+              [AXV ]i∗ =              Aij [XV ]j∗ ,           (2)        quantized Q(XKG ). Then we reset XKr to an empty tensor.
+                             j=1                                         We note that R should be divisible by G. With tiled matrix
+where [XV ]j∗ is the j-th row of XV . From Equation (2),
+the attention output is the weighted summation of value                  multiplication, the raw attention logits is then calculated as:
+cache across various tokens, with the weights being the                                               ⊤
+                                                                                           Ag = tQ Q(XK   ),
+                                                                                                        g
+attention scores. Since the attention score is highly sparse
+(Tian et al., 2023), the output is just the combination of                              XKr = Concat([XKr , tK ]),
+value caches of a few important tokens. The per-token                                               ⊤
+                                                                                           Ar = tQ XKr
+                                                                                                       ,
+quantization can confine the error to each individual token.                                A = Concat([Ag , Ar ]).                 (3)
+Thus, quantizing other tokens does not affect the accuracy
+of important tokens. Consequently, per-token quantization                For value cache, similar to key cache, we also split it into
+leads to a much smaller relative error ∆.                                two parts and keep the most recent value cache in full pre-
+                                                                         cision, namely, XVg and XVr . Specifically, we maintain a
+3.3. KIVI: Algorithm and System Support                                  queue and each newly arrived value cache is pushed into
+                                                                         the queue. Once the queue reaches the predefined residual
+Algorithm. As we previously analyzed, key cache should                   length R, the most outdated value cache is poped. Then the
+be quantized per-channel and value cache should be quan-                 poped value cache is quantized per-token and concatenated
+tized per-token. Recall that key and value cache of newly                with the previously quantized value cache along the token
+generated tokens arrive sequentially. From the implemen-                 dimension.
+tation perspective, per-token quantization aligns well with
+streaming settings, allowing newly quantized tensors to be               As shown in Figure 3, we also emphasize that during the
+directly appended to the existing quantized value cache                  prefill phase, the exact key and value tensors are passed to
+by token dimension. However, for per-channel quantiza-                   the next layers, although only the quantized KV cache is
+tion, the quantization process spans across different tokens,            retained in memory. The whole algorithm can be found in
+which cannot be directly implemented in the streaming set-               Appendix A Algorithm 1.
+ting. As shown in Figure 3, our key idea to solve this prob-
+lem is to group key cache every G tokens and quantize them               Analysis. In KIVI, the grouped key cache XKg and value
+separately. Because the number of tokens in XK can be ar-                cache XVg is quantized, while the residual key cache XKr
+bitrary, we split XK into two parts, namely, the grouped part            and value cache XVr is kept in full precision. By design,
+
+                                                                     5
+                                KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache
+
+there are at most R tokens inside XKr or XVr . In practice,               TREC (classification score), TriviaQA (F1 score), and SAM-
+we set R ≤ 128 and the sequence length lprompt + lgen is                  Sum (ROUGE score) are Few-shot Learning tasks; and LCC
+often much longer than R. Thus the memory overhead from                   (similarity score) and RepoBench-P (similarity score) is
+XKr and XVr is negligible when considering the benefit                    Code Completion task. The maximum sequence length in
+from extreme low-bit quantization, especially for the long                LongBench was set to 8192 for the Mistral model and 4096
+context scenarios. Also, since the newly arrived key and                  for other models.
+value tensors are added to XKr and XVr in full precision,
+KIVI maintains a full precision KV cache sliding window                   4.2. Accuracy and Efficiency Analysis
+for the local relevant tokens. This window size is expected
+to be R2 for key cache, and R for value cache. Later in                   4.2.1. C OMPARISON B ETWEEN D IFFERENT
+the experiment section, we show that this full precision                         Q UANTIZATION C ONFIGURATIONS
+sliding window is crucial for obtaining desirable perfor-                 We first utilize the fake quantization to demonstrate the effec-
+mance on hard tasks, such as GSM8K.                                       tiveness of our asymmetric quantization, namely, quantizing
+                                                                          key cache per-channel and value cache per-token. Here fake
+System Support. We provide a hardware-friendly imple-                     quantization is exactly the same as in Table 1. The results
+mentation for running KIVI on GPUs. To minimize the                       are shown in Table 3. We observe that “2bit (K per-channel,
+overhead, we have fused the dequantization process with                   V per-token)” consistently achieves the best results com-
+matrix multiplication, e.g., Q_MatMul in Figure 3, using                  pared to all other configurations. This is consistent with
+CUDA. We also implement the group-wise quantization ker-                  our previous analysis. We also note that for hard generation
+nel in Triton. Our method is fully compatible with weight-                tasks such as GSM8K, the fake “2bit (K per-channel, V
+only quantization.                                                        per-token)” quantization results are significantly worse than
+                                                                          the full precision counterparts. However, for KIVI in Table
+                                                                          3, we observe that the accuracy drop is only around 2% for
+4. Experiments                                                            GSM8K across different models. As we analyzed in Section
+4.1. Settings                                                             3.3, the difference between fake “2bit (K per-channel, V
+                                                                          per-token)” quantization and KIVI is that KIVI maintains
+Models. We evaluate KIVI using three popular model                        a full precision key and value cache sliding window for
+families: Llama/Llama-2 (Touvron et al., 2023a;b)), Fal-                  the local relevant tokens. This sliding window is crucial
+con (Penedo et al., 2023) and Mistral (Jiang et al., 2023).               to maintaining accuracy for hard generation tasks such as
+Llama and Mistral model is based on multi-head attention,                 mathematical reasoning.
+while Falcon is based on multi-query attention (Shazeer,
+2019). We use the Hugging Face Transformers codebase                      4.2.2. ACCURACY C OMPARISON ON G ENERATION
+and implement the KIVI algorithm upon it. Following                              TASKS
+previous work (Sheng et al., 2023), the group size G in
+Algorithm 1 for quantization is set as 32 across all experi-              LM-Eval Results. We benchmark KIVI on CoQA, Truth-
+ments, the residual length R for key and value cache is set               fulQA, and GSM8K tasks using LM-Eval framework. All
+to 128.                                                                   dataset parameters were set to default. We compare the
+                                                                          standard 16bit configuration with our KIVI compression
+                                                                          techniques across Llama-2-7B, Llama-2-13B, Falcon-7B,
+Tasks. As we analyzed in Section 2, the KV cache size
+                                                                          and Mistral-7B. As shown in Table 3, we observe that for
+grows larger with a longer context. Thus, we evaluate KIVI
+                                                                          the Llama and Mistral model, KIVI only has up to 2% ac-
+under the normal context length and long context setting,
+                                                                          curacy drop despite the KV cache being stored in 2bit. For
+respectively. Specifically, we adopt generation tasks from
+                                                                          instance, in the Llama-2-7B model, the transition from 16bit
+LM-Eval (Gao et al., 2021) for normal context length eval-
+                                                                          to 2bit only slightly decreases accuracy. Similar trends are
+uation and LongBench (Bai et al., 2023) for long context
+                                                                          observed in other Llama-family models. Since Falcon-7B
+evaluation, respectively1 . For LM-eval, we adopt CoQA
+                                                                          adopts multi-query attention and only has one head for KV
+(Exact match accuracy), TruthfulQA (BLEU score), and
+                                                                          cache, it is already highly compressed compared to Llama-
+GSM8K (Exact match accuracy). For LongBench, we chose
+                                                                          based models. Thus, in Table 3, 4bit KIVI is needed to
+tasks from four subgroups. Specifically, Qasper (F1 score)
+                                                                          maintain the accuracy, while 2bit KIVI may have a large
+is a Single-Document QA task; QMSum (ROUGE score)
+                                                                          accuracy drop in this case.
+and MultiNews (ROUGE score) are Summarization tasks;
+    1
+      The closed-end tasks such as MMLU are not ideal to evaluate
+KIVI since they only involve one decoding step and directly fetch         LongBench Results. The performance of KIVI over vari-
+the output logits, which is not suitable for studying the impact of       ous models in the LongBench dataset is summarised in Table
+compressed KV cache.                                                      4. We apply KIVI over Llama2-7B, Llama2-13B, Llama2-
+
+                                                                      6
+                                     KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache
+
+Table 3: Performance comparison between 16bit, 4-bit per-
+token quantization, four fake 2bit KV cache quantization
+similar to those in Table 1, KIVI-2 (2bit) / KIVI-4 (4bit)
+across various models. We emphasize that unlike KIVI,
+which preserves a small portion of full precision key cache
+XKr and value cache XVr , all tokens in fake KV cache
+quantization are quantized for a fair comparison. C stands
+for per-channel quantization and T stands for per-token
+quantization.
+
+ Model                                CoQA     TruthfulQA   GSM8K
+               16bit                   63.88     30.76      13.50
+               4bit (K - T, V - T)     64.82     29.85      12.28
+               2bit (K - C, V - T)     59.08     33.10      5.76
+ Llama-2-7B    2bit (K - T, V - T)     39.88     18.29      0.83
+               2bit (K - C, V - C)      3.60      0.27      0.00
+               2bit (K - T, V - C)      1.30      0.49      0.08
+               KIVI-4                  63.78     30.80      13.80
+               KIVI-2                  63.05     33.95      12.74
+               16bit                   66.37     29.53      22.67
+               4bit (K - T, V - T)     66.73     29.14      20.92
+               2bit (K - C, V - T)     63.53     28.60      12.21
+ Llama-2-13B   2bit (K - T, V - T)     52.93     24.98       4.55
+               2bit (K - C, V - C)      2.88      0.74       0.00       Figure 4: Memory usage and throughput comparison be-
+               2bit (K - T, V - C)      2.80      0.26      0.08
+                                                                        tween 2bit KIVI and 16bit baseline. KIVI can achieve
+               KIVI-4                  66.38     29.49      23.65
+               KIVI-2                  66.23     29.84      20.77       higher throughput by enabling a larger batch size.
+               16bit                   59.83     23.20       4.55
+               4bit (K - T, V - T)     58.53     22.94       3.26
+               2bit (K - C, V - T)     43.93     20.82       1.29       The effect of group size. We fix the residual length at 128
+ Falcon-7B     2bit (K - T, V - T)     25.72      0.91       0.53
+               2bit (K - C, V - C)     41.95     17.11       1.52       and vary the group sizes to 32, 64, and 128. From Table 5,
+               2bit (K - T, V - C)     19.53      0.94       0.15       we observe that group sizes 32 and 64 yield similar results,
+               KIVI-4                  59.67     22.58       4.47       whereas the performance significantly decreases when the
+               KIVI-2                  57.48     24.98       3.41
+                                                                        group size reaches 128. Note the zero-point and the scaling
+               16bit                   67.40     30.45      38.36
+                                                                        factor mentioned in Section 3.1 are calculated according to
+               4bit (K - T, V - T)     67.80     29.83      36.85
+                                                                        this group size; where the choice of group size will greatly
+               2bit (K - C, V - T)     61.65     29.64      26.46
+ Mistral-7B    2bit (K - T, V - T)     54.55     25.86       5.00       impact the KV cache compression effect under a long input.
+               2bit (K - C, V - C)     24.40     24.86       2.27
+               2bit (K - T, V - C)     10.73     19.12      0.99        The effect of residual length. We fix the group size at 32
+               KIVI-4                  66.95     30.49      37.30       and vary the residual length across 32, 64, 96, and 128. As
+               KIVI-2                  66.35     32.17      36.01       shown in Table 5, there is no consistent pattern between
+                                                                        residual lengths and model accuracy. Namely, while a resid-
+                                                                        ual length of 128 achieves good results, 32 and 96 yield
+7B-Chat, Llama2-13B-Chat, Falcon-7B and Mistral-7B. Ta-                 similar outcomes, but a residual length of 64 results in the
+ble 4 suggests that KIVI is an effective method for KV                  worst performance. We emphasize that while we observe no
+cache compression with minimal impact on accuracy across                significance among residual lengths of {32, 96, 128}, hav-
+various hard long context generation tasks. We also present             ing a reasonably large residual length is important; as
+additional results using Mistral-7B-v0.2 and LongChat-                  it brings much performance boosts on hard tasks like
+7B-v1.5 on LongBench, which can be found in Table 8                     GSM8K, again as shown in Table 5.
+and Table 9, respectively.
+                                                                        4.2.4. E FFICIENCY C OMPARISON
+4.2.3. A BLATION
+                                                                        To evaluate the wall-clock time efficiency of KIVI, follow-
+In this section, we benchmark KIVI on GSM8K, one of                     ing vLLM (Kwon et al., 2023), we synthesize workloads
+the hardest generation tasks, to show the effect of hyperpa-            based on ShareGPT (sha, 2023), which contain input and
+rameters group size G and residual length R on the model                output texts of real LLM services. On average, the data
+performance. For full results of KIVI with a residual length            set has an input prompt length lprompt of 161 and an output
+of 32, please refer to Appendix B.                                      length lgen of 338 (Kwon et al., 2023). We increase the batch
+
+                                                                    7
+                            KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache
+
+Table 4: Performance evaluation of KIVI on various models across a range of benchmarks in LongBench. We highlight the
+average performance of our method. More similar results on Mistral-7B-v0.2 and LongChat-7b-v1.5 can be found in
+Table 8 and Table 9
+
+ Model                      Qasper   QMSum         MultiNews   TREC       TriviaQA   SAMSum     LCC     RepoBench-P   Average
+                   16bit      9.52      21.28        3.51          66      87.72       41.69    66.66      59.82       44.52
+ Llama2-7B         KIVI-4     9.28      21.42        3.88          66      87.72       41.82     66.8      59.83       44.59
+                   KIVI-2     9.31       20.5        1.14          66      87.42       42.71    66.88      60.23       44.27
+                   16bit      9.32      21.38        3.71           70     87.87       43.55    66.61      56.42       44.85
+ Llama2-13B        KIVI-4     9.16      20.86        3.21           69     86.97       44.26     65.3      57.08       44.48
+                   KIVI-2     8.58      20.69        6.19          69.5    87.78        44.3    65.08      55.46       44.69
+                   16bit     19.65      20.54        26.36         63      84.28       41.12    59.75      52.93       45.95
+ Llama2-7B-Chat    KIVI-4    19.62       20.7        25.49         63      84.13       40.87    59.27      53.56       45.83
+                   KIVI-2    19.32      20.46        25.48         63      84.84        40.6    58.71      52.97       45.67
+                   16bit     24.18      20.37        25.69         67.5    86.9        42.18    50.23      50.64       45.96
+ Llama2-13B-Chat   KIVI-4     23        20.36        26.06         67.5    87.2        42.04    52.55      52.77       46.44
+                   KIVI-2    23.59      20.76        25.25         67.5    87.17       41.56    49.93      48.45       45.52
+                   16bit      1.48      2.35         11.09         13       5.84       2.44     23.86      9.69         8.71
+ Falcon-7B         KIVI-4     1.04      2.41         11.98         13       5.84       2.36     23.72      9.92         8.78
+                   KIVI-2     1.98      3.61          6.78         10       6.24       2.73     22.18      10.12        7.95
+                   16bit      8.12      19.98        19.99         67.5    89.8        41.69    66.59      58.99       46.58
+ Mistral-7B        KIVI-4     7.89      20.06        20.58         67.5     89.8       41.56    66.45      58.62       46.56
+                   KIVI-2     6.92      19.71        17.92         66.5    89.63       41.66    65.52      58.99       45.85
+
+
+
+Table 5: Ablation study of KIVI by changing group size G            et al., 2023; Wang et al., 2023; 2022). Among them,
+and residual length R.                                              quantization techniques have been widely applied (Fran-
+                                                                    tar et al., 2022; Lin et al., 2023; Kim et al., 2023; Xu
+         Model          Group Size       GSM8K                      et al., 2023). A main branch of LLM quantization is
+                             32            20.77                    weight-only quantization, which involves the quantization of
+         Llama2-13B          64            21.00                    model weights to lower precision. For instance, AWQ (Lin
+                            128            17.29                    et al., 2023) cleverly quantizes model weights to INT4 and
+         Model        Residual Length    GSM8K                      INT3 using an activation-aware manner. GPTQ (Frantar
+                                                                    et al., 2022) utilizes approximate second-order informa-
+                             32            20.62
+                             64            19.86
+                                                                    tion to quantize model weights both accurately and effi-
+         Llama2-13B                                                 ciently. SqueezeLLM (Kim et al., 2023) adopts the concept
+                             96            20.55
+                            128            20.77                    of sensitivity-based non-uniform quantization along with
+                                                                    Dense-and-Sparse decomposition. This line of work is or-
+size until out of memory and report the peak memory usage           thogonal to ours, as they can be combined together.
+and throughput between KIVI (with residual length 32 and
+                                                                    SmoothQuant (Xiao et al., 2023a) is a post-training quan-
+128) and FP16 baseline for the Llama-2-7B model. The
+                                                                    tization method that is more closely related to our work.
+hardware here is a single NVIDIA A100 GPU (80GB).
+                                                                    This method uses equivalent transformations to balance
+As shown in Figure 4, with similar maximum memory us-               the quantization complexity for both activation and weight,
+age, KIVI enables up to 4× larger batch size and gives              making the activation easier to quantize. SmoothQuant can
+2.35× ∼ 3.47× larger throughput. This throughput num-               compress KV cache to 8bit with minor performance loss.
+ber can grow larger with longer context length and output           However, it faces a significant accuracy drop when scaled
+length. We also note that this speed-up can be greatly              down to 4bit or less (Zhao et al., 2024). FlexGen adopts
+increased if we further fuse the KV cache quantization              4-bit per-token quantization for both key and value cache.
+process with previous operations. We leave it as one of
+                                                                    One important recipe of KIVI is the per-channel quanti-
+future work.
+                                                                    zation scheme designed base on observation made in Sec-
+                                                                    tion 3.2 and Figure 2. ATOM (Zhao et al., 2024) also identi-
+5. Related Work                                                     fies that the Key cache exhibits more outliers compared to
+                                                                    the Value cache. KIVI provides further extensive analysis
+Many machine learning system work have been proposed
+                                                                    and leverages this observation to implement per-channel
+to scale up LLM training and inference process (Pope
+
+                                                               8
+                             KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache
+
+quantization. A similar observation and approach have been         consequences of our work, none which we feel must be
+independently discovered and developed in the concurrent           specifically highlighted here.
+work KVQuant (Hooper et al., 2024).
+vLLM (Kwon et al., 2023) and S3 (Jin et al., 2023) are             References
+system-level works, which include memory management                ShareGPT Team. https://sharegpt.com/, 2023.
+through the use of PagedAttention or memory usage pre-
+diction. They can lower the memory requirements of KV              Joshua Ainslie, James Lee-Thorp, Michiel de Jong, Yury
+cache and simultaneously increase model throughput. This             Zemlyanskiy, Federico Lebrón, and Sumit Sanghai.
+research direction is orthogonal to our work, since system-          Gqa: Training generalized multi-query transformer
+level optimizations can also be applied upon our algorithm.          models from multi-head checkpoints. arXiv preprint
+                                                                     arXiv:2305.13245, 2023.
+Several other works also consider compressing KV cache
+by evicting tokens. H2O (Zhang et al., 2023) retains only          Yushi Bai, Xin Lv, Jiajie Zhang, Hongchang Lyu, Jiankai
+a small portion of tokens that contribute significantly to           Tang, Zhidian Huang, Zhengxiao Du, Xiao Liu, Aohan
+the attention scores. Similarly, Scissorhands (Liu et al.,           Zeng, Lei Hou, Yuxiao Dong, Jie Tang, and Juanzi Li.
+2024) exploit the persistence of the importance hypothesis           Longbench: A bilingual, multitask benchmark for long
+in KV cache sparsification. StreamingLLM (Xiao et al.,               context understanding. arXiv preprint arXiv:2308.14508,
+2023b) is based on the observation of “attention sink” and           2023.
+maintains only a few initial tokens to preserve performance.
+Unlike these works, our KIVI retains all input tokens and          Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah,
+compresses them into lower precision. This line of work is           Jared D Kaplan, Prafulla Dhariwal, Arvind Neelakantan,
+orthogonal to ours, as they also can be combined together.           Pranav Shyam, Girish Sastry, Amanda Askell, et al. Lan-
+                                                                     guage models are few-shot learners. Advances in neural
+                                                                     information processing systems, 33:1877–1901, 2020.
+6. Conclusion and Future Work
+                                                                   Tim Dettmers, Mike Lewis, Younes Belkada, and Luke
+In this paper, we systematically analyze KV cache element            Zettlemoyer. Llm. int8 (): 8-bit matrix multiplication for
+distribution in popular LLMs. We conclude that key cache             transformers at scale. arXiv preprint arXiv:2208.07339,
+should be quantized per-channel and value cache should               2022.
+be quantized per token. Based on these observations, we
+propose KIVI, a plug-and-play 2bit KV cache quantization           Elias Frantar, Saleh Ashkboos, Torsten Hoefler, and Dan
+algorithm without the need for any tuning. In real LLM               Alistarh. Gptq: Accurate post-training quantization
+workload, KIVI allows up to 4× larger batch sizes and                for generative pre-trained transformers. arXiv preprint
+3.47× throughput. In the future, we will further optimize            arXiv:2210.17323, 2022.
+the implementation to reduce the overhead of quantization
+                                                                   Leo Gao, Jonathan Tow, Stella Biderman, Sid Black, An-
+process during the prefill and decoding phase.
+                                                                     thony DiPofi, Charles Foster, Laurence Golding, Jeffrey
+                                                                     Hsu, Kyle McDonell, Niklas Muennighoff, et al. A frame-
+Acknowledgments                                                      work for few-shot language model evaluation. Version v0.
+                                                                     0.1. Sept, page 8, 2021.
+The authors thank the anonymous reviewers for their help-
+ful comments. Dr. Beidi Chen is supported by a research            Coleman Hooper, Sehoon Kim, Hiva Mohammadzadeh,
+gift from Moffett.AI. Dr. Vladimir Braverman is partially            Michael W Mahoney, Yakun Sophia Shao, Kurt Keutzer,
+supported by the Ministry of Trade, Industry and Energy              and Amir Gholami. Kvquant: Towards 10 million context
+(MOTIE) and Korea Institute for Advancement of Technol-              length llm inference with kv cache quantization. arXiv
+ogy (KIAT) through the International Cooperative R&D pro-            preprint arXiv:2401.18079, 2024.
+gram, the Naval Research (ONR) grant N00014-23-1-2737,
+and NSF CNS 2333887 award. Dr. Xia Hu is supported by              Albert Q Jiang, Alexandre Sablayrolles, Arthur Mensch,
+NSF grants NSF IIS-2224843. The views and conclusions                Chris Bamford, Devendra Singh Chaplot, Diego de las
+contained in this paper are those of the authors and should          Casas, Florian Bressand, Gianna Lengyel, Guillaume
+not be interpreted as representing any funding agencies.             Lample, Lucile Saulnier, et al. Mistral 7b. arXiv preprint
+                                                                     arXiv:2310.06825, 2023.
+Impact Statement                                                   Yunho Jin, Chun-Feng Wu, David Brooks, and Gu-Yeon
+                                                                     Wei. S3: Increasing gpu utilization during genera-
+This paper presents work whose goal is to advance the field          tive inference for higher throughput. arXiv preprint
+of Machine Learning. There are many potential societal               arXiv:2306.06000, 2023.
+
+                                                               9
+                             KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache
+
+Sehoon Kim, Coleman Hooper, Amir Gholami, Zhen Dong,                Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Mar-
+  Xiuyu Li, Sheng Shen, Michael W Mahoney, and Kurt                   tinet, Marie-Anne Lachaux, Timothée Lacroix, Baptiste
+  Keutzer. Squeezellm: Dense-and-sparse quantization.                 Rozière, Naman Goyal, Eric Hambro, Faisal Azhar, et al.
+  arXiv preprint arXiv:2306.07629, 2023.                              Llama: Open and efficient foundation language models.
+                                                                      arXiv preprint arXiv:2302.13971, 2023a.
+Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng,
+ Lianmin Zheng, Cody Hao Yu, Joseph Gonzalez, Hao                   Hugo Touvron, Louis Martin, Kevin Stone, Peter Albert,
+ Zhang, and Ion Stoica. Efficient memory management                  Amjad Almahairi, Yasmine Babaei, Nikolay Bashlykov,
+ for large language model serving with pagedattention. In             Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, et al.
+ Proceedings of the 29th Symposium on Operating Systems               Llama 2: Open foundation and fine-tuned chat models.
+ Principles, pages 611–626, 2023.                                     arXiv preprint arXiv:2307.09288, 2023b.
+
+Ji Lin, Jiaming Tang, Haotian Tang, Shang Yang, Xingyu              Zhuang Wang, Zhaozhuo Xu, Xinyu Wu, Anshumali Shri-
+   Dang, and Song Han. Awq: Activation-aware weight                   vastava, and TS Eugene Ng. Dragonn: Distributed ran-
+   quantization for llm compression and acceleration. arXiv           domized approximate gradients of neural networks. In
+   preprint arXiv:2306.00978, 2023.                                   International Conference on Machine Learning, pages
+                                                                      23274–23291. PMLR, 2022.
+Zichang Liu, Aditya Desai, Fangshuo Liao, Weitao Wang,
+  Victor Xie, Zhaozhuo Xu, Anastasios Kyrillidis, and An-           Zhuang Wang, Zhen Jia, Shuai Zheng, Zhen Zhang, Xinwei
+  shumali Shrivastava. Scissorhands: Exploiting the per-              Fu, T. S. Eugene Ng, and Yida Wang. Gemini: Fast
+  sistence of importance hypothesis for llm kv cache com-             failure recovery in distributed training with in-memory
+  pression at test time. Advances in Neural Information               checkpoints. In Proceedings of the 29th Symposium on
+  Processing Systems, 36, 2024.                                       Operating Systems Principles, 2023.
+                                                                    Guangxuan Xiao, Ji Lin, Mickael Seznec, Hao Wu, Julien
+Guilherme Penedo, Quentin Malartic, Daniel Hesslow,
+                                                                      Demouth, and Song Han. Smoothquant: Accurate and ef-
+  Ruxandra Cojocaru, Alessandro Cappelli, Hamza Alobei-
+                                                                      ficient post-training quantization for large language mod-
+  dli, Baptiste Pannier, Ebtesam Almazrouei, and Julien
+                                                                      els. In International Conference on Machine Learning,
+  Launay. The refinedweb dataset for falcon llm: outper-
+                                                                      pages 38087–38099. PMLR, 2023a.
+  forming curated corpora with web data, and web data
+  only. arXiv preprint arXiv:2306.01116, 2023.                      Guangxuan Xiao, Yuandong Tian, Beidi Chen, Song Han,
+                                                                      and Mike Lewis. Efficient streaming language models
+Reiner Pope, Sholto Douglas, Aakanksha Chowdhery, Ja-
+                                                                     with attention sinks. arXiv preprint arXiv:2309.17453,
+  cob Devlin, James Bradbury, Jonathan Heek, Kefan Xiao,
+                                                                      2023b.
+  Shivani Agrawal, and Jeff Dean. Efficiently scaling trans-
+  former inference. Proceedings of Machine Learning and             Zhaozhuo Xu, Zirui Liu, Beidi Chen, Yuxin Tang, Jue Wang,
+  Systems, 5, 2023.                                                   Kaixiong Zhou, Xia Hu, and Anshumali Shrivastava.
+                                                                      Compress, then prompt: Improving accuracy-efficiency
+Noam Shazeer. Fast transformer decoding: One write-head               trade-off of llm inference with transferable prompt. arXiv
+  is all you need. arXiv preprint arXiv:1911.02150, 2019.             preprint arXiv:2305.11186, 2023.
+Ying Sheng, Lianmin Zheng, Binhang Yuan, Zhuohan Li,                Jiayi Yuan, Ruixiang Tang, Xiaoqian Jiang, and Xia Hu.
+  Max Ryabinin, Beidi Chen, Percy Liang, Christopher Ré,               Large language models for healthcare data augmentation:
+  Ion Stoica, and Ce Zhang. Flexgen: High-throughput                   An example on patient-trial matching. In AMIA Annual
+  generative inference of large language models with a                 Symposium Proceedings, volume 2023, page 1324. Amer-
+  single gpu. In International Conference on Machine                   ican Medical Informatics Association, 2023.
+  Learning, pages 31094–31116. PMLR, 2023.
+                                                                    Zhenyu Zhang, Ying Sheng, Tianyi Zhou, Tianlong Chen,
+Ross Taylor, Marcin Kardas, Guillem Cucurull, Thomas                  Lianmin Zheng, Ruisi Cai, Zhao Song, Yuandong Tian,
+  Scialom, Anthony Hartshorn, Elvis Saravia, Andrew                   Christopher Ré, Clark Barrett, et al. H _2 o: Heavy-hitter
+  Poulton, Viktor Kerkez, and Robert Stojnic. Galactica:              oracle for efficient generative inference of large language
+  A large language model for science. arXiv preprint                  models. arXiv preprint arXiv:2306.14048, 2023.
+  arXiv:2211.09085, 2022.
+                                                                    Yilong Zhao, Chien-Yu Lin, Kan Zhu, Zihao Ye, Lequn
+Yuandong Tian, Yiping Wang, Beidi Chen, and Simon Du.                 Chen, Size Zheng, Luis Ceze, Arvind Krishnamurthy,
+  Scan and snap: Understanding training dynamics and                  Tianqi Chen, and Baris Kasikci. Atom: Low-bit quanti-
+  token composition in 1-layer transformer. arXiv preprint            zation for efficient and accurate llm serving. Proceedings
+  arXiv:2305.16380, 2023.                                             of Machine Learning and Systems, 6:196–209, 2024.
+
+                                                               10
+                            KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache
+
+A. Detailed Implementations
+In this section, we present the algorithm for KIVI as discussed in Section 3.3. Specifically, we provide the pseudocode for
+KIVI when calculating the attention output in the prefill and decoding phases.
+
+Algorithm 1: The KIVI Prefill & Decoding Algorithm
+parameter: group size G, residual length R
+procedure Prefill:
+   Input: X ∈ Rlprompt ×d
+   XK = XWK , XV = XWV
+   XVg = XV [: lprompt − R], XVr = XV [lprompt − R :]
+   Q(XVg ) ← GroupQuant(XVg , dim=token, numGroup=d//G)
+   Q(XKg ), XKr ← KeyQuant(XK )
+   KV cache ← Q(XKg ), XKr , Q(XVg ), XVr
+   return XK , XV
+end
+procedure Decoding:
+   Input: KV cache, t ∈ R1×d
+   tQ = tWQ , tK = tWK , tV = tWV
+   Q(XKg ), XKr , Q(XVg ), XVr ← KV cache
+   XKr ← Concat([XKr , tK ], dim=token)
+   XVr ← Concat([XVr , tV ], dim=token)
+   if len(XKr ) = R then
+        Q(XKr ), _ ←KeyQuant(XKr )
+        Q(XKg ) ← Concat([Q(XKg ), Q(XKr )], dim=token)
+        XKr ← empty tensor.
+   end
+   if len(XVr ) > R then
+        Q(XVr′ ) ← GroupQuant(XVr [: −R], dim=token, numGroup = d//G)
+        Q(XVg ) ← Concat([Q(XVg ), Q(XVr′ )], dim=token)
+        XVr ← XVr [−R :]
+   end
+   A ← Concat([tQ Q(XKg )⊤ , tQ XK   ⊤
+                                      r
+                                        ], dim=token)
+   Ag = Softmax(A)[: −R], Ar = Softmax(A)[−R :]
+   tO ← Ag Q(XVg ) + Ar XVr
+   KV cache ← Q(XKg ), XKr , Q(XVg ), XVr
+   return tO
+end
+function KeyQuant(XK ∈ Rl×d ):
+   r = l%R,
+   XKg = XK [: l − r], XKr = XK [l − r :]
+   Q(XKg ) ← GroupQuant(XKg , dim=channel, numGroup=l//G)
+   return Q(XKg ), XKr
+end
+
+
+B. More Experimental Results
+In our efficiency evaluation, we observe that with a residual length of 32, KIVI achieves a significantly higher memory
+compression rate, which in turn leads to increased throughput. Additionally, our ablation study reveals that changing the
+residual length from 128 to 32 does not result in a substantial performance gap. We demonstrate KIVI with a residual
+length of 32 across all benchmark datasets. As shown in Tables 6 and 7, KIVI with a residual length of 32 also delivers
+performance comparable to that of the 16-bit full model.
+We also present additional results using Mistral-7B-v0.2 and LongChat-7B-v1.5 on LongBench, which can be found in
+Table 8 and Table 9, respectively.
+
+                                                            11
+                            KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache
+
+
+
+
+Table 6: Performance comparison between 16bit, KIVI-2 (2bit) / KIVI-4 (4bit) with residual length 128 and 32 across
+various models. R32 stands for residual length 32.
+
+                          Model                               CoQA      TruthfulQA      GSM8K
+                                          16bit               63.88        30.76             13.50
+                          Llama-2-7B      KIVI-2 R128         63.05        33.95             12.74
+                                          KIVI-2 R32          62.85        33.01             13.57
+                                          16bit               66.37        29.53             22.67
+                          Llama-2-13B     KIVI-2 R128         66.23        29.84             20.77
+                                          KIVI-2 R32          66.57        29.35             20.62
+                                          16bit               59.83        23.20             4.55
+                                          KIVI-4 R128         59.67        22.58             4.47
+                          Falcon-7B       KIVI-4 R32          59.73        22.96             3.94
+                                          KIVI-2 R128         57.48        24.98             3.41
+                                          KIVI-2 R32          57.50        25.70             2.20
+                                          16bit               67.40        30.45             38.36
+                          Mistral-7B      KIVI-2 R128         66.35        32.17             36.01
+                                          KIVI-2 R32          65.90        31.21             34.34
+
+
+
+
+Table 7: Performance evaluation of KIVI with residual length 128 and 32 on various models across a range of benchmarks
+in LongBench. R32 stands for residual length 32.
+
+ Model                           Qasper   QMSum   MultiNews      TREC   TriviaQA   SAMSum       LCC     RepoBench-P   Average
+                   16bit          9.52    21.28     3.51          66     87.72       41.69      66.66      59.82       44.52
+ Llama2-7B         KIVI-2 R128    9.31     20.5     1.14          66     87.42       42.71      66.88      60.23       44.27
+                   KIVI-2 R32     9.26    20.53     0.97          66     87.42       42.61      66.22      59.67       44.08
+                   16bit          9.32    21.38     3.71          70     87.87       43.55      66.61      56.42       44.85
+ Llama2-13B        KIVI-2 R128    8.58    20.69     6.19         69.5    87.78        44.3      65.08      55.46       44.69
+                   KIVI-2 R32     8.38    20.74     7.01         69.5    87.78       44.43      64.89      55.31       44.75
+                   16bit          19.65   20.54     26.36         63     84.28       41.12      59.75      52.93       45.95
+ Llama2-7B-Chat    KIVI-2 R128    19.32   20.46     25.48         63     84.84        40.6      58.71      52.97       45.67
+                   KIVI-2 R32     19.1    20.08     25.33         63     85.04        39.8      57.91      52.38       45.33
+                   16bit          24.18   20.37     25.69        67.5    86.9        42.18      50.23      50.64       45.96
+ Llama2-13B-Chat   KIVI-2 R128    23.59   20.76     25.25        67.5    87.17       41.56      49.93      48.45       45.52
+                   KIVI-2 R32     23.56    20.9     25.45        67.5    87.42        41.4      48.93      48.81       45.49
+                   16bit          1.48     2.35     11.09         13      5.84       2.44       23.86      9.69        8.71
+                   KIVI-4 R128    1.04     2.41     11.98         13      5.84       2.36       23.72      9.92        8.78
+ Falcon-7B         KIVI-4 R32     1.03     2.45     11.99        13.5     5.84       2.46       23.88      9.95        8.88
+                   KIVI-2 R128    1.98     3.61      6.78         10      6.24       2.73       22.18      10.12       7.95
+                   KIVI-2 R32     2.28     3.23      6.73         10      6.31       2.88       22.71      10.45       8.07
+                   16bit          8.12    19.98     19.99        67.5    89.8        41.69      66.59      58.99       46.58
+ Mistral-7B        KIVI-2 R128    6.92    19.71     17.92        66.5    89.63       41.66      65.52      58.99       45.85
+                   KIVI-2 R32     6.84    19.81      17.2        66.5    89.63       42.82      65.13      58.06       45.74
+
+
+
+
+                                                            12
+                            KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache
+
+
+
+
+Table 8: The results of LongChat-7B-v1.5-32K with KIVI on LongBench. The model has 32K context length. We use a 32
+group size and 128 residual length for both KIVI-2 and KIVI-4 The baseline is of full precision.
+
+               NarrativeQA    Qasper    MultiFieldQA    HotpotQA    MuSiQue     2WikiMQA     GovReport     QMSum
+ Baseline          20.65       29.42        43.15         33.05       14.66        24.14        30.85       22.84
+ w./ KIVI-2        20.79       28.69        41.02         32.91       13.82        23.00        30.47       22.59
+ w./ KIVI-4        20.49       28.90        43.24         33.07       14.66        24.86        31.40       22.84
+                MultiNews       LCC     RepoBench-P     TriviaQA    SAMSum         TRec          PR          Avg
+ Baseline          26.55       54.83        58.94         83.99       40.75        66.50        30.50       38.72
+ w./ KIVI-2        26.28       54.11        57.62         83.19       41.28        66.50        32.25       38.30
+ w./ KIVI-4        26.52       54.06        58.77         83.88       40.62        67.00        31.50       38.79
+
+
+
+
+Table 9: The results of Mistral-7B-Instruct-v0.2 with KIVI on LongBench. The model has 32K context length and applies
+group query attention, which uses 8 heads for KV Cache instead of the full 32 heads. We use a 32 group size and 128
+residual length for both KIVI-2 and KIVI-4 The baseline is of full precision.
+
+               NarrativeQA    Qasper    MultiFieldQA    HotpotQA    MuSiQue     2WikiMQA     GovReport     QMSum
+ Baseline          21.02       29.41        47.13         36.53       19.13        21.76        32.59       23.99
+ w./ KIVI-2        20.61       28.73        44.88         35.47       17.95        20.68        32.55       23.65
+ w./ KIVI-4        20.97       29.41        46.52         36.25       19.53        21.66        32.97       24.06
+                MultiNews       LCC     RepoBench-P     TriviaQA    SAMSum         TRec          PR          Avg
+ Baseline          27.09       53.49        51.40         86.23       43.04        71.00        89.33       43.54
+ w./ KIVI-2        26.54       53.03        51.16         86.00       43.34        71.00        80.83       42.43
+ w./ KIVI-4        26.89       53.33        51.41         86.23       43.34        71.00        89.42       43.53
+
+
+
+
+                                                         13
+

@@ -1,0 +1,1335 @@
+            QueryAgent: A Reliable and Efficient Reasoning Framework with
+                   Environmental Feedback-based Self-Correction
+
+                        Xiang Huang1 , Sitao Cheng∗†1 , Shanshan Huang1 , Jiayu Shen1 ,
+                                 Yong Xu2 , Chaoyun Zhang2 , Yuzhong Qu1
+               1
+                 State Key Laboratory for Novel Software Technology, Nanjing University, China
+                                                  2
+                                                    Microsoft
+                               xianghuang@smail.nju.edu.cn, yzqu@nju.edu.cn
+
+
+                              Abstract                                                           ICL-based
+                                                                                Question                             Logic Form
+        Employing Large Language Models (LLMs)
+        for semantic parsing has achieved remarkable                         End-to-end for a complex task，prone to hallucinate
+        success. However, we find existing meth-                                                Agent-based
+        ods fall short in terms of reliability and effi-
+        ciency when hallucinations are encountered. In                     Question    Step 1        ...    Step N       Logic Form
+        this paper, we address these challenges with a
+                                                                                       Suffer from error propagation
+        framework called QueryAgent, which solves
+                                                                                                QueryAgent
+        a question step-by-step and performs step-
+        wise self-correction. We introduce an environ-                                              ERASER
+        mental feedback-based self-correction method
+        called ERASER. Unlike traditional approaches,                      Question    Step 1         ...    Step N      Logic Form
+        ERASER leverages rich environmental feed-                                               Reliable and Efficient
+        back in the intermediate steps to perform se-
+        lective and differentiated self-correction only                Figure 1: QueryAgent compared with two mainstream
+        when necessary. Experimental results demon-                    KBQA paradigms employing LLMs.
+        strate that QueryAgent notably outperforms all
+        previous few-shot methods using only one ex-                   times, and API invocation cost). Following the
+        ample on GrailQA and GraphQ by 5.7 and 15.0
+                                                                       popular In-Context Learning (ICL) paradigm,
+        F1. Moreover, our approach exhibits superi-
+        ority in terms of efficiency, including runtime,               Li et al. (2023) and Nie et al. (2023) generate
+        query overhead, and API invocation costs. By                   the target query with few-shot demonstrations.
+        leveraging ERASER, we further improve an-                      They consider LLMs as a black box and complete
+        other baseline (i.e., AgentBench) by up to 10.5                a complex task in one go. As a result, it lacks
+        points, revealing the strong transferability of                interpretability and is prone to hallucination (Yao
+        our approach.                                                  et al., 2023), leading to lower accuracy of the top-1
+                                                                       candidate. To alleviate these issues, they employ
+   1    Introduction
+                                                                       beam search and self-consistency (Wang et al.,
+   Recent advances in employing Large language                         2023). However, these also result in numerous
+   models (LLMs) on various tasks have exhibited im-                   unreliable candidates, thus increasing the running
+   pressive performance (Brown et al., 2020; OpenAI,                   time and query times. Typically, it requires
+   2023). Among these tasks, Knowledge Base Ques-                      querying thousands of SPARQL queries and
+   tion Answering (KBQA), which aims to answer                         several minutes to obtain the final answer.
+   questions over knowledge base (KB), has emerged                        For a complex task, solving it step-by-step has
+   as a critical and complex challenge, serving as an                  emerged as a promising solution (Wei et al., 2022;
+   ideal testbed for assessing the reasoning capabili-                 Zhou et al., 2023). AgentBench (Liu et al., 2024)
+   ties of LLMs over structured data (Gu et al., 2023).                implements an Agent-based (Yao et al., 2023)
+      However, despite their remarkable achieve-                       KBQA system by progressively invoking tools to
+   ments, we find that existing LLM-backend KBQA                       build the target query. However, its iterative nature
+   methods fall short in both reliability (the credibility             dictates that each step strictly relies on the previ-
+   of results) and efficiency (i.e., running time, query               ous steps. When hallucination occurs, subsequent
+        ∗
+            Equal contribution.                                        reasoning processes would be built upon erroneous
+        †
+            This work is done during the internship at Microsoft.      foundations, resulting in unreliable candidates and
+                                                                    5014
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 5014–5035
+                              August 11-16, 2024 ©2024 Association for Computational Linguistics
+meaningless resource wastage. Additionally, the          the effectiveness of QueryAgent and ERASER.
+necessity to invoke an LLM at each step renders          With only 1 example, QueryAgent notablely sur-
+beam search unaffordable, placing a high demand          passes all few-shot methods, which require up to
+on the accuracy of the top-1 results. In our pre-        100 shots, on GrailQA (+5.7), GraphQ (+15.0),
+liminary experiments, we observed that 35% of            WebQSP (+3.4), and MetaQA (+2.0). Moreover,
+the questions in AgentBench suffer from various          our approach exhibits significant efficiency im-
+hallucinations. As a result, AgentBench achieves         provements. Compared with ICL-based meth-
+unsatisfactory performance, only 57% F1 of the           ods, QueryAgent reduces runtime and query over-
+state-of-the-art ICL-based methods on GrailQA.           head to several orders. Compared with Agent-
+   In view of these challenges, we introduce a           based methods, QueryAgent allows for approxi-
+framework called QueryAgent to explore more              mately a 50% reduction in API invocation costs
+reliable and efficient reasoning in complex en-          and runtime. These results highlight the reliability
+vironments. Specifically, QueryAgent models              and efficiency of our methods. We also evaluate
+KBQA as a multi-turn generation task to step-            QueryAgent on a Text2SQL dataset (WikiSQL),
+by-step construct the target query with tools            and adapt ERASER to another system (Agent-
+and perform stepwise self-correction. To mit-            Bench), to demonstrate their versatility. Results re-
+igate the error accumulation issue of multi-             veal that QueryAgent outperforms the previous 32-
+step reasoning, we propose an environmen-                shot method by 6.9 points. Besides, ERASER rela-
+tal feedback-based self-correction method called         tively yields an additional improvement for Agent-
+ERASER (EnviRonmental feedbAck-based SElf-               Bench by 26% and 42% in F1 on the GrailQA and
+coRrection). For each LLM generated text,                GraphQ, respectively 1 .
+ERASER detects whether it is erroneous and ana-
+lyzes the possible causes based on the feedback          2       Related Work
+from environments (e.g., KB execution results,
+                                                         2.1      Few-shot KBQA
+Python interpreter execution status, previous rea-
+soning memory) in the intermediate steps. Upon an-       Recent advances in adopting LLMs for few-shot
+alyzing this feedback, ERASER provides potential         KBQA can be broadly categorized into 3 groups:
+causes of errors and general guidelines for correc-         1) ICL-based KB-BINDER (Li et al., 2023) and
+tion. Based on the guidelines, LLM can reconsider        KB-Coder (Nie et al., 2023) implement an ICL-
+and correct the erroneous result.                        based system by taking dozens of annotated ex-
+   Unlike previous self-correction methods (Pour-        amples into the prompt. Since they model this
+reza and Rafiei, 2023; Chen et al., 2023; Cheng          complex task as a simple end-to-end generation
+et al., 2024) which purposelessly correct every gen-     process, LLMs are directly confronted with a large
+erated result with the same few-shot demonstra-          search space and thus more likely to generate un-
+tions, the idea of ERASER is to actively identify        reliable results. Although they incorporate beam
+and differentiate various errors based on the rich       search and self-consistency to increase the likeli-
+environmental feedback in the intermediate reason-       hood of encompassing the correct logic form, these
+ing steps and then provide tailored guidelines for       also introduce the need to process a large number
+the distinct error type. With the help of various en-    of candidates. On average, to solve a question, it
+vironmental feedback, ERASER has a more solid            takes executing thousands of candidate queries and
+basis for precise detection, analysis, and correc-       several minutes to obtain the final answer.
+tion, rather than relying solely on the final answer.       2) IR-based Starting from an entity, StructGPT
+Moreover, ERASER distinguishes between differ-           (Jiang et al., 2023), and ToG (Sun et al., 2024)
+ent types of errors, allowing it to provide guidelines   iteratively walk on the graph, selecting the next
+specifically tailored for each error type. This tar-     neighboring entity to jump to, until finding the an-
+geted approach makes ERASER more purposeful              swer. Compared with the methods that generate
+and scalable. In situations where there are numer-       an executable query, these methods can only solve
+ous potential error scenarios, the guidelines for        questions whose reasoning process can be mod-
+different errors can be independently developed          eled as a single, non-branching chain. They can-
+without the need to encode all possible error cases      not model questions with multi-constraints whose
+to a single prompt.                                          1
+                                                             Our code will be released at https://github.com/
+   We conduct extensive experiments to evaluate          cdhx/QueryAgent
+
+                                                     5015
+query graph is a tree or graph. As they traverse in     approaches rely solely on the final output as the
+the KG to obtain the answer, they have limitations      basis for error correction, presenting substantial
+on questions whose answer is not an entity in the       challenges for LLMs to make accurate judgments.
+KG (e.g., aggregation or boolean question).                To address the above issues, we propose
+   3) Agent-based AgentBench (Liu et al., 2024)         ERASER, an environmental feedback-based self-
+utilizes some pre-defined SPARQL templates to           correction method.      Based on the feedback
+solve the question step-by-step, including acquiring    from the environment in the intermediate steps,
+the one-hop relation, merging two reasoning paths,      ERASER proactively identifies when errors arise
+adding aggregation, and so on. For a complex task,      and provides tailored guidelines.
+solving it step by step aligns with human intuition
+and helps reduce the potential search space. How-       3     Method
+ever, at each step, AgentBench heavily relies on the
+previous results, hence demanding high precision.       3.1   Overview
+We observe that AgentBench encounters various
+                                                        In this work, we model KBQA as a semantic pars-
+unexpected outputs during reasoning, leading to
+                                                        ing task. We propose an LLM-backed symbolic
+serious error accumulation. When hallucinations
+                                                        agent called QueryAgent which step-by-step con-
+arise in the preceding steps, the subsequent become
+                                                        structs formal queries with tools and performs
+meaningless or unreliable. These factors contribute
+                                                        stepwise self-correction. The process of QueryA-
+to inferior performance, which is only half as effec-
+                                                        gent can be divided into two parts: Query construc-
+tive as the ICL-based methods.
+                                                        tion and Self-Correction (ERASER). At each step,
+   In this work, based on the agent paradigm, we
+                                                        QueryAgent first generates the action to be taken,
+propose a reliable and efficient framework called
+                                                        then leverages environmental feedback to identify
+QueryAgent, and alleviate LLM’s hallucination by
+                                                        and distinguish potential errors. If an error is de-
+introducing a self-correction method.
+                                                        tected, the system provides tailored guidelines to
+2.2 Self-Correction                                     help LLMs perform error correction.
+                                                           The reliability and efficiency of QueryAgent are
+As the concern persists in the accuracy and ap-
+                                                        reflected in the following aspects. For reliability:
+propriateness of LLM’s generated content, self-
+                                                        1) It solves questions progressively rather than di-
+correction has been proposed as a remedy to these
+                                                        rectly outputting the complete answer. 2) We intro-
+issues (Pan et al., 2023). DIN-SQL (Pourreza and
+                                                        duce a correction process, namely ERASER, dur-
+Rafiei, 2023) utilizes a zero-shot prompt to rectify
+                                                        ing reasoning. 3) ERASER is purposeful and more
+errors in the generated SQL queries. The prompt
+                                                        precise than traditional self-correction method. For
+asks LLMs to examine the generated SQL queries
+                                                        efficiency: 1) The high accuracy of our top-1 can-
+for potential errors and correct them while skipping
+                                                        didate eliminates the need for beam search and
+those that are deemed error-free. Such intrinsic
+                                                        self-consistency. 2) Self-correction reduces mean-
+self-correction, which is solely based on LLMs’
+                                                        ingless reasoning along erroneous paths. 3) We
+inherent capabilities without the crutch of external
+                                                        perform self-correction only when necessary and
+feedback, fails to achieve significant improvement
+                                                        only incorporate related guideline to the prompt.
+and is unreliable (Huang et al., 2024). An intuitive
+improvement would be to incorporate few-shot
+                                                        3.2   Query Construction
+demonstrations in the prompt (Chen et al., 2023).
+However, this would result in longer prompts, and       To interact with KB and step-by-step build a target
+can only cover a limited number of scenarios. Since     query, we leverage PyQL (Huang et al., 2023) to
+they indiscriminately apply the same prompt to all      systematically construct the workflow. PyQL is a
+cases, LLMs may be confused about which ex-             management toolset designed for query building
+ample fits the current situation. Some works like       over knowledge bases, including various tools to in-
+SALAM (Wang and Li, 2023) train a model to re-          corporate clauses to the final executable query (i.e.,
+trieve the most similar error case. Even so, it still   SPARQL) , such as adding triple patterns, filters,
+can not ensure precise error discrimination and is      aggregations, etc. As the final SPARQL query can
+heavyweight. Besides, the above methods over-           be transformed from a sequence of PyQL functions,
+look the rich feedback that the environment (e.g.,      our objective is to generate these PyQL functions
+KB, DB) can provide for error correction. These         incrementally during the multi-turn interaction.
+                                                    5016
+         Question: How many key designers does a computer designed by tom_kilburn have?                                                                               Guidelines
+                                                                                                                                                  A
+                                                                                                                                                      (Memory) You add a triple pattern where the
+     Thought: Based on the guideline, we              Thought: Among the relations, the most       Thought: The question is to ask ... So             head and tail are both new variables. This
+     need to revise the action to ...                 possible relation is "computer_designed".    firstly we need to get the relation of             triple cannot bind to the existing query graph.
+     Action: add_fact(tom_kilburn,                    Action: add_fact(?designer,                  tom_kilburn.                                       I suggest you reconsider the head and tail
+     computer_designed, ?computer.)                   computer_designed, ?computer.)               Action: get_relation(tom_kilburn)
+                                               3                                              2                                           1           entity.
+                              Guideline A                                         No Errors
+  No Errors                                                                                                                                       B
+                                                                                                                                                      (Python) get_relation func needs one
+     Thought: ... Now we need to get                                                                                                                  parameter to indicate which entity or variable
+                                                                                                                                                      you want to get the one-hop relations.
+     the relation of ?computer.                                                             ERASER                                                    However, you pass in no parameter. I suggest
+     Action: get_relation()
+                                       4                                                                                                              you generate get_relation with one parameter
+                                                                                                                                                      from AVAILABLE_ENTITY_LIST
+  Guideline B                                                    Environment                                                   Guidelines             or AVAILABLE_VARIABLE_LIST next time.
+                                                                                                     Error detection &
+     Thought: Based on the previous                                                                                                               C
+                                                     KB
+                                                                     Python          Reasoning          distinguish
+     guideline, we need to correct the
+                                                                  interpreter         Memory                                                          (KB and Memory) Execution on KB got an
+     action to ...                                                                                                                                    empty result. I notice that the relation you
+     Action: get_relation(?computer)                                                                                                                  use is not one of the relations of ?computer
+                                         5                                                                                                            you just queried by get_relation(). You can
+  No Errors                                        Guideline C                                        No Errors                                       only choose the relation obtained by
+                                                                                                                                                      get_relation(), otherwise, you may encounter
+     Thought: ... the most possible relation          Thought: Based on the guideline, we                                                             factual error.
+                                                                                                   Thought: ... Now we need to acquire the
+     is "key_designer" ...                            should use "key_designer" ...
+                                                                                                   number of ?designer as the answer.
+
+
+
+
+                                                                                                                                                                           ...
+     Action: add_fact( ?computer,                     Action: add_fact( ?computer,
+                                                                                                   Action: add_count(?designer)                                                   (Other guidelines)
+     computer_designer, ?designer.)                   key_designer, ?designer.)
+                                               6                                              7                                               8
+                                                                                                                                                  *            KB_EXECUTION_RESULT
+    Logic Form: SELECT COUNT(?designer) AS ?ans WHERE                                                                                                            (No errors detected.)
+                       { tom_kilburn computers_designed ?computer. ?computer key_designer ?designer. }
+
+
+Figure 2: An example of QueryAgent and ERASER. At each step, the LLM generates thought and action based on
+the previous steps. Based on the action’s execution status (KB and Python) and reasoning memory, ERASER detects
+whether an error exists. If no error is detected, the observation of this step is the execution result on KB(i.e., guideline
+*), and LLM is conducting normal reasoning. Otherwise, the observation is the corresponding self-correction
+guideline(e.g., guideline A/B/C), and LLM is conducting self-correction.
+
+   As shown in Figure 2, at each step, the LLM pro-                                                    ERASER. The key ideas underlying ERASER are
+vides its thoughts over the current step and suggests                                                  to let the environment “speak out” and distinguish
+the next action to be taken. The action is a PyQL                                                      different types of errors. We require the system
+function, we execute it to obtain the results as the                                                   to provide feedback on its current status and any
+observation from the environment. For the exam-                                                        encountered errors. Based on this feedback, we
+ple in Figure 2, the LLM suggests firstly to obtain                                                    attempt to identify what types of errors arise and
+the one-hop relations of “tom kilburn” (thought)                                                       then provide targeted and valuable guidance.
+and the function get_relation(tom_kilburn)                                                                The feedback mainly originates from three en-
+should be invoked at this step (action). By exe-                                                       vironments: Knowledge Base, Python Interpreter,
+cuting this function, we obtain relations around                                                       and Reasoning Memory. For example, KB can pro-
+“tom kilburn” for the next step (observation). This                                                    vide feedback such as: whether the executed result
+process is iteratively repeated. When the reasoning                                                    is empty, whether the reasoning process ends with a
+process concludes, we execute all generated PyQL                                                       blank node (CVT) or multiple variables, error mes-
+functions to obtain the answer. Given that each                                                        sages from the query engine, and so on. The Python
+step corresponds to an executable query, we can                                                        interpreter can provide error messages of various
+easily observe the result of the current reasoning                                                     invalid function calls (e.g., not enough values to
+process, similar to how humans progressively write,                                                    unpack). For reasoning memory, we can access in-
+execute, and validate a query.                                                                         formation including but not limited to: what steps
+   The prompt consists of four parts: the task de-                                                     have been taken, what variables have been created,
+scription, the document of available functions, a                                                      and the executed results of the previous steps.
+running example, and the new question. We first                                                           By analyzing the above feedback, we can de-
+provide an overview of the task and the rules that                                                     tect some errors and determine the cause of them.
+must be followed. Then we provide a brief docu-                                                        As illustrated in Figure 2, an error is raised by
+ment of all available functions. Following that, we                                                    the Python interpreter at the fourth step due to
+present a detailed step-by-step reasoning process                                                      insufficient parameters in the generated action.
+of an example question. Finally, we concatenate                                                        We choose the corresponding guideline (guideline
+the new question that needs to be solved at the end.                                                   B) as the observation of this step. By injecting
+                                                                                                       the guideline into the reasoning process, normal
+3.3 ERASER                                                                                             reasoning and self-correction are under the same
+In this section, we propose an EnviRonmental                                                           framework, without the need to design another
+feedbAck-based SElf-coRrection method called                                                           model or agent for self-correction. In the sixth
+                                                                                                  5017
+step, the query engine yields an empty result after a           Dataset         Training       Dev       Test
+triple pattern constraint is added. According to the
+                                                               G RAIL QA         44,337       6,763     13,231
+reasoning memory, we have acquired the relations
+                                                                G RAPH Q          2,381         -        2,395
+of “?computer”, but the chosen relation is not any              W EB QSP          3,098         -        1,639
+of them. It is likely an incorrect relation was chosen       M ETAQA-3 HOP       114,196     14,274     14,274
+in the previous steps. This example also showcases              W IKI SQL        56,355       8,421     15,878
+the importance of leveraging various feedback from
+different environments for error distinction. For in-           Table 1: Statistics of experiment datasets.
+stance, whether or not the system has obtained the
+relations of the head/tail entity can be indicative      vocation of the LLM occurs exclusively when an
+of two distinct causes of error, but they both mani-     error is detected. The correction prompt is a general
+fest as empty results in the execution. Compared         guideline rather than lengthy few-shot examples.
+with the previous methods which only focus on the
+final answer, this rich environmental feedback in        4     Experiment
+the intermediate steps can provide more basis for        4.1    Datasets
+detecting and distinguishing various errors.
+   The guidelines in ERASER are the description          We experiment QueryAgent on four KBQA
+of what abnormal conditions occur and some pos-          datasets. The statistics can be found in Table 1. We
+sible solutions. They are manually written and           report the performance on the dev set of GrailQA
+built-in within the code. Examples are shown in          and the performance on test set of other datasets.
+the right part of Figure 2. Guideline A describes        G RAIL QA (Gu et al., 2021) is a large-scale com-
+what abnormal situation that has happened (where         plex dataset that evaluates three levels of general-
+the head and tail entity are both new variables),        ization (i.e., i.i.d., compositional, and zero-shot)
+and provides the correct direction (to reconsider        G RAPH Q (Su et al., 2016) is a particularly chal-
+the head and tail entity). The LLM receives this         lenging dataset given that it exclusively focuses on
+as a reference and successfully generates a cor-         non-i.i.d. generalization. In this paper, we use the
+rect function. Compared with some code genera-           processed version by Gu and Su (2022).
+tion work which simply returns the original system       W EB QSP (Yih et al., 2016) is a simple KBQA
+error message (Chen et al., 2023), the guideline         dataset with questions from Google query logs. It
+provided in the prompt can be seen as an interme-        mainly tests i.i.d. generalization.
+diate language. It shields the LLM from directly         M ETAQA (Zhang et al., 2018) consists of 1-3 hops
+considering the original error, instead focusing on      question based on Wiki-Movies KG. We experi-
+easier-to-comprehend guidance, which ultimately          ment on the most difficult 3-hop subset (denoted as
+contributes to a successful correction. Besides, by      MetaQA-3Hop).
+injecting the guidelines into the reasoning process,
+ERASER has no need for designing another spe-            4.2    Experimental Setup
+cific module or agent to perform self-correction.        We use gpt-3.5-turbo (OpenAI, 2022) for our
+   In this manner, we only need to establish checks      experiments by default. We use F1 as the evalua-
+for potential errors based on various environmen-        tion metric on all datasets. For baselines with the
+tal feedback and provide correction suggestions          same setting, we report the performance from their
+for each type of error. During reasoning, the sys-       original paper. KB-BINDER uses Codex which
+tem will choose the corresponding guideline based        has been deprecated. For a fair comparison, we
+on the type of error being triggered to perform          report the performance reproduced by KB-Coder
+self-correction. To summarize, ERASER has the            with gpt-3.5-turbo. For KB-BINDER and KB-
+following advantages: 1) Purposeful and Precise:         Coder, we compare the setting without similarity
+ERASER has the ability to detect errors. For each        retrieval since it is not a strict few-shot setting that
+error, it provides tailored guidelines that relate to    requires the whole annotated training set can be
+the current situation. 2) Independent and Scal-          accessed. AgentBench reports performance on a
+able: The trigger for each type of error is inde-        mixed subset and uses golden linking results. We
+pendent. It provides convenience for incremental         reproduce AgentBench with the same entity link-
+development without affecting the results of other       ing result as ours. We also implement the one-shot
+questions. 3) Lightweight and Economical: In-            setting of KB-BINDER based on their public code.
+                                                     5018
+         Methods                             GrailQA       GraphQ       WebQSP       MetaQA-3Hop
+         fine-tuning
+         ArcaneQA (Gu and Su, 2022)               73.7          31.8         75.6                     -
+         TIARA (Shu et al., 2022)                 78.5             -         76.7                     -
+         DecAF (Yu et al., 2023)                  81.4             -         78.8                     -
+         Pangu(T5-3B) (Gu et al., 2023)           83.4          57.7         79.6                     -
+         few-shot
+         Pangu (Gu et al., 2023)                  53.5          35.4         48.6                    -
+         KB-BINDER (Li et al., 2023)              50.8          34.5         56.6                 96.5
+         KB-Coder (Nie et al., 2023)              51.7          35.8         60.5                    -
+         McL-KBQA (Tan et al., 2023)              54.8             -         59.8                    -
+         one-shot
+         KB-BINDER (Li et al., 2023)              16.8           4.8          9.0                 65.3
+         AgentBench (Liu et al., 2024)            30.5          25.1         26.4                    -
+         Ours                                     60.5          50.8         63.9                 98.5
+            w/ GPT4                               66.8          63.0         69.0                 99.9
+
+Table 2: Overall results on GrailQA, GraphQ, WebQSP, and MetaQA-3Hop. All datasets are evaluated by F1. For
+the few-shot setting, Pangu uses 100-shot for all datasets. KB-BINDER and KB-Coder use 40-shot for GrailQA and
+100-shot for GraphQ and WebQSP. KB-BINDER uses 5-shot for MetaQA-3Hop. McL-KBQA uses 221-shot and
+144-shot for GrailQA and WebQSP, respectively.
+
+
+4.3 Main Result                                                Method               GrailQA      GraphQ
+As shown in Table 2, with only one example, our                Ours                       60.5        50.8
+method outperforms all few-shot methods that re-                w/o ERASER                43.7        35.3
+quire up to 100 annotations on all four datasets.               w/ zero-shot SC           38.5        30.2
+For GrailQA and GraphQ, our method notably                      w/ few-shot SC            48.0        40.1
+surpasses the best few-shot methods by 5.7 and
+                                                         Table 3: Ablation study of ERASER and a comparison
+15.0 points. On WebQSP, QueryAgent slightly              with other methods. The w/o ERASER setting replaces
+surpasses 100-shot methods by 3.4 points. It is          the guideline with the original error message. Zero-shot
+expected considering the inherent characteristics        SC indicates the “generic” self-correction prompt of
+of the datasets. Since all WebQSP questions are          DIN-SQL (Pourreza and Rafiei, 2023). Few-shot SC
+under I.I.D. setting and this dataset is relatively      indicates the “explanation feedback prompt” of Self-
+small, few-shot methods have more opportunities          Debug (Chen et al., 2023). We follow and implement
+                                                         their ideas in our tasks.
+to encounter similar questions within the prompts.
+In contrast, most of the questions of GrailQA are
+                                                         produce the one-shot result of KB-BINDER. The
+compositional and zero-shot questions, and 100%
+                                                         dramatic decline in performance exposes some lim-
+of GraphQ are compositional questions. Few-shot
+                                                         itations of the ICL-based method in terms of exam-
+methods lose this advantage on such question types,
+                                                         ple quantity.
+which can reasonably explain why our approach
+exhibits a more pronounced advantage on GrailQA          5     Detailed Analysis
+and GraphQ. Additionally, all few-shot methods
+incorporate beam search or self-consistency to fur-      To gain more insights into QueryAgent’s strong
+ther boost the performance. It also implies that         performance, we conduct some in-depth analysis.
+there is still space for improvement in our method
+if we also choose a more costly setting.                 5.1    Ablation Study
+   Compared with the one-shot methods, the perfor-       In this section, we analyze how ERASER con-
+mance of QueryAgent approximately doubles that           tributes to reliable reasoning and compare it with
+of Agentbench, elevating the Agent-based method          other self-correction methods. The result is shown
+and one-shot KBQA to a new level. We also re-            in Table 3. ERASER improves for 16.8 and 15.5
+                                                    5019
+                            GrailQA                       GraphQ                         WebQSP
+   Methods
+                    TPQ      QPQ        CPQ      TPQ        QPQ        CPQ       TPQ       QPQ       CPQ
+   KB-BINDER       51.2 s   3297.7    $ 0.010   84.0 s    2113.8     $ 0.024   138.6 s   8145.1    $ 0.017
+   AgentBench      40.0 s      7.4    $ 0.034   65.1 s       7.2     $ 0.035    70.4 s      7.2    $ 0.038
+   Ours            16.6 s       5.2   $ 0.019   15.3 s         6.2   $ 0.021    12.6 s       4.7   $ 0.014
+Table 4: Efficiency comparison with KB-BINDER and AgentBench. The TPQ, QPQ, and CPQ respectively
+represent the time cost, SPARQL query times, and gpt-3.5-turbo invocation cost per question.
+
+points for GrailQA and GraphQ, demonstrating             thing worth noting is that more attempts also im-
+the effectiveness of our method. For the baseline        ply a lower accuracy of the top-1 candidate and
+method, zero-shot SC failed to boost the perfor-         a higher proportion of low-quality candidates. In
+mance further and even exhibited negative gains.         contrast, our method only selects the top-1 candi-
+The few-shot method has made some improve-               date at a time, which means it requires the method
+ments but not that significant and its prompt is         to possess a high level of precision at each step.
+considerably longer than ERASER. It is expected          However, even under such extreme constraints, our
+since few-shot SC can only cover limited scenar-         approach still outperforms other methods.
+ios and LLM needs to figure out which part in the           As for the CPQ, our method incurs slightly
+prompt is related to the current situation. We also      higher costs in terms of LLM invocation compared
+manually analyzed 200 questions of GrailQA to            to KB-BINDER. Our method is a step-by-step rea-
+investigate how ERASER influences the reasoning          soning process, and while it has many advantages,
+process. We find that 43% of questions utilized          we acknowledge that it also has an inevitable issue
+ERASER in their reasoning processes. Among               of requiring multiple requests to the LLM. How-
+them, 30% questions were completely corrected.           ever, on the flip side, KB-BINDER needs to con-
+Given that our error detection strategy is conserva-     catenate many examples, which also faces the chal-
+tive, each steps that triggered the ERASER were          lenge of having a long prompt. In fact, on the
+indeed found to contain errors during reasoning.         100-shot setting, the CPQ of using KB-BINDER
+                                                         has already exceeded that of our method.
+5.2 Efficiency Analysis                                     On the other hand, compared with AgentBench,
+In this section, we evaluate the running efficiency.     our method also surpasses it on all three criteria. It
+We conduct both horizontal and vertical compar-          is noteworthy that our method is not only faster and
+isons by comparing KB-BINDER, which utilizes             cost-effective but also achieves approximately dou-
+a different paradigm, and AgentBench, which is           ble the QA performance compared to AgentBench.
+similar to ours. We analyzed the time cost per           At first glance, the incorporation of ERASER is a
+question (TPQ), query times per question (QPQ),          negative factor for efficiency evaluation since the
+and LLM calling cost per question (CPQ). All tests       prompt becomes longer than a regular reasoning
+were conducted in the same network environment,          process. Nonetheless, from a different perspective,
+with each experiment running independently.              timely and accurate error correction prevents the
+    As shown in Table 4, compared with KB-               system from deviating further in the wrong direc-
+BINDER, our method exhibits overwhelming ad-             tion and reduces the overhead caused by meaning-
+vantages in terms of TPQ and QPQ, while CPQ is a         less reasoning processes. Consequently, to some
+little higher on GrailQA. This outcome aligns with       extent, a reliable reasoning process ultimately con-
+our expectations. KB-BINDER needs to conduct             tributes to achieving efficient reasoning. Besides,
+a beam search step by step to collect a large pool       by only performing corrections when necessary and
+of candidates and then execute them one by one           distinguishing different types, we have managed to
+to find the first executable query, which requires       minimize the costs of ERASER.
+querying numerous SPARQLs. Additionally, KB-
+                                                         5.3   Generalization Ability
+BINDER uses self-consistency by repeating this
+paradigm for K times to boost the performance,           In this section, we analyze the generalization ability
+leading to (K − 1)× extra cost. To some extent,          of our method and ICL-based method from qualita-
+these also lead to a longer running time. Another        tive analysis and experimental comparisons.
+                                                   5020
+       Methods                    WikiSQL                   Methods       GrailQA     GraphQ      WebQSP
+       few-shot(32 shot)                                    AgentBench         30.5        25.1        26.4
+       Davinci-003                      49.1                  w ERASER         38.5        35.6        32.0
+       ChatGPT                          51.6
+                                                        Table 6: Performance of AgentBench with ERASER.
+       StructGPT(Davinci-003)           64.6
+       StructGPT(ChatGPT)               65.6
+                                                        2017) as the experiment dataset. To acquire the exe-
+       one-shot                                         cution feedback from the database environment, we
+       AgentBench                       57.6            implement a SQL-version PyQL to help LLM ac-
+       Ours                             72.5            cess the database and provide tools to construct the
+         w/o ERASER                     67.0            SQL query. We compare our method with Struct-
+Table 5: The results of QueryAgent on WikiSQL. We       GPT (Jiang et al., 2023). The baseline results of
+evaluate denotation accuracy.                           Dacinci-003 and ChatGPT also come from Struct-
+                                                        GPT. Our method outperforms the few-shot method
+   Methodologically speaking, our method tack-          with 32 examples. Besides, ERASER contributes
+les the question step-by-step with atomic symbolic      to 7.6% of performance, indicating the generaliza-
+tools. By decomposing the problem into multi-           tion ability of our self-correction method.
+ple reasoning steps, we bridge the semantic gap            Another experiment (i.e., AgentBench +
+between different questions and datasets, as all        ERASER) is to further verify that ERASER can en-
+questions can be represented using these limited        hance the existing Agent-based KBQA system. Ta-
+tools. However, the combination of these steps can      ble 6 shows that ERASER further improves the per-
+be numerous, posing challenges for compositional        formance of AgentBench by 8.0 and 10.5 points on
+generalization. ICL-based methods learn and gen-        GrailQA and GraphQ. By integrating ERASER, we
+erate the complete query at once, directly facing       have elevated the performance of another method
+and bearing the significantly larger search space.      to a new level, highlighting the versatility and plug-
+   From the perspective of the experiment, KB-          and-play nature of ERASER.
+BINDER is sensitive to whether similar examples
+appear in the prompt. If the most similar ques-         6    Conclusion
+tions are retrieved as examples in the prompt, KB-      In this paper, we present a reliable and efficient
+BINDER can achieve up to 20 point improvement           framework called QueryAgent, which constructs
+on WebQSP (100% i.i.d.) but a negative boost on         the target query step-by-step with tools and per-
+GraphQ (100% non-i.i.d.). In contrast, our method       forms stepwise self-correction. We also introduce
+uses the same example for all questions. Another        a novel self-correction method called ERASER. It
+observation is that, the higher the proportion of       leverages rich environmental feedback to enable
+non-iid questions in the dataset, the greater the de-   selective and differentiated self-correction, depart-
+gree to which our approach exceeds the ICL-based        ing from the conventional approach which only
+approach. Compared to GrailQA (75% non-i.i.d.),         uses the final result to conduct correction on ev-
+QueryAgent demonstrates greater improvement on          ery output with the same prompt. Experimental
+GraphQ (100% non-i.i.d.). This can also serve as        results demonstrate that QueryAgent notably out-
+evidence that QueryAgent has better generalization      performs all existing few-shot methods on four
+on unrelated examples.                                  KBQA datasets with only a single example, es-
+                                                        pecially on GrailQA (+5.7) and GraphQ (+15.0).
+5.4 Transfer Experiment                                 Moreover, QueryAgent also exhibits superiority
+In the previous sections, we choose KBQA as a rep-      in efficiency with faster solving speed and lower
+resentative testbed to instantiate QueryAgent and       resource utilization. Compared to ICL-based meth-
+ERASER. To illustrate the versatility of our rea-       ods, our approach reduces runtime and query costs
+soning framework and ERASER, in this section,           by a factor of tens, while compared to Agent-based
+we conduct another two experiments: 1) we imple-        methods, it reduces time and API invocation costs
+ment QueryAgent framework on another seman-             by more than half. We also show the versatility
+tic parsing task, namely Text2SQL. 2) we adapt          of QueryAgent and ERASER by evaluating them
+ERASER to AgentBench.                                   on a Text2SQL dataset and applying ERASER on
+   We choose the test set of WikiSQL (Zhong et al.,     another system (AgentBench). QueryAgent outper-
+                                                    5021
+forms previous few-shot methods and ERASER fur-             Yu Gu, Xiang Deng, and Yu Su. 2023. Don’t generate,
+ther boosts the performance of AgentBench.                    discriminate: A proposal for grounding language
+                                                              models to real-world environments. In Proceedings
+                                                              of the 61st Annual Meeting of the Association for
+Limitations                                                   Computational Linguistics (Volume 1: Long Papers),
+                                                              pages 4928–4949, Toronto, Canada. Association for
+Here we would like to discuss several limitations             Computational Linguistics.
+of our method. Firstly, the various feedback is the
+basis to detect and distinguish different errors. If        Yu Gu, Sue Kase, Michelle Vanni, Brian Sadler, Percy
+the feedback is unavailable or too simplistic, such           Liang, Xifeng Yan, and Yu Su. 2021. Beyond I.I.D.:
+                                                              Three levels of generalization for question answer-
+as only providing the final answer, there is insuf-
+                                                              ing on knowledge bases. The Web Conference 2021
+ficient information to confidently conduct error              - Proceedings of the World Wide Web Conference,
+detection and differentiate between various error             WWW 2021, 2021:3477–3488.
+types. Therefore, ERASER may have limited bene-
+fits in end-to-end approaches or when applied to a          Yu Gu and Yu Su. 2022. ArcaneQA: Dynamic program
+                                                              induction and contextualized encoding for knowl-
+too simple environment. Another limitation is that,           edge base question answering. In Proceedings of
+while step-by-step solving is widely recognized as            the 29th International Conference on Computational
+a promising way of addressing complex tasks, it in-           Linguistics, pages 1718–1731, Gyeongju, Republic
+evitably leads to the issue of lengthy prompts. The           of Korea. International Committee on Computational
+                                                              Linguistics.
+cost can be further minimized by optimizing histor-
+ical encoding and prompt engineering. However,              Jie Huang, Xinyun Chen, Swaroop Mishra,
+these engineering techniques are not the primary               Huaixiu Steven Zheng, Adams Wei Yu, Xiny-
+focus of this study.                                           ing Song, and Denny Zhou. 2024. Large language
+                                                               models cannot self-correct reasoning yet. In The
+Acknowledgements                                               Twelfth International Conference on Learning
+                                                               Representations.
+This work is supported by the National Natural
+                                                            Xiang Huang, Sitao Cheng, Yuheng Bao, Shanshan
+Science Foundation of China (NSFC) under Grant                Huang, and Yuzhong Qu. 2023. MarkQA: A large
+No. 62072224. The authors would like to thank all             scale KBQA dataset with numerical reasoning. In
+anonymous reviewers for their advice.                         Proceedings of the 2023 Conference on Empirical
+                                                              Methods in Natural Language Processing, pages
+                                                              10241–10259, Singapore. Association for Compu-
+                                                              tational Linguistics.
+References
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie               Jinhao Jiang, Kun Zhou, Zican Dong, Keming Ye, Xin
+  Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind           Zhao, and Ji-Rong Wen. 2023. StructGPT: A general
+  Neelakantan, Pranav Shyam, Girish Sastry, Amanda             framework for large language model to reason over
+  Askell, Sandhini Agarwal, Ariel Herbert-Voss,                structured data. In Proceedings of the 2023 Con-
+  Gretchen Krueger, Tom Henighan, Rewon Child,                 ference on Empirical Methods in Natural Language
+  Aditya Ramesh, Daniel Ziegler, Jeffrey Wu, Clemens           Processing, pages 9237–9251, Singapore. Associa-
+  Winter, Chris Hesse, Mark Chen, Eric Sigler, Ma-             tion for Computational Linguistics.
+  teusz Litwin, Scott Gray, Benjamin Chess, Jack
+  Clark, Christopher Berner, Sam McCandlish, Alec           Tianle Li, Xueguang Ma, Alex Zhuang, Yu Gu, Yu Su,
+  Radford, Ilya Sutskever, and Dario Amodei. 2020.             and Wenhu Chen. 2023. Few-shot in-context learning
+  Language models are few-shot learners. In Ad-                on knowledge base question answering. In Proceed-
+  vances in Neural Information Processing Systems,             ings of the 61st Annual Meeting of the Association for
+  volume 33, pages 1877–1901. Curran Associates,              Computational Linguistics (Volume 1: Long Papers),
+  Inc.                                                         pages 6966–6980, Toronto, Canada. Association for
+                                                               Computational Linguistics.
+Xinyun Chen, Maxwell Lin, Nathanael Schärli, and
+  Denny Zhou. 2023. Teaching large language models          Xiao Liu, Hao Yu, Hanchen Zhang, Yifan Xu, Xuanyu
+  to self-debug.                                              Lei, Hanyu Lai, Yu Gu, Hangliang Ding, Kaiwen
+                                                              Men, Kejuan Yang, Shudan Zhang, Xiang Deng, Ao-
+Sitao Cheng, Ziyuan Zhuang, Yong Xu, Fangkai Yang,            han Zeng, Zhengxiao Du, Chenhui Zhang, Sheng
+   Chaoyun Zhang, Xiaoting Qin, Xiang Huang, Ling             Shen, Tianjun Zhang, Yu Su, Huan Sun, Minlie
+   Chen, Qingwei Lin, Dongmei Zhang, Saravan Rajmo-           Huang, Yuxiao Dong, and Jie Tang. 2024. Agent-
+   han, and Qi Zhang. 2024. Call me when necessary:           bench: Evaluating LLMs as agents. In The Twelfth
+   Llms can efficiently and faithfully reason over struc-     International Conference on Learning Representa-
+   tured environments.                                        tions.
+                                                        5022
+Zhijie Nie, Richong Zhang, Zhongyuan Wang, and              Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak
+  Xudong Liu. 2023. Code-style in-context learning            Shafran, Karthik R Narasimhan, and Yuan Cao. 2023.
+  for knowledge-based question answering.                     React: Synergizing reasoning and acting in language
+                                                              models. In The Eleventh International Conference
+OpenAI. 2022. Introducing chatgpt.                            on Learning Representations.
+
+OpenAI. 2023. GPT-4 Technical Report.                       Wen-tau Yih, Matthew Richardson, Chris Meek, Ming-
+                                                             Wei Chang, and Jina Suh. 2016. The value of se-
+Liangming Pan, Michael Saxon, Wenda Xu, Deepak                mantic parse labeling for knowledge base question
+  Nathani, Xinyi Wang, and William Yang Wang. 2023.           answering. In Proceedings of the 54th Annual Meet-
+  Automatically correcting large language models: Sur-        ing of the Association for Computational Linguistics
+  veying the landscape of diverse self-correction strate-    (Volume 2: Short Papers), pages 201–206, Berlin,
+  gies.                                                       Germany. Association for Computational Linguis-
+                                                              tics.
+Mohammadreza Pourreza and Davood Rafiei. 2023.
+ DIN-SQL: Decomposed in-context learning of text-           Donghan Yu, Sheng Zhang, Patrick Ng, Henghui
+ to-SQL with self-correction. In Thirty-seventh Con-          Zhu, Alexander Hanbo Li, Jun Wang, Yiqun Hu,
+ ference on Neural Information Processing Systems.            William Yang Wang, Zhiguo Wang, and Bing Xiang.
+                                                              2023. DecAF: Joint decoding of answers and log-
+Yiheng Shu, Zhiwei Yu, Yuhan Li, Börje Karlsson,              ical forms for question answering over knowledge
+  Tingting Ma, Yuzhong Qu, and Chin-Yew Lin. 2022.            bases. In The Eleventh International Conference on
+  TIARA: Multi-grained retrieval for robust question          Learning Representations.
+  answering over large knowledge base. In Proceed-          Yuyu Zhang, Hanjun Dai, Zornitsa Kozareva, Alexan-
+  ings of the 2022 Conference on Empirical Methods            der Smola, and Le Song. 2018. Variational reasoning
+  in Natural Language Processing, pages 8108–8121,            for question answering with knowledge graph. In
+  Abu Dhabi, United Arab Emirates. Association for            Proceedings of the AAAI conference on artificial in-
+  Computational Linguistics.                                  telligence, volume 32.
+Yu Su, Huan Sun, Brian Sadler, Mudhakar Srivatsa,           Victor Zhong, Caiming Xiong, and Richard Socher.
+  Izzeddin Gür, Zenghui Yan, and Xifeng Yan. 2016.            2017. Seq2sql: Generating structured queries
+  On generating characteristic-rich question sets for         from natural language using reinforcement learning.
+  QA evaluation. In Empirical Methods in Natural              CoRR, abs/1709.00103.
+  Language Processing (EMNLP), Austin, Texas, USA.
+  Association for Computational Linguistics.                Denny Zhou, Nathanael Schärli, Le Hou, Jason Wei,
+                                                              Nathan Scales, Xuezhi Wang, Dale Schuurmans,
+Jiashuo Sun, Chengjin Xu, Lumingyuan Tang, Saizhuo            Claire Cui, Olivier Bousquet, Quoc V Le, and Ed H.
+   Wang, Chen Lin, Yeyun Gong, Lionel Ni, Heung-              Chi. 2023. Least-to-most prompting enables com-
+   Yeung Shum, and Jian Guo. 2024. Think-on-graph:            plex reasoning in large language models. In The
+   Deep and responsible reasoning of large language           Eleventh International Conference on Learning Rep-
+   model on knowledge graph. In The Twelfth Interna-          resentations.
+   tional Conference on Learning Representations.
+
+Chuanyuan Tan, Yuehe Chen, Wenbiao Shao, and Wen-
+  liang Chen. 2023. Make a choice! knowledge base
+  question answering with in-context learning.
+
+Danqing Wang and Lei Li. 2023. Learning from mis-
+  takes via cooperative study assistant for large lan-
+  guage models. In Proceedings of the 2023 Confer-
+  ence on Empirical Methods in Natural Language
+  Processing, pages 10667–10685.
+
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V Le,
+  Ed H. Chi, Sharan Narang, Aakanksha Chowdhery,
+  and Denny Zhou. 2023. Self-consistency improves
+  chain of thought reasoning in language models. In
+  The Eleventh International Conference on Learning
+  Representations.
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+   Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+   et al. 2022. Chain-of-thought prompting elicits rea-
+   soning in large language models. Advances in Neural
+   Information Processing Systems, 35:24824–24837.
+                                                        5023
+A     Preliminary                                         the KB or Python interpreter will return some error
+                                                          logs as feedback. We also accumulate all avail-
+Knowledge Base (KB) A knowledge base is a col-
+                                                          able structural information (current_info) in every
+lection of subject-relation-object triples. Formally,
+                                                          step as the Reasoning Memory (RM) to provide
+a KB can be denoted as G = {⟨s, r, o⟩ | s, r ∈
+                                                          comprehensive information for error detection and
+E, r ∈ R} where E and R denote the entity set and
+                                                          distinguishing. The information in RM not only
+relation set, respectively.
+                                                          includes the directly generated result (e.g., previ-
+Knowledge Based Question Answering (KBQA)
+                                                          ous action and query result) but also includes the
+Given a KB G and a nature language question q,
+                                                          information required for the second parsing of the
+KBQA aims to find the answer a of q based on G.
+                                                          generated result of LLM or KB (e.g., the param-
+Typically, KBQA is modeled as semantic parsing,
+                                                          eters of action). Based on all this available info
+where the q is mapped to an executable logic form l
+                                                          from the environment (env_fb), we detect if there
+(e.g., SPARQL, S-expression, PyQL) whose deno-
+                                                          exists an error and distinguish the error type (er-
+tation is the answer. In this work, we chose PyQL
+                                                          ror). If an error exists, we get its corresponding
+as the target format of l which can be converted
+                                                          guideline based on the recognized error type, and
+into equivalent SPARQL queries.
+                                                          this step’s observation is set to this guideline. If
+S-expression S-expression is a commonly used
+                                                          no error is detected, the kb_fb is a valid execution
+logical form in KBQA. It was initially introduced
+                                                          result against KB, and this step’s observation is
+in the Lisp programming language and first intro-
+                                                          set to this execution_result. This process is iter-
+duced to KBQA by Gu et al. (2021). S-expression
+                                                          ated until exceeding the maximum iteration time or
+can represent some simple SPARQL grammar and
+                                                          the LLM generates the terminate action (i.e., exe-
+can be transformed into a standard SPARQL query.
+                                                          cute()). For more details, the example can be found
+Due to its simplicity compared to SPARQL, it is
+                                                          in Appendix G.
+often used as the target format in generative KBQA
+approaches.
+                                                             Algorithm 1: QueryAgent
+PyQL PyQL (Huang et al., 2023) stands for
+                                                               1: Input: question Q, entity linking result E, instruction I,
+Pythonic Query Language for SPARQL. It is a                       maximum iteration times T ;
+logic form written in Python that can be converted             2: t ← 1;
+                                                               3: prompt ← I + Q + E;
+to SPARQL losslessly. A PyQL for a question is                 4: RM ← ∅; // Reasoning Memory
+a sequence of PyQL functions. In this manner,                  5: while t ≤ T do
+PyQL exhibits how a question is solved step-by-                6:    thought, action ← LLM(prompt);
+                                                               7:    KB_f b, P ython_f b ← Execute(action);
+step and can be regarded as a structural CoT (Chain-           8:    current_inf o ← Get_Info_in_This_Step();
+of-Thought).                                                   9:    RM ← RM ∪ current_inf o;
+                                                              10:    env_f b ← {kb_f b, py_f b, RM };
+B Implementation Details of QueryAgent                        11:    error ← Detect_and_Distinguish_Err(env_f b);
+                                                              12:    if error then
+B.1    Detailed Elaboration of QueryAgent                     13:        guideline ← Get_Guideline(error);
+                                                              14:        obs ← guideline;
+Here we provide a detailed elaboration of QueryA-             15:        RM ← RM − {current_inf o};
+gent along with a formal algorithmic representa-              16:    else
+                                                              17:        execution_result ← kb_f b
+tion (Algorithm 1).                                           18:        obs ← execution_result;
+   At each step, LLM first generates the thought              19:    end if
+                                                              20:    prompt ←
+and action for this step based on prompt. The                        prompt + thought + action + obsservation;
+prompt at the first step is the one-shot reasoning            21:    if action = execute() then
+case concatenated with the new question to solve              22:        break;
+                                                              23:    end if
+and its entity linking result. For the following steps,       24:    t ← t + 1;
+the prompt fed to the LLM is the prompt of the last           25: end while
+step concatenated with the (thought, action, and              26: return execution_result;
+observation) of the last step. We then execute the
+action against the KB to get the feedback from
+KB (kb_fb) and the Python interpreter (py_fb). If         B.2     Detail Elaboration of Guidelines
+the action is successfully executed, the kb_fb is the     In QueryAgent, the guidelines are served as the
+execution result of the current unfinished SPARQL         observation in our ReAct (Yao et al., 2023) style
+query and the py_fb is an empty string. Otherwise,        Agent. The content of the guideline depends on the
+                                                      5024
+situation.                                                     tures a smaller number of relations, thus negating
+                                                               the need for the coarse ranking module.
+   • When an error arises, the guideline is the de-
+     scription of what abnormal conditions occur               C     Other Experiment Details and Analysis
+     and some possible solutions. For example, the
+     guideline A, B, C,... in Figure 2. In this case,          C.1     Baseline Methods
+     the LLM is conducting self-correction.                    We compare QueryAgent with fine-tuning and few-
+                                                               shot methods.
+   • When no error arises, there is no need for
+     self-correction. Therefore, the guideline is              C.1.1    Fine-tuning Method
+     the execution result on KB. For example, the              ArcaneQA (Gu and Su, 2022) is a generation-
+     guideline * (When no error is detected, the               based method that incrementally synthesizes a pro-
+     guideline is KB_EXECUTION_RESULT) in                      gram by dynamically predicting a sequence of sub-
+     Figure 2. In this case, the LLM is conducting             programs. It leverages constrained decoding to
+     normal reasoning.                                         prune the search space.
+                                                               TIARA (Shu et al., 2022) proposes a multi-grained
+   Therefore, writing a guideline for self-correction
+                                                               retrieval method to retrieve relevant KB elements.
+does not require much experience. As long as the
+                                                               It also applies constrained decoding to reduce gram-
+current abnormal conditions and the possible solu-
+                                                               mar errors.
+tion are given, the LLM will benefit from them. It
+                                                               DecAF (Yu et al., 2023) jointly generates both
+is worth noting that the ICL-based self-correction
+                                                               logical forms and the direct answer, then combines
+method also needs manually written examples, thus
+                                                               the merits of them to get the final answer. It adopts
+this part of the effort is hard to avoid. Set this aside,
+                                                               BM25 for retrieval to obtain relevant KB subgraphs
+ERASER has the advantage in coverage, scalability,
+                                                               to eliminate the need for entity linking.
+precision, and length of the prompt.
+                                                               Pangu (Gu et al., 2023) consists of a symbolic
+B.3      Relation Ranking                                      agent to collect valid candidate plans, and an LM
+                                                               to select the best one. It capitalizes on the dis-
+In the body of this paper, we primarily focus on
+                                                               criminative ability of LM rather than the generative
+query construction and error correction. Here, we
+                                                               ability.
+supplement a technical detail in query construction,
+namely the coarse ranking of candidate relations.              C.1.2    Few-shot Method
+Given that the one-hop relation of an entity can be            KB-BINDER (Li et al., 2023) is an ICL-based
+numerous, considering all candidate relations will             KBQA method utilizing dozens of (Question, S-
+increase the prompt length, potentially exceeding              expression) pairs as examples.
+the maximum context length permitted by the LLM.               KB-Coder (Nie et al., 2023) converts the s-
+Thus, upon retrieving the one-hop relations for an             expression to a sequence of function calls thus
+entity or variable, we perform a coarse ranking of             reducing the format error rate.
+candidates if the number of candidates exceeds 40.
+                                                               Pangu (Gu et al., 2023) is a general framework
+We first encode the question and each relation can-
+                                                               with experiments on both fine-tuning and few-shot
+didate using OpenAI embeddings (ada v2)2 . Then
+                                                               settings. For the few-shot setting, Pangu also
+we calculate the cosine similarity between the en-
+                                                               adopts the ICL paradigm.
+coding of each candidate and the question. Based
+                                                               McL-KBQA (Tan et al., 2023) use a rank-based
+on their similarity scores, only the top 40 relation
+                                                               method to enumerate and score logic form candi-
+candidates are retained as the result of this coarse
+                                                               dates then use LLM to choose the final logic form
+ranking. The selected relations are then shuffled
+                                                               via ICL.
+to mitigate any potential bias in the model’s se-
+                                                               AgentBench (Liu et al., 2024) proposes an Agent-
+lection process due to the order of scores. The
+                                                               based baseline by modeling KBQA as a multi-turn
+cost of invoking OpenAI embeddings on the entire
+                                                               open-ended generation task.
+GrailQA (dev), Graph (test), and WebQSP (test)
+                                                               StructGPT (Jiang et al., 2023) is a few-shot
+datasets are $0.012, $0.002, and $0.001, respec-
+                                                               based method for complex reasoning on structured
+tively, almost negligible. The MetaQA dataset fea-
+                                                               data (including Table, DB, and KG). It predicts a
+   2
+       https://platform.openai.com/docs/guides/embeddings      function invocation sequence in a pre-defined order.
+                                                            5025
+ Methods                 GrailQA      GraphQ      WebQSP              Type           Number       Trigger times
+ QueryAgent                                                           KB                     4               204
+   w/o RR                     45.6         34.5       33.5
+   w HS                       52.1         47.0       50.2
+                                                                      Python                15               862
+   w ST                       59.1         53.8       60.8            RM                     9              4729
+   w OE (default)             56.3         55.0       61.2            KB+RM                  3              1923
+                                                                      Python+RM              2               341
+Table 7: Ablation study of QueryAgent with different
+relation ranking (RR) strategies. HS and ST indicate            Table 8: The distribution of different environmen-
+Hybrid Search and Sentence Transformer, respectively.           tal feedback, which necessitates feedback from the
+We experiment on 500 random selected questions.                 KB, Python interpreter(Python), or Reasoning Mem-
+                                                                ory(RM).
+
+Specifically, they define three operations on DB
+                                                                C.4     More Analysis of ERASER
+and two operations on KB.
+                                                                C.4.1    The Contribution of Different
+                                                                         Environments
+C.2 API Invocation Cost
+                                                                Take GrailQA as an example, we have designed 33
+The computational costs of API calls in this paper              guidelines for various situations. We manually clas-
+are calculated following the official methodology               sify these guidelines according to the environment
+provided by OpenAI3 . For gpt-3.5-turbo, that                   they belong to.
+is: cost = input_token_num/1000 ∗ $0.0015 +                        As shown in Table 8, the environment feedback
+output_token_num/1000 ∗ $0.0020. The count                      that is most beneficial for ERASER is the Reason-
+of tokens is implemented by tiktoken4 .                         ing Memory. This also reflects the advantage of
+                                                                step-by-step solving, as it allows us to utilize the
+                                                                memory from previous steps at any step, providing
+C.3 Impact of Different Relation Ranking                        more evidence for error correction.
+    Strategy                                                       The top 10 most frequently triggered guidelines
+                                                                account for 86% of the total number of triggers.
+In this section, we analyze the influence of the rela-
+                                                                The distribution is shown in Table 9.
+tion ranking (RR) module and the effect of different
+RR strategies. The default strategy in this paper               C.4.2 The Error That Can Not be Detected
+is OE which is based on the cosine similarity of                Note that ERASER is not omnipotent, it cannot
+the OpenAI embedding for question and candidate                 detect all errors. Some errors may be undetectable
+relation. We compare the OE setting with another                because they do not exhibit any anomalies in any
+two baseline strategies: HS and ST. HS indicates                given environment.
+Hybrid Search which is implemented by BM25                         Undetectable errors are typically higher-level se-
+and Faiss search. ST indicates Sentence Trans-                  mantic errors. For example, errors in the planning
+former. It is similar to the OE setting but replaces            level may result in a query that can be executed but
+the OpenAI embedding with Sentence Transformer                  differs in semantic meaning from the target ques-
+embedding. The result in Table 7 shows that with-               tion. The planning level error refers to selecting
+out the RR module, the performance drops signifi-               the wrong function to invoke or selecting too many
+cantly. It is expected since we simply retained the             or too few functions. For example, if the question
+top 40 candidates in their default order without any            includes an aggregation operation, but the LLM
+re-ranking process. Among all ranking strategies,               stops after adding all the triples without adding
+the OE setting achieves the best performance on                 the aggregation operation, the final query is still
+GraphQ while the ST setting achieves the best on                error-free, but it would convey a different meaning
+GrailQA and WebQSP. This implies that with a                    than intended by the question (e.g., Gold function
+proper ranking strategy, QueryAgent still has room              list: add_fact, add_fact, count; Predict function list:
+for improvement.                                                add_fact, add_fact).
+                                                                   Another scenario happens when LLM needs to
+   3
+       https://openai.com/pricing                               choose a relation from candidates. If an incorrect
+   4
+       https://github.com/openai/tiktoken/tree/main             but valid one-hop relation is chosen, the query can
+                                                             5026
+   Trigger                                                                           Trigger times         Type
+   get_relation is applied to entities or variables that have not appeared before.           2867            RM
+   add_fact yields an empty result and get_relation has been invoked.                         821       KB+RM
+   add_fact yields an empty result and get_relation has not been invoked yet.                 740       KB+RM
+   add_fact introduces two new variables and get_relation has been invoked.                   635            RM
+   add_fact introduces two new variables and get_relation has not been invoked.               464            RM
+   get_relation yields an empty result.                                                       362       KB+RM
+   get_relation has not been invoked before add_filter.                                       335            RM
+   The output action is not one of the available valid functions.                             314         Python
+   The operator of add_filter is used incorrectly.                                            242    Python+RM
+   The first parameter of add_filter is invalid.                                              171    Python+RM
+
+                             Table 9: The top 10 most frequently triggered guidelines.
+
+
+still be executed correctly, but the semantics are
+incorrect. This issue is particularly evident in the
+WebQSP dataset. This indicates that the relation
+linking is still a main obstacle for both fine-tuning-
+based and prompt-based KBQA. In QueryAgent we
+have a relation ranking model to mitigate this issue,
+which can be found in Section B.3.
+
+
+
+
+                                                        5027
+D   Prompt used in QueryAgent
+
+You need to understand the question and plan for the process of constructing a query to solve this question.
+
+Remember the following RULES:
+1. Never try to get a relation from a relation, for example, get_relation(measurement_unit.inverse_temperature_unit.measurement_system).
+
+You can only choose actions from these eight actions:
+1. get_relation(Freebase_mid_or_variable)
+Get the one-hop relation list of a freebase mid or a variable.
+2. add_fact(head,relation,tail)
+Add a triple pattern: (head, relation, tail) to the query.
+3. add_max(max_var)
+Constrain the query by only returning the result when max_var is the biggest.
+4. add_min(min_var)
+Constrain the query by only returning the result when min_var is the smallest.
+5. add_count(count_var,new_var)
+Add a query step to count the number of elements in the variable count_var and store the result in the variable new_var.
+6. add_filter(ob1,op,ob2)
+Add a filter constraint, the result needs to satisfy "ob1 op ob2". ob1 and ob2 can be variables or digits, op can be >,<,>=,<=. For example, ?
+x,>,?y or ?x <= 0.3 is valid.
+For example, if you need ?length is greater than 10, you can use add_filter(?length,>,10)
+7. set_answer(answer_var)
+For a SQL-like query, you need to determine which variable to return. Function set_answer is to determine this, it will constrain that the
+query only returns answer_var.
+8. execute()
+This is used when you think the query has been completely constructed. Calling this action will execute the query and get the final answer.
+
+
+                          Figure 3: Prompt of GrailQA (Task description and tools document).
+
+
+
+
+                                                                   5028
+Let's start with an example
+Question : which was the most recently formed cyclone that is in the same category as tropical storm rachel?
+Entity : {Tropical Storm Rachel: m.0crbvqz}
+
+Thought 1 : This question aims to find a cyclone(?cyclone), this cyclone(?cyclone) has the latest formed time(?time). Besides, the
+category(?category) of this cyclone(?cyclone), is also the category(?category) of storm rachel(m.0crbvqz). To construct the query, we need
+to first constrain ?category is the category of storm rachel(m.0crbvqz), then constrain that ?category is the category of ?cyclone, then
+constrain ?time as the formed time of ?cyclone, and finally, filter the max ?time and only return ?cyclone.
+Action 1 : get_relation(m.0crbvqz)
+Observation 1 : {'forward': ['kg.object_profile.prominent_type', 'meteorology.tropical_cyclone.category',
+'meteorology.tropical_cyclone.tropical_cyclone_season', ...], 'backward': ['meteorology.tropical_cyclone_category.tropical_cyclones',
+'meteorology.tropical_cyclone_season.tropical_cyclones', ...]}
+
+Thought 2 : Based on the relations, the meteorology.tropical_cyclone.category is the most possible relation for storm rachel(m.0crbvqz).
+This is a forward relation. So we constrain (m.0crbvqz, meteorology.tropical_cyclone.category, ?category) to get the ?category of storm
+rachel(m.0crbvqz).
+Action 2 : add_fact(m.0crbvqz, meteorology.tropical_cyclone.category, ?category)
+Observation 2 : The value of the variable category is ['Tropical storm (SSHS)']
+
+Thought 3 : By executing the current query, we get some instances of ?categoty, they seem some cyclone category. This result meets our
+expectations. Now we need to constrain the category of ?cyclone is ?category. So let us first query for the relations of ?category.
+Action 3 : get_relation(?category)
+Observation 3 : {'forward': ['kg.object_profile.prominent_type', 'meteorology.tropical_cyclone_category.max_storm_surge'
+'meteorology.tropical_cyclone_category.min_wind_speed', 'meteorology.tropical_cyclone_category.tropical_cyclones', ...], 'backward':
+['meteorology.tropical_cyclone.category', ...]}
+
+Thought 4 : Base on the relations, the meteorology.tropical_cyclone.category is the most possible relation for ?category. This is a backward
+relation. So we constrain (?cyclone, meteorology.tropical_cyclone.category, ?category) to make sure the category of ?cyclone is ?category.
+Action 4 : add_fact(?cyclone, meteorology.tropical_cyclone.category, ?category)
+Observation 4 : The value of the variable category is ['Tropical storm (SSHS)']. The value of variable cyclone is ['Hurricane Katrina',
+'Tropical Storm Rachel', 'Tormenta tropical Arlene', 'Tempesta tropicale Lee', 'Hurricane Iselle']
+
+Thought 5 : By executing the current query, we get some instances of ?cyclone, they seem some cyclone. This result meets our
+expectations.
+Now we need to query for the forming time of ?cyclone. So let us first query for the relations of ?cyclone.
+Action 5 : get_relation(?cyclone)
+Observation 5 :
+{'forward': ['kg.object_profile.prominent_type', 'meteorology.tropical_cyclone.affected_areas', 'meteorology.tropical_cyclone.category',
+'meteorology.tropical_cyclone.formed', 'meteorology.tropical_cyclone.highest_winds', 'meteorology.tropical_cyclone.indirect_fatalities', ...],
+'backward': ['dataworld.gardening_hint.last_referenced_by', 'meteorology.cyclone_affected_area.cyclones', ...]}
+
+Thought 6 : Based on the relations, the meteorology.tropical_cyclone.formed is the most possible relation for ?cyclone. This is a forward
+relation. So we constrain (?cyclone, meteorology.tropical_cyclone.formed, ?time) to get the ?time when ?cyclone formed.
+Action 6 : add_fact(?cyclone, meteorology.tropical_cyclone.formed, ?time)
+Observation 6 : The value of variable ?category is ['Tropical storm (SSHS)']. The value of variable ?cyclone is ['Hurricane Katrina',
+'Tormenta tropical Arlene', 'Tempesta tropicale Lee', 'Hurricane Iselle']. The value of variable ?time is ['2014-07-31-08:00', '2005-06-08-
+08:00', '2011-09-01-08:00', '1981-11-08:00']
+
+Thought 7 : By executing a current query, we get some instances of ?time, they seem some times. This result meets our expectations. Now
+we need to add an argmax constraint. The query only returns the result with max ?time.
+Action 7 : add_max(?time)
+Observation 7 : The value of a variable ?category is ['Tropical storm (SSHS)']. The value of a variable ?cyclone is ['Hurricane Iselle']. The
+value of a variable ?time is ['2014-07-31-08:00']
+
+Thought 8 : By executing a current query, we get only one result, and the ?time in this result is the biggest among all ?time shown in the
+last step. This result meets our expectations. Now we need to determine which variable is the answer to this question. Based on the
+question, we know ?cyclone represents the answer, so we only return this variable.
+Action 8 : set_answer(?cyclone)
+Observation 8 : The value of variable ?cyclone is ['Hurricane Iselle']
+
+Thought 9 : This SPARQL seems to represent the intent of the question, execute it to get the answer.
+Action 9 : execute()
+
+Question : NEW QUESTION
+Entity list : ENTITY LINKING RESULT
+
+
+                            Figure 4: Prompt of GrailQA (1-shot example and new question).
+
+
+                                                                   5029
+E     Tools Sets
+
+    PyQL function                              Brief description
+                                           SPARQL version (for KB)
+  Tools for interacting with KB
+  get_relation(entity_or_variable)             Get the one-hop relations of an entity or a variable. The parameter
+                                               should be an entity (m.02xlbx) in KB or a variable (?computer).
+    execute()                                  Execute the current SPARQL query, and return the execution result
+                                               on KB.
+  Tools for constructing query
+  add_fact(head, relation, tail)              Add a triple pattern of (head, relation, tail).
+  add_max(max_var)                            Calculate the maximum value of a given variable (max_var).
+  add_min(min_var)                            Calculate the minimum value of a given variable (min_var).
+  add_count(count_var)                        Count the occurrences of a given variable (count_var).
+  add_filter(ob1,op,ob2)                      Add a comparative constraint. “ob1” and “ob2” are two objects
+                                              for comparison. The “op” can be one of >, <, =, >=, <=.
+    set_answer(ans_var)                       Set the ans_var as the variable that this query returns.
+                                             SQL version (for DB)
+  Tools for interacting with DB
+  get_column(column)                           Get the value stored in the given column.
+  execute()                                    Execute the current SQL query, and return the execution result on
+                                               DB.
+  Tools for constructing query
+  add_condition(column, op, value)            Add a constrain which requires the SQL meets “column op value”.
+                                              The “column” should be the column_name of all columns. The op
+                                              can be one of: =, >, <. The “value” is a specific value (e.g.,string,
+                                              digit). For example, add_condition(Lyrics theme/style, =, Ro-
+                                              mance) is a valid case. It requires the SQL query should only
+                                              return the rows that the value stored in “Lyrics theme/style” col-
+                                              umn is “Romance”.
+    set_answer(column, aggregation_type)      Specify the answer to this SQL. What column do you want to
+                                              return (column) and what aggregation function (aggregation_type)
+                                              do you need to perform on it. The aggregation_type can only
+                                              be: None, MAX, MIN, COUNT, SUM, AVG. If the question
+                                              just needs to return the content of the column corresponding to
+                                              column and does not need to do anything else with it, just set
+                                              the aggregation_type to None. If the question needs to return the
+                                              number of all items in the column corresponding to column_name,
+                                              set the aggregation_type to COUNT. If the question needs to return
+                                              the maximum or minimum item among all items in the column
+                                              corresponding to the column, set the aggregation_type to MAX
+                                              or MIN. If the question needs to return the summation or average
+                                              of all items in column_name, set the aggregation_type to SUM or
+                                              AVG.
+
+Table 10: The toolset we used in this work. We design two versions of PyQL functions: SPARQL version (for
+KB) and SQL version (for DB). The tools for interacting with KB/DB need to execute against KB/DB to obtain
+the execution result and will not add clauses to the target query. The tools for constructing KB/DB are used to add
+clauses to the target query.
+
+
+
+
+                                                       5030
+F   Example Guidelines of ERASER
+
+Trigger: When the result of add_filter is empty. All parameters are valid.
+Guidelines: You choose add_filter as the action in this step. However, we get an empty result. I
+strongly suggest you carefully check if a comparison step is needed. If not needed and the result
+already meets our expectations, you can use set_answer() to determine which variable to return. If
+there is a need for a filter constraint, please carefully check the two comparison objects and the operator.
+Please re-generate only Thought STEPS + 1 and Action STEPS + 1.
+Trigger: When setting CVT node as the answer.
+Example: set_answer(?conflict)
+Guidelines: You should not set ?conflict as the answer, because its value is "UnName_Entity". Please
+check again and re-generate only Thought STEPS + 1 and Action STEPS + 1.
+Trigger: Got empty result after adding an add_fact(h,r,t) and “r” is a valid relation from the result of
+get_relation().
+Example: Added two triple patterns to the same entity with different relations.
+Guidelines: Got empty result after adding this triple pattern. You should carefully check whether this
+triple is needed. You likely add a triple pattern that can not match any graph on KB.
+
+                        Table 11: Example guidelines which leverage KB feedback.
+
+
+
+Trigger: When generated action is not in action_list.
+Example: None
+Guidelines: Invalid action, next time you must choose an action from get_relation(), add_fact(),
+add_max(), add_min(), add_count(), add_filter(), set_answer(), execute(). Please re-generate only
+Thought STEPS + 1 and Action STEPS + 1.
+Trigger: When the parameter list of the generated action does not match the requirements specified in
+the API documentation.
+Example: add_fact(?x, ?y)
+Guidelines: add_fact(head,relation,tail) should have 3 parameters. You have 2 parameters. Please
+check again. (specific guidelines vary depending on the actual situation)
+Trigger: When the operator is invalid in add_filter.
+Example: add_filter(?engine, aviation.aircraft_model.part_of_line, m.031vqw)
+Guidelines: You used aviation.aircraft_model.part_of_line as operator in add_filter, which is invalid.
+I strongly suggest you carefully check whether a comparison step and add_filter() is needed. If not
+needed and the result already meets our expectation, use set_answer() to determine which variable to
+return as the answer. If a comparison step is indeed needed, make sure the second argument is one of
+[>, <, >=, <=, =, !=]. Please re-generate only Thought STEPS + 1 and Action STEPS + 1.
+
+                       Table 12: Example guidelines which leverage Python feedback.
+
+
+
+
+                                                   5031
+Trigger: When add_fact is used but no relations have been queried.
+Example: add_fact(m.0bj4p9h, ?relation, ?newspaper)
+Guidelines: You should use get_relation() first. Suggestion: choose valid options from
+get_relation(m.0bj4p9h). Please check again and re-generate only Thought STEPS + 1 and Action
+STEPS + 1.
+Trigger: When the parameter of get_relation is not a linked entity or created variable.
+Example: get_relation(g.1233lk8r)
+Guidelines: The parameter of “g.1233lk8r” is not a linked entity or created variable. Suggestion:
+choose from: get_relation(?instrument), get_relation(m.01663r) for next Action. Please check again
+and re-generate.
+Trigger: When parameter of set_answer is not a existing variable.
+Example: set_answer(?boat)
+Guidelines: ?boat is not a created variable. You must set an existing variable as the answer. Existing
+variables include: ?car, ?speed. Please choose the proper variable and set it again.
+Trigger: When two new variables are introduced in add_fact.
+Example: add_fact(?exhibition, exhibition.exhibition_subject.subject, ?subject)
+Guidelines: You introduced unexisting variable in add_fact(), which is invalid. You should find another
+approach to solve the question. Please re-generate only Thought STEPS + 1 and Action STEPS + 1.
+
+                Table 13: Example guidelines which leverage Reasoning Memory feedback.
+
+
+
+
+                                                 5032
+G    Case Study
+
+
+GrailQA
+Question: is angular frequency be defined by 1.0 radians per second?
+Entity: {'1.0': '1.0^^http://www.w3.org/2001/XMLSchema#float'}
+
+Step 1:
+Thought 1: This question aims to determine if the angular frequency is defined as 1.0 radians per second. To construct the query, we need to first
+constrain the angular frequency to be 1.0 radians per second and then check if there is any result.
+Action 1: add_filter(?angular_frequency, =, 1.0)
+Observation 1: ERROR_INFO: You should use get_relation() first. Choose a parameter from ['1.0']. Please re-generate only Thought 2 and Action 2.
+
+Step 2:
+Thought 2: Based on the question, we need to find the relation for the entity '1.0'. Let's use the get_relation() action to get the relations for this entity.
+Action 2: get_relation(1.0)
+Observation 2: {'forward': [], 'backward': ['astronomy.celestial_object.magnitude', 'base.years.years.leap_year', 'baseball.batting_statistics.rbis',
+'measurement_unit.angular_velocity_unit.frequency_in_radians_per_second', ...]}
+
+Step 3:
+Thought 3: Based on the relations obtained for the entity '1.0', there is a relation called
+'measurement_unit.angular_velocity_unit.frequency_in_radians_per_second' which seems to be related to angular frequency. We can use this relation
+to constrain the angular frequency to be 1.0 radians per second.
+Action 3: add_filter(?angular_frequency, measurement_unit.angular_velocity_unit.frequency_in_radians_per_second, 1.0)
+Observation 3: ERROR_INFO: You used measurement_unit.angular_velocity_unit.frequency_in_radians_per_second as operator in add_filter,
+which is invalid. I strongly suggest you carefully check whether a comparsion step and add_filter() is needed. If not needed and the result already
+meets our expectation, use set_answer() to determine which variable to return as answer. If comparision step is indeed needed, make sure the second
+argument is one of [>, <, >=, <=, =, !=]. Please re-generate only Thought 4 and Action 4.
+
+Step 4:
+Thought 4: Based on the error message, it seems that the relation 'measurement_unit.angular_velocity_unit.frequency_in_radians_per_second' cannot
+be used as an operator in the add_filter() action. We need to find another way to construct the query.
+Thought 4: Since we cannot directly use the relation 'measurement_unit.angular_velocity_unit.frequency_in_radians_per_second' as an operator, we
+can try to find the relations for the entity '1.0' and see if there is any relation that can help us determine if the angular frequency is defined as 1.0
+radians per second.
+Action 4: get_relation(1.0)
+Observation 4: {'forward': [], 'backward': ['astronomy.celestial_object.magnitude', 'baseball.lifetime_batting_statistics.ibbs',
+'measurement_unit.angular_velocity_unit.frequency_in_radians_per_second', ...]}
+
+Step 5:
+Thought 5: Based on the relations obtained for the entity '1.0', there is a relation called
+'measurement_unit.angular_velocity_unit.frequency_in_radians_per_second' which seems to be related to angular frequency. We can use this relation
+to constrain the angular frequency to be 1.0 radians per second.
+Action 5: add_fact(?angular_frequency, measurement_unit.angular_velocity_unit.frequency_in_radians_per_second, 1.0)
+Observation 5: The value of variable ?angular_frequency is ['Radian per second']
+
+Step 6:
+Thought 6: By executing the current query, we get the value of variable ?angular_frequency as ['Radian per second']. This means that the angular
+frequency is defined as 1.0 radians per second. Therefore, the answer to the question is "yes".
+Action 6: set_answer("yes")
+Observation 6: ERROR_INFO: yes is invalid. You must set a existing variable as answer. Existing variables includes: ['?angular_frequency']. Please
+choose proper variable and set again.
+
+Step 7:
+Thought 7: Based on the error message, it seems that I cannot set the answer as "yes". I need to set the answer as the variable that represents the
+angular frequency, which is "?angular_frequency".
+Action 7: set_answer(?angular_frequency)
+Observation 7: The value of variable ?angular_frequency is ['Radian per second']
+
+Step 8:
+Thought 8: This SPARQL query seems to represent the intent of the question. We can now execute it to get the final answer.
+Action 8: execute()
+Observation 8: The value of variable ?angular_frequency is ['Radian per second']
+
+Answer: ['Radian per second']
+F1: 1.0
+
+
+                                 Figure 5: A reasoning and self-correction example of GrailQA.
+
+
+
+
+                                                                          5033
+GraphQ
+Question: find all the streams available on live365.
+Entity: {'live365': 'm.04rtjj'}
+
+Step 1:
+Thought 1: This question aims to find all the streams available on live365. To construct the query, we need to first constrain that the streams are
+available on live365. We can use the relation 'broadcast.broadcast_on' to represent this constraint. Finally, we need to set the answer variable to be the
+streams (?stream) and execute the query.
+Action 1: get_relation(m.04rtjj)
+Observation 1: forward: ['broadcast.content.artist', 'broadcast.distributor.distributes', 'kg.object_profile.prominent_type', ...]
+backward: ['broadcast.artist.content', 'broadcast.broadcast.distributor', 'type.type.instance', ...]
+
+Step 2:
+Thought 2: Based on the relations, the 'broadcast.broadcast_on' relation is the most possible relation. This is a forward relation. So we constrain
+(m.04rtjj, broadcast.broadcast_on, ?stream).
+Action 2: add_fact(m.04rtjj, broadcast.broadcast_on, ?stream)
+Observation 2: ERROR_INFO: The relation broadcast.broadcast_on that you choose leads to an empty result. The relations of m.04rtjj includes:
+{'forward': ['broadcast.content.artist', 'broadcast.distributor.distributes', 'kg.object_profile.prominent_type', ...], 'backward': ['broadcast.artist.content',
+'broadcast.broadcast.distributor', 'type.type.instance', ...]}. Try to change a relation that matches the question best. If it still doesn't work, you may use
+other approach to solve the question. Please check again and re-generate only Thought 3 and Action 3.
+
+Step 3:
+Thought 3: Based on the relations provided, none of them seem to directly represent the concept of "streams available on live365". We may need to
+use a different approach to solve this question.
+Action 3: Since we couldn't find a suitable relation to directly represent the concept of "streams available on live365", we need to use a different
+approach to solve this question.
+Observation 3: ERROR_INFO: Invalid action, next time you must choose a action from: get_relation(), add_fact(), add_max(), add_min(),
+add_count(), add_filter(), set_answer(), execute(). Please re-generate only Thought 4 and Action 4.
+
+Step 4:
+Thought 4: Since we couldn't find a suitable relation to directly represent the concept of "streams available on live365", we may need to use a
+different approach to solve this question. One possible approach is to find a relation that represents the concept of "stream" and then filter the results
+to only include streams that are available on live365. Let's try to find a relation that represents the concept of "stream".
+Action 4: get_relation(?stream)
+Observation 4: ERROR_INFO: You cannot query for the relations of ?stream because it hasn't been binded to anything. You need to first query for
+get_relation(m.04rtjj). Let's modify our approach and re-generate only Thought 5 and Action 5.
+
+Step 5:
+Thought 5: Since we couldn't find a suitable relation to directly represent the concept of "streams available on live365", we may need to use a
+different approach to solve this question. One possible approach is to find a relation that represents the concept of "stream" and then filter the results
+to only include streams that are available on live365. Let's try to find a relation that represents the concept of "stream".
+Action 5: get_relation(m.04rtjj)
+Observation 5: forward: ['broadcast.content.artist', 'broadcast.distributor.distributes', 'type.object.key', ...]
+backward: ['broadcast.artist.content', 'broadcast.broadcast.distributor', 'type.type.instance', ...]
+
+Step 6:
+Thought 6: Based on the relations, the 'broadcast.distributor.distributes' relation is the most possible relation. This is a backward relation. So we
+constrain (?stream, broadcast.distributor.distributes, m.04rtjj).
+Action 6: add_fact(?stream, broadcast.distributor.distributes, m.04rtjj)
+Observation 6: The value of variable ?stream is ['ASCAP Nashville - 128kbps Stream', 'Capital Radio - 16kbps Stream', 'ASCAP Concert - 128kbps
+Stream', "POP GOES THE 70's! - 16kbps Stream", "Wild 4 The 80's - 16kbps Stream", ...]
+
+Step 7:
+Thought 7: By executing the current query, we get some instances of ?stream, and these instances seem to represent different streams. This result
+meets our expectation. Now we need to set the answer variable to be ?stream and execute the query to get the final answer.
+Action 7: set_answer(?stream)
+Observation 7: The value of variable ?stream is ['ASCAP Nashville - 128kbps Stream', 'Capital Radio - 16kbps Stream', 'ASCAP Concert - 128kbps
+Stream', "POP GOES THE 70's! - 16kbps Stream", "Wild 4 The 80's - 16kbps Stream", ...]
+
+Step 8:
+Thought 8: This SPARQL query seems to represent the intent of the question. We can now execute it to get the final answer.
+Action 8: execute()
+Observation 8: The value of variable ?stream is ['ASCAP Nashville - 128kbps Stream', 'Capital Radio - 16kbps Stream', 'ASCAP Concert - 128kbps
+Stream', "POP GOES THE 70's! - 16kbps Stream", "Wild 4 The 80's - 16kbps Stream", ...]
+
+Answer: ['ASCAP Nashville - 128kbps Stream', 'Capital Radio - 16kbps Stream', 'ASCAP Concert - 128kbps Stream', ...]
+F1: 1.0
+
+                                  Figure 6: A reasoning and self-correction example of GraphQ.
+
+
+
+
+                                                                           5034
+WebQSP
+Question: where do florida panthers play
+Entity: {'florida panthers': 'm.0j8js'}
+
+Step 1:
+Thought 1: This question aims to find the place where the Florida Panthers (m.0j8js) play. To construct the query, we need to first find the relation
+between the Florida Panthers and the place they play, and then constrain the query to only return the corresponding place as the answer.
+Action 1: get_relation(m.0j8js)
+Observation 1: ['base.ontologies.ontology_instance.equivalent_instances', 'broadcast.genre.content', 'ice_hockey.hockey_team.captain',
+'ice_hockey.hockey_team.coach', 'ice_hockey.hockey_team.conference', 'ice_hockey.hockey_team.division', 'kg.object_profile.prominent_type',
+'sports.professional_sports_team.draft_picks', 'sports.professional_sports_team.owner_s', 'sports.sports_team.arena_stadium',
+'sports.sports_team.coaches', 'sports.sports_team.colors', 'sports.sports_team.league', 'sports.sports_team.location', 'sports.sports_team.roster',
+'sports.sports_team.sport', 'sports.sports_team.team_mascot', 'sports.sports_team.venue', 'type.object.key',
+'user.avh.default_domain.ellerdale_topic.ellerdale_id', 'user.robert.default_domain.daylife.hero_image_id']
+
+Step 2:
+Thought 2: Based on the above relations, the most possible relation to find the place where the Florida Panthers play is 'sports.sports_team.venue'. So
+we constrain (m.0j8js, sports.sports_team.venue, ?place).
+Action 2: add_fact(m.0j8js, sports.sports_team.venue, ?place)
+Observation 2: The value of variable ?place is ['UnName_Entity', 'UnName_Entity']
+
+Step 3:
+Thought 3: By executing the current query, we get two instances of ?place, which are 'UnName_Entity'. This result does not meet our expectation.
+We need to further constrain the query to get the actual place where the Florida Panthers play. Let's query for the relations of 'UnName_Entity'.
+Action 3: get_relation('UnName_Entity')
+Observation 3: ERROR_INFO: UnName_Entity is invalid in get_relation. It must be a existing variable, such as ['?place'] or a mid from entity list,
+such as ['m.0j8js']. Please check again.
+
+Step 4:
+Thought 4: There seems to be an error in the query. We cannot directly query for the relations of 'UnName_Entity'. Instead, we need to use the
+get_relation() action with a valid variable or Freebase mid. Let's modify the query to use a valid variable.
+Action 4: get_relation(?place)
+Observation 4: ['sports.team_venue_relationship.from', 'sports.team_venue_relationship.team', 'sports.team_venue_relationship.to',
+'sports.team_venue_relationship.venue']
+
+Step 5:
+Thought 5: Based on the above relations, the most possible relation to find the place where the Florida Panthers play is
+'sports.team_venue_relationship.venue'. So we constrain (?place, sports.team_venue_relationship.venue, m.0j8js).
+Action 5: add_fact(?place, sports.team_venue_relationship.venue, m.0j8js)
+Observation 5: ERROR_INFO: The relation sports.team_venue_relationship.venue that you choose leads to an empty result. Re-think the question
+again and choose another relation from ['sports.team_venue_relationship.from', 'sports.team_venue_relationship.team',
+'sports.team_venue_relationship.to', 'sports.team_venue_relationship.venue']. Please check again and re-generate only Thought 6 and Action 6.
+
+Step 6:
+Thought 6: There seems to be an error in the query. The relation 'sports.team_venue_relationship.venue' does not provide any results. We need to re-
+think the question and choose another relation to find the place where the Florida Panthers play.
+Action 6: get_relation(m.0j8js)
+Observation 6: ['base.ontologies.ontology_instance.equivalent_instances', 'broadcast.genre.content', 'ice_hockey.hockey_team.captain',
+'ice_hockey.hockey_team.coach', 'ice_hockey.hockey_team.conference', 'ice_hockey.hockey_team.division', 'kg.object_profile.prominent_type',
+'sports.professional_sports_team.draft_picks', 'sports.professional_sports_team.owner_s', 'sports.sports_team.arena_stadium',
+'sports.sports_team.coaches', 'sports.sports_team.colors', 'sports.sports_team.league', 'sports.sports_team.location', 'sports.sports_team.roster',
+'sports.sports_team.sport', 'sports.sports_team.team_mascot', 'sports.sports_team.venue', 'type.object.key',
+'user.avh.default_domain.ellerdale_topic.ellerdale_id', 'user.robert.default_domain.daylife.hero_image_id']
+
+Step 7:
+Thought 7: Based on the above relations, the most possible relation to find the place where the Florida Panthers play is
+'sports.sports_team.arena_stadium'. So we constrain (m.0j8js, sports.sports_team.arena_stadium, ?place).
+Action 7: add_fact(m.0j8js, sports.sports_team.arena_stadium, ?place)
+Observation 7: The value of variable ?place is ['BB&T Center', 'Miami Arena']
+
+Step 8:
+Thought 8: This SPARQL query seems to represent the intent of the question. We can now execute it to get the final answer.
+Action 8: execute()
+Observation 8: The value of variable ?place is ['BB&T Center', 'Miami Arena']
+
+Answer: ['BB&T Center', 'Miami Arena']
+F1: 1.0
+
+
+                                Figure 7: A reasoning and self-correction example of WebQSP.
+
+
+
+                                                                       5035
+
