@@ -1,0 +1,163 @@
+# DefensiveKV: Taming the Fragility of KV Cache Eviction in LLM Inference (ICLR 2026)
+
+[![Paper](https://img.shields.io/badge/arXiv-2510.13334-red)](https://arxiv.org/pdf/2510.13334)
+[![Dataset](https://img.shields.io/badge/HuggingFace-Dataset-yellow)](https://huggingface.co/datasets/yuanfengustc/defensivekv_dataset)
+[![OpenReview](https://img.shields.io/badge/OpenReview-ICLR26-blue)](https://openreview.net/forum?id=nJgS06sX3O)
+
+This repository contains the official implementation of **DefensiveKV** and **LayerDefensiveKV**, two novel KV cache compression methods introduced in our paper. This project is forked from the excellent [KVPRESS](https://github.com/NVIDIA/kvpress) library by NVIDIA but provides a more efficient implementation of head-wise KV-cache methods.
+
+_If your issue has not received a response within 48 hours, please feel free to contact me via email—we will try to help. If you find this work useful for your research, we would greatly appreciate a star or a citation._ ^_^
+
+## Overview
+
+We tackle the fragility of existing cache eviction via **defensive aggregation**, implementing two variants:
+
+- **DefensiveKV**: Introduces **defensive aggregation** on top of the current SOTA method, (Ada-)CriticalKV.  
+- **Layer-DefensiveKV**: Extends DefensiveKV by adopting AdaKV-style **layer-wise budget allocation**.
+
+**Defensive aggregation** is implemented in just **two lines of code**, yet yields substantial improvements.
+
+```python
+## Mechanism of Defensive Aggregation 
+max_scores = scores.max(dim=2).values.max(dim=-2).values
+scores = max_scores.clamp(min=max_scores.mean(dim=-1, keepdim=True))
+```
+
+![Performance Overview](./Task_Performance.png)
+![LongBench  Overview](./Longbench_Performance.png)
+
+## Installation
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd defensive_kvpress
+
+# Install dependencies
+pip install -e .
+
+# Build the kernel for efficient head-wise computation
+cd kvpress/csrc/
+make
+
+# Install flash attention for better performance
+pip install flash-attn --no-build-isolation
+```
+
+### Preparing Models and Datasets & Setting Environment Variables
+
+Set the following environment variables before running evaluations:
+
+
+```bash
+
+
+# Preprocessed LongBench and 4K Ruler datasets are already provided in the datasets folder and can be downloaded directly.
+# Make sure git-xet is installed (https://hf.co/docs/hub/git-xet)
+git clone https://huggingface.co/datasets/yuanfengustc/defensivekv_dataset
+
+export KVPRESS_DATASETS=/path/to/datasets  # Directory containing evaluation datasets 
+export MODELS_DIR=/path/to/your/models  # Directory containing HuggingFace models
+```
+
+## Strong Recommendation: A Real Quick Evaluation (≤ 1 hour)
+
+We provide a quick evaluation on **10% of the RULER benchmark** to demonstrate the performance of **DefensiveKV** and **Layer-DefensiveKV** under 20\% cache size. 
+
+💡 **Rapid Verification:** Validate with several popular methods in just 1 hour on a single RTX 4090.
+
+📉 **The Truth:** Correcting previous benchmark flaws reveals SnapKV scores drop to **39.0** at 20% compression, shattering previous "lossless" illusions.
+
+🚀 **Our Progress:**  We advanced from AdaKV to CriticalKV then DefensiveKV, boosting performance from **39.0** to **91.4**.
+
+🧩 **Stackable Gains:** Our orthogonal approaches integrate seamlessly with existing methods for additive improvements. Explore with us!
+
+
+```bash
+cd evaluation
+bash quick_evaluate.sh
+```
+
+| Ruler Tasks | cwe | fwe | MK1 | MK2 | MK3 | MQ | MV | S1 | S2 | S3 | qa1 | qa2 | vt | Ave. |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| SnapKV | 72.6 | 74 | 26 | 8 | 2 | 36.5 | 34 | 74 | 52 | 4 | 44 | 42 | 38 | 39.0 |
+| AdaKV | 92.4 | 87.3 | 24 | 20 | 16 | 29.5 | 26.5 | 88 | 56 | 4 | 46 | 42 | 65.6 | 46.0 |
+| AdaCriticalKV | 93.8 | 93.3 | 60 | 30 | 26 | 71 | 72 | 88 | 92 | 4 | 56 | 52 | 79.2 | 62.9 |
+| DefensiveKV | **95.2** | 92 | 98 | 86 | 72 | 95.5 | 90 | **100** | **100** | 62 | **78** | 46 | 94.4 | 85.3 |
+| LayerDefensiveKV | 93.6 | **94** | **100** | **98** | **92** | **100** | **94.5** | 98 | 96 | **92** | **78** | **56** | **96.4** | **91.4** |
+
+## Comprehensive Evaluation (LongBench + RULER)
+
+Run the following script to evaluate on **LongBench** and **RULER**:
+
+```bash
+cd evaluation
+bash evaluate.sh
+```
+
+This script will:
+1. Run DefensiveKV and Layer-DefensiveKV on LongBench with compression ratio 0.8 (20% Cache Size)
+2. Run the same methods on RULER (4096 context length) with compression ratio 0.8 (20% Cache Size)
+3. Save logs to `evaluation/logs/` directory
+
+## Efficiency Evaluation
+
+Run the following script to evaluate efficiency:
+
+```bash
+cd evaluation
+bash efficiency_evaluate.sh
+```
+
+
+###  Press Names in Evaluation
+
+- `efficient_defensivekv` - DefensiveKV (per-head)
+- `efficient_layer_defensivekv` - GlobalDefensiveKV (global per-head)
+- `criti_adasnapkv` - CriticalKV built on  AdaKV
+- `adasnapkv` - AdaKV
+- `snapkv` - SnapKV
+
+### Analyzing Results
+
+After running evaluations, use the provided scripts to analyze results:
+
+```bash
+cd evaluation/results
+
+# Generate statistics from JSON result files
+python statistic.py
+
+```
+
+## TODO
+
+Future updates are listed below—feel free to open an issue or send a PR with ideas and feature requests:
+
+- [X] Initialize release.
+- [X] Efficiency evaluation.
+- [X] Upgrade Transformers to v4.57 for Qwen-3 support.
+- [X] Qwen-3-MoE Support.
+
+## Contact
+
+For questions or discussions about this work, please open an issue in this repository. 
+
+## Paper
+
+If you find this work useful, please cite our paper:
+
+```bibtex
+@article{feng2025taming,
+  title={Taming the Fragility of KV Cache Eviction in LLM Inference},
+  author={Feng, Yuan and Guo, Haoyu and Lv, JunLin and Zhou, S Kevin and Xie, Xike},
+  journal={arXiv preprint arXiv:2510.13334},
+  year={2025}
+}
+```
+
+**Paper Link**: [https://arxiv.org/pdf/2510.13334](https://arxiv.org/pdf/2510.13334)
+
+## Acknowledgments
+
+This project is built upon the [KVPRESS](https://github.com/NVIDIA/kvpress) library by NVIDIA. We thank the original authors for their excellent work on KV cache compression methods and the flexible framework that made this research possible.
