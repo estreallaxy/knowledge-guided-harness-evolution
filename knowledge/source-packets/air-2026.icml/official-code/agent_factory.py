@@ -1,0 +1,380 @@
+"""
+Factory for creating safe agents with incident response capabilities.
+"""
+
+from typing import List, Callable, Optional
+from agents import Agent, Tool
+from rule import Rule
+from state import IncidentState
+from interpreter import RuleInterpreter
+from openai_integration import IncidentDetectionHooks
+from response import ResponseOrchestrator
+from tools import mark_remediation_complete, get_incident_status, configure_detector
+from tool_wrapper import create_safe_tool_with_eradication
+
+
+def create_safe_agent(
+    rule_file: str,
+    base_tools: List[Tool],
+    agent_name: str = "Safe Agent",
+    model: str = "gpt-5.6-luna",
+    llm_client=None,
+    session=None,
+    use_learned_rules: bool = True,
+    generate_learned_rules: bool = True,
+) -> tuple[Agent[IncidentState], IncidentState]:
+    """
+    Create an agent with incident response safety layer.
+    
+    This factory function sets up a complete agent with:
+    - Rule-based incident detection
+    - Automatic remediation orchestration
+    - Tool execution monitoring
+    - Dynamic instruction generation
+    
+    Args:
+        rule_file: Path to the ResponseSpec rule file
+        base_tools: List of tools the agent can use (e.g., delete_file, copy_file)
+        agent_name: Name for the agent
+        model: OpenAI model to use (default: gpt-5.6-luna)
+        llm_client: Optional OpenAI client for incident detection
+        session: Optional Session instance for conversation history (enables full argument tracking)
+        use_learned_rules: Load existing learned rules for pre-check (default True)
+        generate_learned_rules: After remediation, generate a new learned rule
+            via eradication (default True). When False, only orchestrate/remediation runs.
+    
+    Returns:
+        Tuple of (agent, incident_state)
+        - agent: Configured Agent instance with safety layer
+        - incident_state: IncidentState context object
+    
+    Example:
+        ```python
+        from agents import function_tool
+        
+        @function_tool
+        async def delete_file(path: str) -> str:
+            # Implementation
+            return f"Deleted {path}"
+        
+        agent, state = create_safe_agent(
+            rule_file="rules/security_rules.txt",
+            base_tools=[delete_file],
+            agent_name="File Manager"
+        )
+        
+        result = await Runner.run(agent, "Delete /tmp/test.txt", context=state)
+        ```
+    """
+    # 1. Load rules from file
+    # print(f"[create_safe_agent] Loading rules from {rule_file}...")
+    rules = Rule.from_file(rule_file)
+    # print(f"[create_safe_agent] Loaded {len(rules)} rule(s)")
+    
+    # 2. Create incident state (context)
+    state = IncidentState(
+        all_rules=rules,
+        session=session,
+        generate_learned_rules=generate_learned_rules,
+    )
+    
+    # ⭐ 2.1. Load learned rules from previous runs (optional)
+    if use_learned_rules:
+        # print(f"[create_safe_agent] Loading learned rules...")
+        state.load_learned_rules()
+        # print(f"[create_safe_agent] Loaded {len(state.learned_rules)} learned rule(s)")
+    else:
+        # print(f"[create_safe_agent] Skipping learned rules (use_learned_rules=False)")
+        state.learned_rules = []  # Ensure empty list
+    
+    # 3. Create rule interpreter
+    interpreter = RuleInterpreter(rules, llm_client)
+    
+    # 4. Configure detector with LLM client
+    configure_detector(llm_client)
+    
+    # 5. Create hooks for lifecycle events
+    hooks = IncidentDetectionHooks(interpreter)
+    
+    # 6. Create dynamic instructions function
+    def dynamic_instructions(
+        context, 
+        agent
+    ) -> str:
+        """Generate dynamic instructions based on incident state"""
+        return ResponseOrchestrator.generate_dynamic_instructions(context.context)
+    
+    # ⭐ 7. Wrap base tools with eradication (dual-layer checking)
+    # print(f"[create_safe_agent] Wrapping {len(base_tools)} base tool(s) with eradication...")
+    wrapped_tools = [
+        create_safe_tool_with_eradication(tool, rules, state)
+        for tool in base_tools
+    ]
+    
+    # 8. Combine safety tools with wrapped base tools
+    all_tools = [
+        mark_remediation_complete,
+        get_incident_status,
+        *wrapped_tools  # ⭐ Use wrapped tools instead of base tools
+    ]
+    
+    # 8. Create the agent
+    agent = Agent[IncidentState](
+        name=agent_name,
+        instructions=dynamic_instructions,
+        hooks=hooks,
+        tools=all_tools,
+        model=model
+    )
+    
+    # print(f"[create_safe_agent] Agent '{agent_name}' created with {len(all_tools)} tools")
+    # print(f"[create_safe_agent] Safety tools: mark_remediation_complete, get_incident_status")
+    # base_tools are now raw functions, not Tool objects
+    base_tool_names = [t.__name__ if hasattr(t, '__name__') else str(t) for t in base_tools]
+    print(f"[create_safe_agent] Base tools: {', '.join(base_tool_names)}")
+    print(
+        f"[create_safe_agent] generate_learned_rules="
+        f"{'ON' if generate_learned_rules else 'OFF'}"
+    )
+    
+    return agent, state
+
+
+def create_safe_agent_with_custom_instructions(
+    rule_file: str,
+    base_tools: List[Tool],
+    base_instructions: str,
+    agent_name: str = "Safe Agent",
+    model: str = "gpt-5.6-luna",
+    llm_client=None,
+    session=None,
+    generate_learned_rules: bool = True,
+) -> tuple[Agent[IncidentState], IncidentState]:
+    """
+    Create a safe agent with custom base instructions.
+    
+    This variant allows you to provide custom base instructions that will be
+    combined with the incident response instructions.
+    
+    Args:
+        rule_file: Path to the ResponseSpec rule file
+        base_tools: List of tools the agent can use
+        base_instructions: Custom instructions for the agent's normal behavior
+        agent_name: Name for the agent
+        model: OpenAI model to use
+        llm_client: Optional OpenAI client for incident detection
+        generate_learned_rules: After remediation, generate a new learned rule
+    
+    Returns:
+        Tuple of (agent, incident_state)
+    """
+    # Load rules and create state
+    rules = Rule.from_file(rule_file)
+    state = IncidentState(
+        all_rules=rules,
+        session=session,
+        generate_learned_rules=generate_learned_rules,
+    )
+    
+    # ⭐ Load learned rules
+    state.load_learned_rules()
+    
+    interpreter = RuleInterpreter(rules, llm_client)
+    configure_detector(llm_client)
+    hooks = IncidentDetectionHooks(interpreter)
+    
+    # Create custom dynamic instructions
+    def dynamic_instructions(context, agent) -> str:
+        """Combine base instructions with incident response instructions"""
+        incident_instructions = ResponseOrchestrator.generate_dynamic_instructions(context.context)
+        
+        # If in incident mode, incident instructions take priority
+        if context.context.incident_detected:
+            return incident_instructions
+        
+        # Otherwise, combine base with safety protocol
+        return f"""{base_instructions}
+
+{incident_instructions}
+"""
+    
+    # ⭐ Wrap base tools with eradication
+    wrapped_tools = [
+        create_safe_tool_with_eradication(tool, rules, state)
+        for tool in base_tools
+    ]
+    
+    # Combine tools
+    all_tools = [
+        mark_remediation_complete,
+        get_incident_status,
+        *wrapped_tools  # ⭐ Use wrapped tools
+    ]
+    
+    # Create agent
+    agent = Agent[IncidentState](
+        name=agent_name,
+        instructions=dynamic_instructions,
+        hooks=hooks,
+        tools=all_tools,
+        model=model
+    )
+    
+    return agent, state
+
+
+def create_safe_embodied_agent(
+    rule_file: str,
+    tools: List[Tool],
+    base_instructions: str,
+    agent_name: str = "Embodied Agent",
+    model: str = "gpt-5.6-luna",
+    llm_client=None,
+    session=None,
+    generate_learned_rules: bool = True,
+    # Optional raw implementations of embodied tools. When provided,
+    # they will be wrapped with dual-layer checking and used to
+    # replace the corresponding Tool objects in ``tools``.
+    turn_on_impl: Optional[Callable] = None,
+    find_impl: Optional[Callable] = None,
+    pick_impl: Optional[Callable] = None,
+    open_receptacle_impl: Optional[Callable] = None,
+    close_receptacle_impl: Optional[Callable] = None,
+    turn_off_impl: Optional[Callable] = None,
+    break_object_impl: Optional[Callable] = None,
+    slice_object_impl: Optional[Callable] = None,
+    cook_impl: Optional[Callable] = None,
+    dirty_impl: Optional[Callable] = None,
+    clean_impl: Optional[Callable] = None,
+    # Multi-arg / context-dependent embodied tools
+    put_impl: Optional[Callable] = None,
+    drop_impl: Optional[Callable] = None,
+    throw_impl: Optional[Callable] = None,
+    fillLiquid_impl: Optional[Callable] = None,
+    pour_impl: Optional[Callable] = None,
+    emptyLiquid_impl: Optional[Callable] = None,
+) -> tuple[Agent[IncidentState], IncidentState]:
+    """Create a safe embodied agent using existing Tool objects.
+
+    This is a convenience factory for embodied_agent, where the 17 action
+    tools are already defined as @function_tool-wrapped Tool objects.
+
+    Unlike ``create_safe_agent`` and ``create_safe_agent_with_custom_instructions``,
+    this helper does **not** wrap the tools again with ``create_safe_tool_with_eradication``.
+    This avoids schema/signature conflicts for now, while still providing:
+
+    - Rule loading (initial + learned rules)
+    - IncidentState context for ResponseSpec
+    - IncidentDetectionHooks for lifecycle integration
+    - Dynamic instructions that combine base embodied instructions with
+      incident-response instructions
+
+    Later, once the tool wrapper supports the embodied tool signatures,
+    this helper can be migrated to use wrapped tools as well.
+    """
+
+    # Load rules and create incident state
+    rules = Rule.from_file(rule_file)
+    state = IncidentState(
+        all_rules=rules,
+        session=session,
+        generate_learned_rules=generate_learned_rules,
+    )
+
+    # Load learned rules for pre-check use in the ResponseSpec pipeline
+    state.load_learned_rules()
+
+    # Configure interpreter and detection hooks
+    interpreter = RuleInterpreter(rules, llm_client)
+    configure_detector(llm_client)
+    hooks = IncidentDetectionHooks(interpreter)
+
+    # Dynamic instructions: combine embodied base instructions with
+    # incident-response instructions generated from the IncidentState
+    def dynamic_instructions(context, agent) -> str:
+        incident_instructions = ResponseOrchestrator.generate_dynamic_instructions(
+            context.context
+        )
+
+        # If an incident is active, prioritize incident-response protocol
+        if context.context.incident_detected:
+            return incident_instructions
+
+        # Otherwise, run normal embodied behavior with safety protocol appended
+        return f"""{base_instructions}
+
+{incident_instructions}
+"""
+
+    # Combine ResponseSpec safety tools with the provided embodied tools.
+    # For any raw implementation provided, wrap it with dual-layer checking
+    # and replace the corresponding Tool in the list.
+    all_tools: List[Tool] = [
+        mark_remediation_complete,
+        get_incident_status,
+    ]
+
+    impls_by_name: dict[str, Callable] = {}
+    if turn_on_impl is not None:
+        impls_by_name["turn_on"] = turn_on_impl
+    if find_impl is not None:
+        impls_by_name["find"] = find_impl
+    if pick_impl is not None:
+        impls_by_name["pick"] = pick_impl
+    if open_receptacle_impl is not None:
+        impls_by_name["open_receptacle"] = open_receptacle_impl
+    if close_receptacle_impl is not None:
+        impls_by_name["close_receptacle"] = close_receptacle_impl
+    if turn_off_impl is not None:
+        impls_by_name["turn_off"] = turn_off_impl
+    if break_object_impl is not None:
+        impls_by_name["break_object"] = break_object_impl
+    if slice_object_impl is not None:
+        impls_by_name["slice_object"] = slice_object_impl
+    if cook_impl is not None:
+        impls_by_name["cook"] = cook_impl
+    if dirty_impl is not None:
+        impls_by_name["dirty"] = dirty_impl
+    if clean_impl is not None:
+        impls_by_name["clean"] = clean_impl
+    if put_impl is not None:
+        impls_by_name["put"] = put_impl
+    if drop_impl is not None:
+        impls_by_name["drop"] = drop_impl
+    if throw_impl is not None:
+        impls_by_name["throw"] = throw_impl
+    if fillLiquid_impl is not None:
+        impls_by_name["fillLiquid"] = fillLiquid_impl
+    if pour_impl is not None:
+        impls_by_name["pour"] = pour_impl
+    if emptyLiquid_impl is not None:
+        impls_by_name["emptyLiquid"] = emptyLiquid_impl
+
+    # Pre-create wrapped tools for any provided implementations
+    wrapped_by_name: dict[str, Tool] = {}
+    for name, impl in impls_by_name.items():
+        # print(f"[create_safe_embodied_agent] Wrapping '{name}' with dual-layer checks...")
+        wrapped_by_name[name] = create_safe_tool_with_eradication(
+            impl,
+            rules,
+            state,
+        )
+
+    # Rebuild tool list, replacing any Tool whose name has a wrapped impl.
+    # Avoid isinstance(..., Tool) because Tool may be represented as a
+    # subscripted generic at runtime in some SDK versions.
+    for t in tools:
+        if hasattr(t, "name") and t.name in wrapped_by_name:
+            all_tools.append(wrapped_by_name[t.name])
+        else:
+            all_tools.append(t)
+
+    agent = Agent[IncidentState](
+        name=agent_name,
+        instructions=dynamic_instructions,
+        hooks=hooks,
+        tools=all_tools,
+        model=model,
+    )
+
+    return agent, state

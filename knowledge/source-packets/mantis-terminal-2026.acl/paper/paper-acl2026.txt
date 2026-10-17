@@ -1,0 +1,1165 @@
+===== PDF p.1 =====
+A Multi-Agent Framework for High-Interaction Terminal Simulation
+
+
+                    Kai Wei1 , Yuwen Cui1 , Kehan Shen1 , Hua Wei2 , Guangjing Wang1
+                          1
+                            University of South Florida 2 Arizona State University
+
+
+
+
+                           Abstract                                   Terminal simulation focuses on modeling in-
+                                                                   teractive command-line environments. A high-
+         Terminal simulation, framed as a terminal                 interaction terminal simulator must preserve not
+         command-level Turing test, is a long-standing             only command syntax, but also execution seman-
+         symbolic language generation problem in di-
+                                                                   tics, environmental continuity, and state consis-
+         alogue and interactive systems. Prior scripted
+         simulators lack flexibility for complex, multi-           tency across multi-turn command interactions. The
+         turn interactions, while LLM-based approaches             terminal simulation is challenging because both the
+         often misinterpret commands, break output                 output content and format must adapt accurately
+         formats, drift from system state, and remain              to each input in a continuously interactive state.
+         vulnerable to prompt injection. In this work,             Meanwhile, we need to ensure cross-session con-
+         we propose MANTIS, a terminal simulation                  sistency (i.e., stateful coherence across sessions) in
+         framework that improves realism, consistency,
+                                                                   long-term, multi-turn command-line interactions.
+         and robustness for command language gener-
+         ation. MANTIS integrates a multi-agent ar-                The challenges become especially demanding when
+         chitecture with a filter-based routing model              users are computer-proficient operators who ac-
+         that safely dispatches commands to external               tively probe the system, test corner cases, and no-
+         tools or an LLM-based agent to support inter-             tice subtle inconsistencies in outputs, file states,
+         active commands and defend against prompt                 permissions, or command behavior.
+         injection attacks. In addition, we design an                 Traditional terminal simulations often rely on
+         agentic file system with history memory prun-             static scripted logic, which is brittle and inflexi-
+         ing for long-term state consistency. We re-
+                                                                   ble under complex multi-turn interactions (Kumar
+         lease three datasets: 28,045 real terminal in-
+         put–output pairs, a 1,000 multi-turn interaction          et al., 2024). More recently, large language models
+         session dataset, and a 25,849 labeled classi-             (LLMs) have been explored for terminal simula-
+         fication dataset. MANTIS outperforms state-               tion (Sladić et al., 2024; Sezgin and Boyacı, 2025;
+         of-the-art baselines by more than 9%, achiev-             Zhou et al., 2025). Yet, general-purpose LLMs
+         ing over 95% accuracy on multi-turn terminal              struggle in high-interaction terminal simulation.
+         simulation. The dataset and source code are               LLMs may misinterpret shell commands, produce
+         available at https://github.com/kaiwei666a/
+                                                                   outputs in incorrect terminal formats, hallucinate
+         MANTIS_Terminal_Simulation.
+                                                                   content for chained or state-dependent commands,
+    1    Introduction                                              and generate responses that are inconsistent with
+                                                                   interaction history (Shi et al., 2023; Bridges et al.,
+    Terminal simulation is fundamentally a symbolic                2025). LLMs also remain vulnerable to instruction-
+    command-language generation problem for dia-                   following failures and prompt injection attacks (He
+    logue and interactive systems. As a primary                    and Vechev, 2023; Wei and Wang, 2025), which
+    command-line interface, the Unix-based terminal                is particularly problematic in adversarial, high-
+    plays an important role in human-computer inter-               interaction environments.
+    action, such as remote access and system adminis-                 In this work, we address the above limitations
+    tration. In particular, terminal simulation has been           by designing MANTIS (Multi-AgeNt Terminal
+    widely used as a key mechanism for cyber decep-                Interaction Simulation). We introduce a multi-
+    tion to lure malicious attackers and collect threat            agent framework to enable parallel task execution,
+    intelligence (Fan et al., 2024; Christli et al., 2024;         as a high-interaction terminal simulation requires
+    Otal and Canbaz, 2024).                                        distinct, tightly constrained subproblems that inter-
+                                                             32828
+Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 32828–32845
+                                 July 2-7, 2026 ©2026 Association for Computational Linguistics
+
+===== PDF p.2 =====
+act over long horizons. An Arbiter Agent coordi-             world testbed on top of the proposed terminal
+nates and dispatches tasks to both a Strategic Agent         simulation framework. In particular, we intro-
+and a Response Agent to improve efficiency and               duce a routing tool for a response agent that
+context consistency. In addition, we build a large-          classifies incoming commands and dispatches
+scale terminal interaction dataset to fine-tune small        them either to dedicated execution tools or to
+language models, ensuring robust interpretation of           the LLM-based simulator. This design im-
+chained and complex commands with limited com-               proves security against prompt-injection at-
+putational resources. Furthermore, we design an              tacks while efficiently handling both simple
+agentic file system that preserves consistency with          commands and highly dynamic, interactive
+the interaction history while reducing token con-            terminal commands with high fidelity.
+sumption. Finally, we propose a dynamic routing
+tool that defends against prompt-injection attacks      2   Related Work
+and handles dynamic and interactive commands
+such as scp and nano.                                   High-interaction terminal simulation can be viewed
+   We evaluate MANTIS through statistical tests         as a command-level Turing test. Compared to
+along multiple dimensions, including syntax accu-       judging free-form natural language fluency and
+racy, state consistency, and robustness to prompt       safety (Chen et al., 2023, 2024b), we evaluate
+injection attack. MANTIS consistently outper-           whether the simulated terminal behaves like a real
+forms state-of-the-art baselines across all metrics.    computer system under sustained adversarial inter-
+For example, on a terminal interaction dataset          action. Terminal simulation is particularly impor-
+of 1,000 multi-turn terminal sessions, MANTIS           tant in cyber deception, where a simulated termi-
+achieves more than 95% accuracy, exceeding Hon-         nal, as a honeypot (Guan et al., 2024; Wang et al.,
+eyGPT (Wang et al., 2025) by 9%. The history            2025), can accept and process an attacker’s com-
+pruning algorithm also saved 18% of token con-          mands in a virtual environment rather than on real
+sumption while maintaining 96% accuracy. Finally,       systems, thereby reducing security risks.
+in a user study of 20 participants, MANTIS re-             The low- and medium-interaction terminal sim-
+ceived an average mean opinion score of at least        ulators generate command responses using man-
+4.6 out of 5 for terminal simulation. In summary,       ually scripted input–output pairs, which are lim-
+we make the following contributions:                    ited to predefined command sets and easily ex-
+                                                        posed by exploratory probing (Shi et al., 2019;
+   • Dataset. We construct a shell command              Oosterhof et al., 2025). To improve realism, re-
+     dataset comprising 28,045 input-output pairs       cent work adopts LLMs to generate more realis-
+     from a real Linux system. We also curate a         tic and context-aware terminal responses (Guan
+     multi-turn terminal interaction dataset with       et al., 2024; Christli et al., 2024; Sladić et al., 2024,
+     1,000 sessions to evaluate the accuracy and        2025). However, LLM-based terminal simulation
+     state consistency of LLM-based terminal in-        struggles to maintain a dynamic and interactive
+     teractions. Furthermore, we labeled a clas-        system state across multi-turn interactions.
+     sification dataset containing 25,849 different        For example, HoneyLLM (Guan et al., 2024)
+     instructions for command routing modeling.         is an LLM-based terminal simulator, but it often
+   • Agentic Design. We propose a multi-agent           mishandles malformed inputs and violates con-
+     framework that supports parallel task execu-       straints related to filesystem state and permission
+     tion and command-line simulation, enabling         checks. This is because the general-purpose LLMs
+     accurate shell-command interpretation and re-      are trained on public web corpora with limited ex-
+     alistic terminal outputs in interactive honeypot   posure to shell syntax and operating system behav-
+     environments. Specifically, we introduce an        iors (Deng et al., 2025; Fan et al., 2024; Otal and
+     agentic file-system abstraction to make MAN-       Canbaz, 2024), making it difficult to consistently
+     TIS maintain context-consistent responses. In      simulate state-dependent command outputs. In ad-
+     addition, we design a history pruning algo-        dition, LLMs are prone to hallucinations and to
+     rithm that reduces token consumption and re-       inconsistent use of prior context (Liu et al., 2023),
+     sponse latency, improving accuracy.                which makes reliable state tracking difficult and
+                                                        thus hampers execution of chained or dynamically
+   • Terminal Simulation. We implement a real-          evolving shell commands.
+                                                    32829
+
+===== PDF p.3 =====
+Command c
+                                                                                                  Scan ports
+                                                                                                               scp -o              Sandbox
+                                          Arbiter Agent                                                                  Upload files
+            u = Routing(c)                                                             UpdateSnapshot
+
+                                                                                                                                   Cwd
+                                                                                                                                Privileges
+                                                                                                               System logs         CVE
+                                                                                                                                   Files
+
+               u = Read                   u = Rejection                        u = Write                                       Ip address
+                                                                          Planning                             Auth. logs
+                                                                                                                               Username
+               ToolExec(c,s)              Illegal Command        Info. Integration
+                                                                                                                                Password
+                                                                                                                               Timestamp
+         Read-Only, No State Change
+                                                                                                                               Command
+                                                                                                                               Timestamp
+                 Read Snapshot                                    History pruning                              Session logs    Username
+                                                                Session                                                         Response
+        Deterministic Response y                                History
+
+                                                                             Strategic Agent
+
+       Continuous interactive interface
+                                                                                                               System State Difference
+          top                nano
+                                                     Formatted Response              Context Consistency
+
+
+                                                            Response Agent
+                                                                                                                        File System
+
+
+Figure 1: The MANTIS system comprises multiple cooperating agents: an Arbiter Agent, a Strategic Agent, and a
+Response Agent, together with an agentic file system that includes a history-pruning mechanism. MANTIS supports
+routing incoming commands, maintaining and reasoning over system state, and generating realistic terminal outputs.
+
+3   System Design                                                           observable execution effects into the maintained
+                                                                            snapshot logs. The Arbiter Agent maintains system,
+In this section, we introduce MANTIS, including
+                                                                            session, and authentication logs, and routes how
+multi-agent design with a dynamic routing tool,
+                                                                            each incoming command should proceed.
+an agentic file system with history pruning for a
+realistic and interactive terminal simulation.                                 We develop a command routing model as a tool
+                                                                            to help the Arbiter Agent decide how each com-
+3.1 Multi-Agent Design                                                      mand proceeds and call other tools. Given an input
+LLM-based multi-agent systems extend the ca-                                command, the routing model classifies the com-
+pabilities of pure LLM via external tool integra-                           mand into one of three routing categories. (i) Read
+tion, structured memory, and customized work-                               category corresponds to read-only operations, such
+flow planning and multi-agent coordination. Prior                           as directory listing or status queries. These com-
+work (Jia et al., 2025; Chen et al., 2024a; Wang                            mands do not induce persistent state changes and
+et al., 2023) shows that interactive environments                           are handled by fast, deterministic handlers that di-
+can surface multi-agent coordination failures and                           rectly read from the maintained system state. (ii)
+consistency issues that are often obscured in single-                       Write category includes state-changing or context-
+agent or single-turn evaluations. A new interac-                            sensitive operations that affect the filesystem, pro-
+tive environment is needed to assess output con-                            cess management, and I/O operations. These com-
+sistency, dynamic task planning, parallel execu-                            mands are forwarded to the Strategic Agent for his-
+tion, and communication-efficient coordination for                          tory context pruning and providing context for Re-
+multi-agent evaluation. Terminal simulation pro-                            sponse Agent. (iii) Rejection category includes in-
+vides such a practical and interactive environment                          valid, malformed, or unsafe inputs, such as prompt-
+for assessing LLM-based multi-agent behavior.                               injection attempts. These commands are immedi-
+   As shown in Figure 1, the terminal simulation                            ately rejected and return standard shell-style error
+is organized as a coordinated multi-agent system                            messages consistent with real terminal behavior.
+composed of an Arbiter Agent, a Strategic Agent,                              The Strategic Agent manages contextual infor-
+and a Response Agent. The Arbiter Agent acts as the                         mation required for terminal simulation, including
+control plane of the terminal simulation. For every                         pruned history and system state. The history prun-
+incoming command, the Arbiter Agent records the                             ing retains only interactions that are important to
+pre-execution system snapshot and incorporates the                          explain the current environment configuration, pri-
+                                                                 32830
+
+===== PDF p.4 =====
+oritizing state-altering commands. The resulting            Algorithm 1: Agentic Terminal Simulation
+context provides a minimal yet causally consistent           Input: command c, snapshot s, timestamp
+view of the system state for response generation.                   t, history H, honeypot flag F ,
+To lure external adversaries, the Strategic Agent                   pruned history W
+can optionally generate a plan log that specifies            Output: response y and trace π
+how the system should respond to the incoming              1 id ← uuid();
+command to simulate a potential vulnerability, as          2 u ← Routing(c);
+described in detail in Appendix E. This plan log           3 if u = Rejection then
+is provided to the LLM as guidance for response            4     return ("ShellError", Trace(id, ut ));
+generation.
+                                                           5  if u = Read then
+   The Response Agent generates the final terminal
+                                                            6     y ← ToolExec(c, st−1 );
+output based on the current system state. In our
+                                                            7     return (yt , Trace(id, ut , yt ));
+multi-agent design, a limited task scope by task
+delegation allows the Response Agent to focus on           8  Run in parallel:
+output-format and state-consistency requirements,          9     if F == True then
+enabling more effective task execution with fewer          10        P ⋆ ← Planning(st−1 , c, Wt−1 );
+task instructions. The multi-agent terminal interac-       11     st ← UpdateSnapshot(st−1 , ct );
+tion is shown in Algorithm 1. Given a command ct ,         12     Wt , Ht ← PruneHistory(st−1 , c, Wt−1 );
+the current system snapshot st−1 , and the retained        13 y ← Response(st , ct , Wt−1 , P );
+                                                                                               ⋆
+interaction history Wt−1 , the algorithm first com-        14 return (y, Trace(id, ut , Ht , Pt , yt , Wt ));
+                                                                                              ∗
+putes a routing decision ut = Routing(ct ), which
+determines the execution path. Invalid or adversar-
+ial inputs are rejected with shell-consistent error        and reasoning performance for context in earlier
+responses (lines 3-4 in Algorithm 1) while non-            positions (Mohsin et al., 2025; Liu et al., 2025).
+state-changing commands are handled via a tool                To provide more useful information within an
+execution path yt = ToolExec(ct , st−1 ) (lines 5-7).      effective window, existing history pruning meth-
+   For write-level commands (ut = Write), if               ods primarily rely on truncation, summarization,
+MANTIS aims to simulate a vulnerability as a               or relevance-based retrieval (Anagnostidis et al.,
+honeypot, MANTIS performs planning based on                2023; Fu et al., 2024). While effective at reducing
+the current snapshot and the pruned history, pro-          token consumption, existing methods undermine
+ducing a response plan Pt∗ = Plan(st−1 , ct , Wt−1 )       the precision with which LLMs reason about the
+(lines 8-10). In parallel, the system updates the          current fine-grained system state. In interactive
+snapshot according to command semantics using              terminal environments, even minor deviations in
+UpdateSnapshot(st−1 , ct ), and prunes the interac-        executable details (e.g., file paths, permissions,
+tion history by PruneHistory(st−1 , ct , Wt−1 ). Fi-       flags, or working directories) can alter command
+nally, conditioned on the optional plan Pt∗ , the up-      semantics and lead to inconsistent or invalid system
+dated snapshot st , and the pruned history Wt−1 ,          states (Holister et al., 2025).
+the Response Agent generates the terminal output
+yt = Response(st , ct , Wt−1 , Pt∗ ) and records an        3.2.1 Role-based File System
+execution trace πt = (ut , Ht , Pt∗ , yt , Wt ) for next   Inspired by the Unix philosophy that "everything is
+round analysis.                                            a file", we design an agentic file system that uni-
+                                                           fies context artifacts under a common namespace
+3.2 Agentic File System Design                             and maintains multiple task-specific logging chan-
+As LLMs are increasingly embedded into agentic             nels to record terminal commands and metadata
+workflows, performance and reliability are con-            (e.g., timestamp, user). Specifically, (i) System
+strained more by context engineering. The context          log maintains a structured file of directories, files,
+engineering includes the end-to-end process of ac-         metadata, and permission changes that result from
+quiring, organizing, compressing, and updating the         external input commands, such as file creation,
+information an agent uses to reason and act. Al-           deletion, modification, and movement. (ii) Authen-
+though recent LLMs support large context windows           tication log records SSH authentication activities,
+(e.g., 128K), LLMs exhibit strong positional bias          including login attempts, credential usage, and ses-
+in long-context settings, with degraded memory             sion establishment events. (iii) Session log stores
+                                                      32831
+
+===== PDF p.5 =====
+the chronological interaction history between the             Algorithm 2: State-Aware History Pruning
+attacker and the terminal simulator, including is-             Input: new interaction et = (ct , yt );
+sued commands and corresponding responses. In                          snapshots st−1 , st ; previous pruned
+addition, we introduce a sandbox for isolated file-                    history Wt−1 ; persistent history
+handling. All attacker-uploaded or modified files                      Ht−1 ; capacity K
+are redirected into a dedicated Docker container               Output: pruned history Wt , updated
+that provides filesystem isolation and disables code                     history Ht
+execution and external networking. The sandbox               1 Ht ← Ht−1 ∥ et ;
+is used solely to record file contents and structural        2 U (t) ← Evict(et , Wt−1 , st , st−1 );
+changes, preventing malicious payloads from being                                                    
+                                                             3 U (t) = Udup (t), Ustd (t), Ustale (t) ;
+executed on the host system.                                 4 foreach hn ∈ Wt−1 do
+
+3.2.2 History Pruning for In-Context Memory                  5     if cn = ct then
+                                                             6          Udup (n) ← Udup (n) + 1;
+The complete interaction history Ht up to time t
+is stored in different logs for inspection, such as         7  Ustd (t) ≜ StDiff(st−1 , st ) ∈ {0, 1, 2, 3};
+for calling the shell command history. Besides,              8 Ustale (et ) = t;
+                                                                                               
+Arbiter Agent retains the current system state and           9 ht ← et , timestampt , U (t) ;
+state-changing commands in the pruned history               10 Wt ← Wt−1 ∥ ht ;
+Wt . Wt is a subsequence of Ht that acts as in-             11 while |Wt | > K do
+context memory for Response Agent to act correctly          12     h⋆ ← arg maxh∈Wt U (h);
+at each step. The history-pruning algorithm for ef-         13     Wt ← Wt \ {h⋆ };
+ficient in-context memory is shown in Algorithm 2.          14   return Wt , Ht ;
+    Specifically, the system observes a new terminal
+interaction et = (ct , yt ) at time step t, where ct
+denotes the command and yt denotes the response.
+Upon observation, the et is appended to Ht−1 , de-          spired by the Linux Audit (Red Hat, 2025), MITRE
+noted as Ht = Ht−1 ∥ et . The complete execution            ATT&CK (MITRE, 2025), and advanced persis-
+trace is retained independently of any context prun-        tent threat (APT) detection work (Microsoft, 2025;
+ing decisions. We use JSON format to track system           King and Chen, 2003), we define grade rules to
+entities (e.g., files, processes, services, network         quantify the state difference Ustd (t). (i) If any priv-
+endpoints) and their observable properties (e.g.,           ilege or identity change, persistence modification,
+existence, permissions, ownership, configuration            or network exposure change is present, Ustd (t) = 0.
+values). The Arbiter Agent updates the system en-           (ii) If any critical configuration file is modified,
+tities from the pre-execution state st−1 to the post-       then Ustd (t) = 1. (iii) If any local filesystem
+execution state st , reflecting the observable system       write/creation/deletion/content modification oc-
+snapshot after executing ct .                               curs, Ustd (t) = 2. (iv) Ustd (t) = 3 if no persistent
+    We define a pruning priority U (t) based                side effect is observed (read-only). When multiple
+on [et , Wt−1 , st , st−1 ], and U (t) returns a            change types co-occur, Ustd (t) is conservatively de-
+three-component priority vector                             termined by the minimum applicable grade level.
+                                         as U (t) =
+  Udup (t)∗∗∗ , Ustd (t)∗∗ , Ustale (t)∗ , where Udup (t)   Thus, given a command, for each related field (e.g.,
+has highest priority, Ustd (t) is the second, and           a specific file or folder), Ustd (t) ∈ {0, 1, 2, 3}, ob-
+Ustale (t) is last to consider when removing a history      tained by a field-wise comparison between fields
+record. Specifically, the initial value of Udup (t) for     of st−1 and st .
+each command is 0. When there exists an interac-               The staleness term Ustale (et ) measures how old
+tion eh ∈ Wt−1 whose stored command is identical            an interaction is. We define it as the elapsed rounds
+to ct , the redundancy term Udup (et )+1 (lines 5-6 in      since the interaction occurred. The initial value of
+Algorithm 2). The repeated commands accumulate              Ustale (et ) = t is 0, and is increased by 1 if a new ter-
+larger Udup (·) and are more likely to be evicted.          minal interaction occurs. Thus, earlier interactions
+    We then compute the corresponding state dif-            have larger staleness values. During pruning, sys-
+ference grade as Ustd (t) ≜ StDiff(st−1 , st ), which       tem commands are compared first by redundancy
+assigns a discrete severity level to the snapshot tran-     Udup (t), then by grade-based priority Ustd (t), and
+sition from st−1 to st (line 7 in Algorithm 2). In-         finally by temporal staleness Ustale (t).
+                                                       32832
+
+===== PDF p.6 =====
+Table 1: Commercial LLM API Performance Comparison for Terminal Interaction Simulation on Multi-turn Dataset.
+
+    Metric         Claude-4           DeepSeek-R1-0528            Gemini-2.5-Pro          GPT-OSS-120B           Qwen3-Coder
+    Accuracy (%)      85.3                   82.7                      87.6                    83.9                  89.3
+    Avg-Latency (s) 3.65                     3.41                      2.57                    1.42                  1.08
+    P50 Latency (s) 2.50                     3.28                      1.81                    1.16                  0.71
+    P95 Latency (s) 12.34                    5.01                      5.81                    2.76                  2.98
+    Total Tokens   4,979,724              6,137,005                 5,010,700               4,437,379             4,255,288
+Metrics: Accuracy (%) is the percentage of sessions with correct responses based on system settings and history states;
+Avg-Latency (s) is the average end-to-end latency per command. P50 Latency (s) is the median end-to-end per-command latency.
+P95 Latency (s) is the 95th-percentile latency reflecting tail delays. Total Tokens is the cumulative token usage across all requests.
+
+   We then construct a new history entry ht =                       generation dataset of 28,045 Linux shell commands
+  et , timestampt , U (t) and append it to pruned                    collected from a Kali Linux environment, where
+history Wt . We define K as an upper bound on the                    each instance pairs a raw command c with its
+number of interactions retained in the working con-                  ground-truth terminal output y obtained by exe-
+text and directly reflects the effective context bud-                cuting the command in a controlled Linux environ-
+            j to the language
+get available              k model. K is calculated                  ment. This dataset is used for instruction tuning on
+as: K =       Bmax −Bfixed
+                            , where Bmax = 8, 000,                   LLMs in Response Agent.
+                   b
+Bfixed denotes non-history tokens, and b is the esti-                   (ii) Multi-turn Dataset: We crafted 1,000 multi-
+mated per-interaction token cost.                                    turn interaction sessions (3–20 turns) that simulate
+   Based on NoLiMa (Modarressi et al., 2025),                        diverse behaviors. The dataset is used for LLMs
+GPT-4o’s performance degrades noticeably once                        in multi-turn response benchmarking, with a fixed
+the input context grows beyond 8K, known as mem-                     workspace directory structure. More details are
+ory decay. Thus, we account for the memory decay                     in Appendix B. Additionally, we constructed 20
+and keep the total prompt length fed to the Re-                      multi-turn interaction sessions, each comprising
+sponse Agent below Bmax = 8, 000 tokens when                         50–100 turns, resulting in a total of 1,403 com-
+choosing the context capacity K. In our implemen-                    mands. We use these sessions to evaluate the per-
+tation, Bfixed is measured from the actual prompt                    formance of history pruning with respect to token
+construction, which consists of the system prompt                    consumption and contextual state consistency.
+(235 tokens) and a snapshot field in the Strategic                      (iii) Routing Dataset: We merge commands from
+Agent prompt. As the snapshot is initially empty                     the Response Dataset and Multi-turn Dataset, fol-
+but can grow after commands are executed, we use                     lowed by deduplication and labeling as Read or
+a conservative upper bound by empirically approx-                    Write. Besides, we crafted 2,361 syntax-error com-
+imating the steady-state snapshot footprint as two                   mands (e.g., sl, ls-al), and prompt-injection inputs,
+snapshots (1335 tokens per snapshot).                                labeling them as Rejection. In total, we have 25,849
+                                                                     instances in the routing dataset. 11.71% are Write
+   We empirically set b = 100 as an estimate of
+                                                                     operations and 9.13% are Rejection cases, while
+the average token footprint per interaction, includ-
+                                                                     the remaining 79.14% are Read operations, con-
+ing command, response, and metadata. With the
+                                                                     sistent with the read-dominant nature of real-world
+above settings, we calculate K as 50 interactions
+                                                                     terminal interactions. More detail in Appendix F.
+in the working context. When |Wt−1 ∥ et | > K,
+we iteratively evict the interaction with the three-                 Models and Training. We fine-tuned multi-
+component priority vector U (·) until |Wt | ≤ K.                     ple open-source small language models, includ-
+We acknowledge that advances in LLM capabili-                        ing Llama, Qwen, DeepSeek, CodeLlama, and
+ties may increase the feasible value of Bmax . Our                   CodeGemma variants, and adopted Llama-3.2-
+framework can readily accommodate such changes                       3B-Instruct (FT) as the "brain" of our Response
+by adjusting these parameters accordingly.                           Agent. Specifically, fine-tuning is performed on a
+                                                                     single NVIDIA RTX 4090 GPU using Low-Rank
+4     Implementation and Evaluation                                  Adaptation (LoRA) supervised fine-tuning, imple-
+                                                                     mented in the LLaMA-Factory framework. Models
+4.1 Dataset and Instruction Tuning
+                                                                     are trained for three epochs using the AdamW op-
+Datasets. We constructed three datasets in our                       timizer with a learning rate of 5 × 10−5 , gradient
+experiments. (i) Response Dataset: A response-                       accumulation steps of 8, and a maximum gradi-
+                                                               32833
+
+===== PDF p.7 =====
+100
+                                                                                    prompt-level misuse that induces non-standard or
+      Accuracy (%)
+                     90
+                                                                                    misleading outputs. (iv) CTX: 1,000 multi-turn in-
+                     80
+                                                                                    teraction sessions with diverse interaction patterns
+                     70                                           ShelLM
+                                                                  HoneyLLM
+                                                                                    to evaluate context consistency.
+                     60                                           HoneyGPT
+                                                                  MANTIS(ours)
+                                                                                       First, we measure multi-turn context consistency
+                     50
+                           CAW (200)   ROB (500)   PI-RES (570)    CTX (1k)         (CTX) score, as well as the accuracy in Table 1 by
+                                                                                    comparing the model output against the ground-
+Figure 2: System comparison across four metrics. CAW                                truth terminal output using exact string matching.
+= command execution accuracy on normal commands;                                    A session is counted as correct if strings are identi-
+ROB = robustness to syntax error commands; PI-RES =
+                                                                                    cal at each evaluated turn. For example, we mark a
+resistance to prompt-injection inputs; CTX = multi-turn
+context consistency (Multi-turn Dataset).                                           turn correct if (i) all state-dependent entities (paths,
+                                                                                    filenames, permissions, counts) are consistent with
+ent norm of 1.0. A cosine learning-rate scheduler                                   the snapshot, and (ii) terminal-faithful formatting
+is applied with 7 warm-up steps. The per-device                                     is preserved (line breaks and ordering). All other
+batch size is set to 2 for both training and eval-                                  cases are counted as incorrect.
+uation. LoRA adapters are applied to all target                                        We remove inherently non-deterministic fields
+modules with a rank of 8 and a scaling factor of 16.                                (e.g., timestamps, process IDs, and run-specific
+In addition, we fine-tune a dynamic routing model                                   numeric IDs such as job IDs) and strip rendering
+for command-level classification as described in                                    artifacts that do not alter semantic content (e.g.,
+Section 3.1. More details are in Appendix F.                                        shell prompt prefixes and escape-related symbols).
+                                                                                    This pre-processing does not affect evaluation ac-
+4.2 Terminal Response LLM Benchmarking                                              curacy as we write non-deterministic fields (e.g.,
+                                                                                    timestamps, process IDs, and run-specific numeric
+We first benchmark the performance of commer-                                       IDs such as job IDs) into a log file, instead of being
+cial APIs using the Vertex AI service (Google                                       memorized by LLMs. We observe that even on the
+Cloud, 2025b) on our multi-turn dataset for ter-                                    same machine, rerunning the same job spawns a
+minal simulation. The evaluated models include                                      new process instance that is typically assigned a
+Claude-4 (Anthropic, 2025), DeepSeek-R1-0528                                        different PID by the OS, leading to mismatches that
+(DeepSeek AI, 2025b), Gemini-2.5-Pro (Google                                        are unrelated to semantic correctness. As a result,
+Cloud, 2025a), GPT-OSS-120B (OpenAI et al.,                                         these critical changes are preserved in the retained
+2025), and Qwen3-Coder (Qwen Team, 2025) us-                                        session logs and explicitly appended to the next-
+ing the same prompts. As shown in Table 1, the                                      round prompt when generating the next response.
+current response accuracy is below 90% and should                                   We want to emphasize that logging the process ID
+be improved to support high-interaction terminal                                    in our agentic file system guarantees consistency.
+simulation. Besides, using commercial LLM APIs                                         Second, for command execution accuracy on
+introduces large delays under different command                                     normal commands (CAW), we manually verify ev-
+testing. For example, the 95th-percentile latency is                                ery instance while applying the same normalization
+between 2.76 and 12.34s.                                                            and exact-match criteria as in our automatic evalu-
+   Then, we compare MANTIS against state-of-                                        ation (i.e., manual checks only confirm whether the
+the-art LLM-based terminal interaction baselines,                                   normalized strings should be considered identical
+including ShelLM (Sladić et al., 2024), Hon-                                       under the predefined rules). Third, for robustness
+eyLLM (Guan et al., 2024), and HoneyGPT (Wang                                       to syntax error commands (ROB) and resistance to
+et al., 2025). For fair comparison, we re-implement                                 prompt injection inputs (PI-RES), we score outputs
+all baselines using the GPT-4o model with differ-                                   fully automatically by exactly matching the nor-
+ent prompts in the corresponding papers. We build                                   malized model output to the required target output
+four test sets: (i) CAW: 200 well-formed commands                                   for each prompt.
+sampled from the Response Dataset to evaluate the                                      As shown in Figure 2, our system consistently
+correctness of command execution and output for-                                    outperforms all baselines across all evaluation di-
+matting. (ii) ROB: 500 syntax-error commands                                        mensions. For example, MANTIS achieves 95.36%
+to evaluate robustness to confusing or malformed                                    accuracy on the multi-turn dataset (CTX), out-
+commands. (iii) PI-RES: 570 prompt-injection in-                                    performing state-of-the-art systems (e.g., Hon-
+puts (Toyer et al., 2023) to evaluate resistance to                                 eyGPT 86.16% accuracy) and commercial APIs
+                                                                                 32834
+
+===== PDF p.8 =====
+Table 2: Mean opinion score on multi-turn terminal               Table 3: Different routing model performance.
+interaction quality evaluation (1: Bad, 5: Excellent).
+                                                                 Backbone Model                     Accuracy         Macro F1
+    Metric          5    4   3   2   1   Avg    Std              DistilBERT-base-uncased               98.09            0.930
+    Interactivity   15   2   3   0   0   4.60   0.754            RoBERTa-base                          86.15            0.823
+                                                                 DeBERTa-v3-base                       85.99            0.794
+    Latency         14   4   2   0   0   4.60   0.681
+                                                                 ModernBERT-base                       98.64            0.976
+    Consistency     15   4   1   0   0   4.7    0.571            Electra-base                          93.99            0.917
+    Format          16   4   0   0   0   4.80   0.410            Albert-base-v2                        97.71            0.960
+    Robustness      14   5   1   0   0   4.65   0.587      DistilBERT-base-uncased (Sanh et al., 2019); RoBERTa-base (Liu et al., 2019);
+                                                           DeBERTa-v3-base (He et al., 2021); ModernBERT-base (Warner et al., 2024);
+                                                           Electra-base (Google, 2020); Albert-base-v2 (Lan et al., 2019).
+
+in Table 1. For syntax-error handling, MANTIS
+achieves 97.53% accuracy, while HoneyGPT only              4.4     Ablation Study
+achieves 89.26% accuracy. Overall, MANTIS re-              This ablation study examines the contribution of
+duces incorrect responses and formatting failures          each core component in MANTIS. The routing
+while maintaining stable multi-turn behavior, un-          module determines whether an incoming command
+derscoring the benefit of explicit file-system state       should be executed, simulated, or rejected, and
+and the integrated agent framework.                        therefore mainly contributes to safe control flow
+4.3 User Evaluation on Terminal Simulation                 and robustness against malformed or adversarial
+                                                           inputs. The history-pruning module regulates how
+We conduct a user study to assess the overall re-          prior interactions are preserved in the working con-
+alism of MANTIS for terminal simulation. We                text, directly affecting long-horizon state consis-
+run the terminal simulation on a dedicated Ubuntu          tency, response latency, and token efficiency. The
+server equipped with an NVIDIA RTX 5090 GPU.               response model is responsible for terminal-output
+The server exposes SSH on port 22 to the public In-        generation and primarily contributes to local re-
+ternet, allowing external clients to connect and in-       sponse quality, including formatting fidelity and
+teract with the simulated terminal environment. To         command-to-output correctness.
+reduce operational risk, the deployment is isolated
+from any internal production infrastructure and is         4.4.1 Routing Tool Model Evaluation
+restricted to the services required for terminal inter-    We evaluate the Arbiter Agent’s routing tool model
+action. This setup enables us to observe real-world        performance. The router tool classifies each incom-
+adversarial behaviors (e.g., automated authentica-         ing command into three categories: read (benign,
+tion probing and interactive sessions) while evalu-        non-state-changing queries), write (state-changing
+ating the practicality of our LLM-driven terminal          operations), and rejection (syntax-error or prompt-
+simulation under realistic network conditions.             injection inputs). We split the Routing Dataset into
+   We recruited 20 graduate students with extensive        80% training, 10% validation, and 10% test sets
+experience in Linux-related environments. Each             using a label-stratified sampling to preserve the
+participant interacts with MANTIS for full terminal        class distribution.
+simulation, including command execution, multi-               Table 3 reports the classification performance
+turn interactions, and error handling. Participants        of six encoder-based models after domain-specific
+are asked to complete a set of exploratory tasks and       fine-tuning. Among all candidates, the fine-tuned
+freely probe MANTIS behavior. Each participant             ModernBERT-base model achieves the best over-
+gives opinion scores on interactivity with com-            all performance, reaching 98.64% accuracy with a
+mands, response latency, consistency with history          Macro-F1 of 0.976, indicating consistently strong
+states, output format correctness, and robustness to       performance across read, write, and rejection. This
+syntax errors and prompt injection. As shown in            is particularly important because write and rejec-
+Table 2, 85% of participants rated good or excellent       tion cases are less frequent but more safety-critical,
+for interactivity, reporting that MANTIS produced          and misclassification can lead to incorrect subse-
+realistic terminal responses and behaved compara-          quent behavior. Accurate routing is therefore essen-
+bly to a real Linux environment. In addition, 80%          tial because it determines whether a command is
+of participants gave MANTIS as a score of 5 for            executed against the agentic file-system state, trig-
+the stability of output formatting and the coherence       gers a state update, or is rejected before reaching
+of system behavior.                                        downstream agents.
+                                                        32835
+
+===== PDF p.9 =====
+Table 4: History pruning evaluation in the main setting                            Table 5: Performance of Base and Fine-tuned Models.
+and under a stronger backbone.
+                                                                                      Model                       Acc. (%)     Resp. Time (s)     Total Tokens
+  Metric                         Full history        Pruned history                   L3-8B                         42.0            1.219            30,736
+                                                                                      L3-8B (FT)                    76.5            1.225            28,938
+  Consistency (%)                   92.01                96.07 (↑)
+  Response Latency (s)              1.574                1.298 (↓)                    DS-R1-DQ7B                    49.5            1.063            29,635
+  Token Consumption               3,155,012            2,679,863 (↓)                  DS-R1-DQ7B (FT)               80.5            1.184            28,386
+                                                                                      OpenC-8B                      42.5            1.234            30,744
+  GPT 5.2 Consis. (%)                93.16                96.43 (↑)                   OpenC-8B (FT)                 69.5            1.366            29,194
+  GPT 5.2 Latency (s)                1.848                1.785 (↓)
+                                                                                      L3.2-3B                       34.5            0.644            30,343
+  Note: The main setting uses Llama 3.2 3B (FT) as the response backbone.             L3.2-3B (FT)                  80.5            0.596            29,162
+  GPT 5.2 results are included to verify that the benefit of pruning remains
+  consistent under a stronger backbone.                                               Q2.5-Coder-7B                 53.5            0.976            28,345
+                                                                                      Q2.5-Coder-7B (FT)            75.0            1.032            28,084
+                                                                                      DS-ProvV2-7B                  40.5            0.939            29,367
+4.4.2 History Pruning Evaluation                                                      DS-ProvV2-7B (FT)             69.5            0.942            28,703
+                                                                                      Q3-8B                         67.5            1.357            30,467
+To assess whether history pruning preserves agent                                     Q3-8B (FT)                    85.0            1.377            33,762
+behavior while reducing cost, we evaluate 20 in-                                      CL-7B                         48.5            1.125            31,126
+dependent sessions (50–100 steps each). For each                                      CL-7B (FT)                    73.0            1.167            34,371
+step, we fix the same incoming command and the                                        CG-7B                         54.5            1.396            30,821
+                                                                                      CG-7B (FT)                    67.5            1.264            31,632
+same pre-execution snapshot, and then generate
+                                                                                    Abbreviations: L3-8B = Llama-3-8B (Meta, 2024a); DS-R1-DQ7B = DeepSeek-R1-
+outputs under the same settings using either (i) the                               Distill-Qwen-7B (DeepSeek-AI, 2025); OpenC-8B = Opencoder-8B-instruct (Huang
+                                                                                   et al., 2024); L3.2-3B = Llama-3.2-3B-instruct (Meta, 2024b); Q2.5-Coder-7B
+full interaction history and (ii) the pruned working                               = Qwen2.5-Coder-7B (Hui et al., 2024); DS-ProvV2-7B = DeepSeek-Prover-V2-
+                                                                                   7B (DeepSeek AI, 2025a); Q3-8B = Qwen3-8B-Base (Team, 2025); CL-7B = Codellama-
+history produced by our method. We evaluate effec-                                 7B (Meta, 2023); CG-7B = CodeGemma-7B (Google, 2024).
+tiveness using three metrics: response consistency,
+response latency, and total token consumption.
+   As shown in Table 4, pruning maintains strong                                  formed on Response Dataset. As shown in Table 5,
+response consistency and slightly improves it                                     L3.2-3B (FT) matches DS-R1-DQ7B (FT) in accu-
+(96.07 vs. 92.01), indicating that removing low-                                  racy (80.5%) while responding faster (0.596 s vs.
+utility turns does not harm state-faithful generation                             1.184 s). Although Q3-8B (FT) attains the high-
+and can improve stability by reducing distracting                                 est accuracy (85.0%), it comes with substantially
+context. Pruning also reduces average response la-                                higher latency. Considering a balance between ac-
+tency (1.298 s vs. 1.574 s) and lowers total tokens                               curacy and latency, we use L3.2-3B (FT) in our
+(2,679,863 vs. 3,155,012). We observe that token                                  Response Agent for output generation.
+savings grow over time as the unpruned history ac-
+cumulates. For example, pruning saves about 10%
+of tokens around interaction turn-55, and the sav-                                5      Conclusion
+ings increase to about 18% by around interaction
+turn-75. In the GPT 5.2 rows of Table 4, pruning                                  In this work, we proposed a high-interaction ter-
+likewise improves both consistency and response                                   minal simulation framework that replaces brittle
+latency, indicating that the benefit of pruning is                                scripts and pure LLM-based methods with a multi-
+preserved under a stronger backbone.                                              agent architecture grounded in an explicit file-
+   Overall, the proposed history-pruning method                                   system-backed terminal state. We curated the first
+achieves response correctness comparable to, and                                  large-scale datasets for terminal interaction train-
+in some cases better than, retaining the full interac-                            ing and benchmarking, and introduced a context-
+tion history, while substantially reducing inference                              efficient history pruning algorithm to maintain
+latency and token cost in longer sessions.                                        long-horizon consistency. Experiments and a user
+                                                                                  study demonstrate improvements in output-format
+4.4.3 Response Model Evaluation                                                   fidelity, state consistency, and efficiency. The pri-
+We evaluate the model in Response Agent, focus-                                   mary target application is terminal honeypots, a
+ing solely on terminal response generation with-                                  long-studied setting for attracting external attackers
+out planning, routing, and state-management. We                                   and analyzing their strategies. More broadly, we
+report results on a curated set of 200 shell com-                                 believe this problem offers a promising new testbed
+mands, comparing multiple open-source models in                                   for studying long-horizon, stateful, and controllable
+both base and fine-tuned forms. Fine-tuning is per-                               language interaction.
+                                                                               32836
+
+===== PDF p.10 =====
+Limitations                                             References
+Generalization beyond the curated environment.          Sotiris Anagnostidis, Dario Pavllo, Luca Biggio,
+                                                          Lorenzo Noci, Aurelien Lucchi, and Thomas Hof-
+The datasets are derived from a controlled Kali           mann. 2023. Dynamic context pruning for efficient
+Linux setup with a fixed workspace layout, which          and interpretable autoregressive transformers. Ad-
+may limit external validity. In addition, shell be-       vances in Neural Information Processing Systems,
+havior is highly nuanced, including redirection and       36:65202–65223.
+pipelines, background jobs, environment variables,      Anthropic. 2025. Claude 4. Official Anthropic an-
+and inherently nondeterministic outputs (times-           nouncement for Claude 4 (including Claude Opus 4
+tamps, process IDs, network-dependent responses).         and Claude Sonnet 4), accessed April 17, 2026.
+Consequently, more efforts are required for trans-
+                                                        Robert A Bridges, Thomas R Mitchell, Mauricio
+ferring the proposed approach to other operating          Muñoz, and Ted Henriksson. 2025. Sok: Honey-
+systems and distributions, alternative filesystem         pots & llms, more than the sum of their parts? arXiv
+organizations, locale and encoding settings, or dif-      preprint arXiv:2510.25939.
+ferent shells and configuration profiles.
+                                                        Bocheng Chen, Hanqing Guo, Guangjing Wang, Yuanda
+   Coverage and explainability trade-off in his-          Wang, and Qiben Yan. 2024a. The dark side of hu-
+tory pruning. The current history-pruning mech-           man feedback: Poisoning large language models via
+anism relies on deterministic, code-driven crite-         user inputs. arXiv preprint arXiv:2409.00787.
+ria derived from snapshot and state comparisons.
+                                                        Bocheng Chen, Nikolay Ivanov, Guangjing Wang, and
+While transparent and explainable, it may miss la-        Qiben Yan. 2024b. Multi-turn hidden backdoor
+tent dependencies and thus prune context needed           in large language model-powered chatbot models.
+for edge cases (e.g., implicit dependencies, indi-        In Proceedings of the 19th ACM Asia Conference
+rect side effects, or higher-level semantic links be-     on Computer and Communications Security, pages
+                                                          1316–1330.
+tween past actions and current state). LLM-assisted
+pruning could expand coverage by inferring such         Bocheng Chen, Guangjing Wang, Hanqing Guo, Yuanda
+dependencies, but would reduce interpretability in        Wang, and Qiben Yan. 2023. Understanding multi-
+safety-critical and adversarial settings.                 turn toxic behaviors in open-domain chatbots. In
+                                                          Proceedings of the 26th International Symposium on
+   Cost, latency, and accuracy trade-offs in de-          Research in Attacks, Intrusions and Defenses, pages
+ployment. MANTIS introduces practical deploy-             282–296.
+ment trade-offs among token consumption, in-
+ference latency, and response accuracy. Larger          Jason Aljenova Christli, Charles Lim, and Yevonnael
+                                                           Andrew. 2024. Ai-enhanced honeypots: Leveraging
+backbone models typically improve output fidelity          llm for adaptive cybersecurity responses. In 2024
+and state consistency, but they also increase per-         16th International Conference on Information Tech-
+interaction token cost and end-to-end latency. The         nology and Electrical Engineering (ICITEE), pages
+latency can hinder scalability for long sessions           451–456.
+or high-concurrency deployments. Conversely,            DeepSeek AI. 2025a. DeepSeek-Prover-V2-7B. Hug-
+smaller models reduce cost and improve respon-            ging Face model card, accessed April 17, 2026.
+siveness but may degrade robustness (e.g., for-
+matting stability, rare-command handling, and ad-       DeepSeek AI. 2025b. DeepSeek-R1-0528. Hugging
+                                                          Face, accessed April 17, 2026.
+versarial resilience). Optimizing these coupled
+trade-offs, potentially via adaptive model selection,   DeepSeek-AI. 2025. Deepseek-r1: Incentivizing rea-
+caching, or mixed-precision, remains an impor-            soning capability in llms via reinforcement learning.
+tant direction. Based on the optimization, we will        Preprint, arXiv:2501.12948.
+further deploy the multi-agent-driven terminal sim-     Jiangyi Deng, Xinfeng Li, Yanjiao Chen, Yijie Bai,
+ulation as a honeypot to attract external attackers        Haiqin Weng, Yan Liu, Tao Wei, and Wenyuan Xu.
+in the real world for threat intelligence collection.      2025. RACONTEUR: A Knowledgeable, Insight-
+                                                           ful, and Portable LLM-Powered Shell Command Ex-
+Acknowledgements                                           plainer. In NDSS Symposium 2025.
+
+We appreciate the constructive feedback from re-        Wenjun Fan, Zichen Yang, Yuanzhen Liu, Lang Qin,
+                                                         and Jia Liu. 2024. Honeyllm: A large language
+viewers and meta-reviewers. This work was par-           model-powered medium-interaction honeypot. In
+tially supported by the National Science Foundation      International Conference on Information and Com-
+(NSF) Grant No. 2321270 and No. 2404741.                 munications Security, pages 253–272. Springer.
+                                                    32837
+
+===== PDF p.11 =====
+Qichen Fu, Minsik Cho, Thomas Merth, Sachin Mehta,        Vishal Kumar, Sawan Bhardwaj, Pradeep Chouksey,
+  Mohammad Rastegari, and Mahyar Najibi. 2024.              Praveen Sadotra, and Mayank Chopra. 2024. Emerg-
+  Lazyllm: Dynamic token pruning for efficient long         ing trends in honeypot research: A review of ap-
+  context llm inference. Preprint, arXiv:2407.14057.        plications and techniques. International Journal of
+                                                            Human Computations & Intelligence, 3(6):370–377.
+Google. 2020. ELECTRA Base Discriminator. Hug-
+  ging Face model card, accessed April 17, 2026.          Zhenzhong Lan, Mingda Chen, Sebastian Goodman,
+                                                            Kevin Gimpel, Piyush Sharma, and Radu Sori-
+Google. 2024. CodeGemma 7B. Hugging Face model              cut. 2019.    ALBERT: A lite BERT for self-
+  card, accessed April 17, 2026.                            supervised learning of language representations.
+                                                            CoRR, abs/1909.11942.
+Google Cloud. 2025a. Gemini 2.5 Pro. Vertex AI
+  documentation, accessed April 17, 2026.                 Jiaheng Liu, Dawei Zhu, Zhiqi Bai, Yancheng
+                                                             He, Huanxuan Liao, Haoran Que, Zekun Wang,
+Google Cloud. 2025b. Vertex AI. Google Cloud official        Chenchen Zhang, Ge Zhang, Jiebin Zhang, Yuanx-
+  website, accessed December 25, 2025.                       ing Zhang, Zhuo Chen, Hangyu Guo, Shilong Li,
+                                                             Ziqiang Liu, Yong Shan, Yifan Song, Jiayi Tian,
+Chongqi Guan, Guohong Cao, and Sencun Zhu. 2024.             Wenhao Wu, and 18 others. 2025. A comprehensive
+  Honeyllm: Enabling shell honeypots with large lan-         survey on long context language modeling. Preprint,
+  guage models. In 2024 IEEE Conference on Com-              arXiv:2503.17407.
+  munications and Network Security (CNS), pages 1–9.
+                                                          Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paran-
+Jingxuan He and Martin Vechev. 2023. Large language         jape, Michele Bevilacqua, Fabio Petroni, and Percy
+   models for code: Security hardening and adversarial      Liang. 2023. Lost in the middle: How language mod-
+   testing. In Proceedings of the 2023 ACM SIGSAC           els use long contexts. Preprint, arXiv:2307.03172.
+   Conference on Computer and Communications Se-
+   curity, CCS ’23, page 1865–1879, New York, NY,         Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-
+   USA. Association for Computing Machinery.                dar Joshi, Danqi Chen, Omer Levy, Mike Lewis,
+                                                            Luke Zettlemoyer, and Veselin Stoyanov. 2019.
+Pengcheng He, Jianfeng Gao, and Weizhu Chen. 2021.          Roberta: A robustly optimized BERT pretraining
+  Debertav3: Improving deberta using electra-style          approach. CoRR, abs/1907.11692.
+  pre-training with gradient-disentangled embedding
+  sharing. Preprint, arXiv:2111.09543.                    Meta. 2023. Code Llama 7B. Hugging Face model
+                                                           card, accessed April 17, 2026.
+Samuel Holister, Blaine Kingsley, Xavier Martin, Fe-
+  lix Ashworth, Andrew Scolto, and Peter McAllister.      Meta. 2024a. Llama 3.1 8B. Hugging Face model card,
+  2025. Contextual self-referential memory trajectories     accessed April 17, 2026.
+  for large language model consistency.
+                                                          Meta. 2024b. Llama 3.2 3B Instruct. Hugging Face
+Siming Huang, Tianhao Cheng, Jason Klein Liu, Jiaran       model card, accessed April 17, 2026.
+  Hao, Liuyihan Song, Yang Xu, J. Yang, J. H. Liu,        Microsoft. 2025. Event Tracing for Windows. Mi-
+  Chenchen Zhang, Linzheng Chai, Ruifeng Yuan,              crosoft Learn, accessed December 28, 2025.
+  Zhaoxiang Zhang, Jie Fu, Qian Liu, Ge Zhang, Zili
+  Wang, Yuan Qi, Yinghui Xu, and Wei Chu. 2024.           MITRE. 2025. MITRE ATT&CK Framework. MITRE
+  Opencoder: The open cookbook for top-tier code            ATT&CK official website, accessed December 28,
+  large language models.                                    2025.
+Binyuan Hui, Jian Yang, Zeyu Cui, Jiaxi Yang,             Ali Modarressi, Hanieh Deilamsalehy, Franck Der-
+  Dayiheng Liu, Lei Zhang, Tianyu Liu, Jiajun               noncourt, Trung Bui, Ryan A. Rossi, Seunghyun
+  Zhang, Bowen Yu, Kai Dang, and 1 others. 2024.            Yoon, and Hinrich Schütze. 2025. Nolima: Long-
+  Qwen2. 5-coder technical report. arXiv preprint           context evaluation beyond literal matching. Preprint,
+  arXiv:2409.12186.                                         arXiv:2502.05167.
+Qi Jia, Xiang Yue, Tuney Zheng, Jie Huang, and            Muhammad Ahmed Mohsin, Muhammad Umer, Ah-
+  Bill Yuchen Lin. 2025. SimulBench: Evaluating lan-       san Bilal, Zeeshan Memon, Muhammad Ibtsaam
+  guage models with creative simulation tasks. In Find-    Qadir, Sagnik Bhattacharya, Hassan Rizwan, Abhi-
+  ings of the Association for Computational Linguis-       ram R. Gorle, Maahe Zehra Kazmi, Ayesha Mohsin,
+  tics: NAACL 2025, pages 8118–8131, Albuquerque,          Muhammad Usman Rafique, Zihao He, Pulkit Mehta,
+  New Mexico. Association for Computational Lin-           Muhammad Ali Jamshed, and John M. Cioffi. 2025.
+  guistics.                                                On the fundamental limits of llms at scale. Preprint,
+                                                           arXiv:2511.12869.
+Samuel T King and Peter M Chen. 2003. Backtracking
+  intrusions. In Proceedings of the nineteenth ACM        Michel Oosterhof, dependabot[bot], fe7ch, github-
+  symposium on Operating systems principles, pages          actions[bot], Upi Tamminen, g0tmi1k, Dave Germi-
+  223–236.                                                  quet, SecPascal, Olivier Bilodeau, Guilherme Borges,
+                                                     32838
+
+===== PDF p.12 =====
+lelonek1, Peter Šufliarsky, IridiumXOR, Jc2k, Kata-        Ong, Karim Elmaaroufi, Pieter Abbeel, Trevor Dar-
+  rina Durechova, NunoNovais, Sam Edwards, Claud              rell, and 1 others. 2023. Tensor trust: Interpretable
+  Xiao, Aabed, and 11 others. 2025. cowrie/cowrie.            prompt injection attacks from an online game. arXiv
+  https://github.com/cowrie/cowrie.                           preprint arXiv:2311.01011.
+
+OpenAI, Sandhini Agarwal, Lama Ahmad, Jason Ai,           Vulhub. 2025. GitHub - vulhub/vulhub: Pre-Built Vul-
+  Sam Altman, Andy Applebaum, Edwin Arbus,                  nerable Environments Based on Docker-Compose —
+  Rahul K. Arora, Yu Bai, Bowen Baker, Haim-                github.com. https://github.com/vulhub/vulhub.
+  ing Bao, Boaz Barak, Ally Bennett, Tyler Bertao,          [Accessed 21-06-2025].
+  Nivedita Brett, Eugene Brevdo, Greg Brockman, Se-
+  bastien Bubeck, Che Chang, and 107 others. 2025.        Guangjing Wang, Ce Zhou, Yuanda Wang, Bocheng
+  gpt-oss-120b & gpt-oss-20b model card. Preprint,          Chen, Hanqing Guo, and Qiben Yan. 2023. Be-
+  arXiv:2508.10925.                                         yond boundaries: A comprehensive survey of trans-
+                                                            ferable attacks on ai systems. arXiv preprint
+Hakan T. Otal and M. Abdullah Canbaz. 2024. Llm             arXiv:2311.11796.
+  honeypot: Leveraging large language models as ad-
+  vanced interactive honeypot systems. In 2024 IEEE       Ziyang Wang, Jianzhou You, Haining Wang, Tian-
+  Conference on Communications and Network Secu-            wei Yuan, Shichao Lv, Yang Wang, and Limin Sun.
+  rity (CNS), page 1–6. IEEE.                               2025. Honeygpt: Breaking the trilemma in termi-
+                                                            nal honeypots with large language model. Preprint,
+Qwen Team. 2025. Qwen 3 Coder. Google Cloud
+                                                            arXiv:2406.01882.
+  Vertex AI documentation, accessed April 18, 2026.
+
+Red Hat. 2025. Red Hat Documentation. Accessed            Benjamin Warner, Antoine Chaffin, Benjamin Clavié,
+  December 28, 2025.                                        Orion Weller, Oskar Hallström, Said Taghadouini,
+                                                            Alexis Gallagher, Raja Biswas, Faisal Ladhak, Tom
+Victor Sanh, Lysandre Debut, Julien Chaumond, and           Aarsen, Nathan Cooper, Griffin Adams, Jeremy
+  Thomas Wolf. 2019. Distilbert, a distilled version        Howard, and Iacopo Poli. 2024. Smarter, better,
+  of bert: smaller, faster, cheaper and lighter. ArXiv,     faster, longer: A modern bidirectional encoder for
+  abs/1910.01108.                                           fast, memory efficient, and long context finetuning
+                                                            and inference. Preprint, arXiv:2412.13663.
+Anıl Sezgin and Aytuğ Boyacı. 2025. Decoypot: A large
+  language model-driven web api honeypot for realistic    Kai Wei and Guangjing Wang. 2025. Poster: Agentic
+  attacker engagement. Computers & Security, page           shell honeypot using structured logging. In Proceed-
+  104458.                                                   ings of the 2025 ACM SIGSAC Conference on Com-
+                                                            puter and Communications Security, pages 4803–
+Jie Shi, Sihang Jiang, Bo Xu, Jiaqing Liang, Yanghua        4805.
+   Xiao, and Wei Wang. 2023. Shellgpt: Generative
+   pre-trained transformer model for shell language un-   Ce Zhou, Qian Li, Chen Li, Jun Yu, Yixin Liu,
+   derstanding. In 2023 IEEE 34th International Sym-        Guangjing Wang, Kai Zhang, Cheng Ji, Qiben Yan,
+   posium on Software Reliability Engineering (ISSRE),      Lifang He, and 1 others. 2025. A comprehensive sur-
+   pages 671–682.                                           vey on pretrained foundation models: A history from
+                                                            bert to chatgpt. International Journal of Machine
+Leyi Shi, Yuwen Cui, Xu Han, Honglong Chen, and             Learning and Cybernetics, 16(12):9851–9915.
+  Deli Liu. 2019. Mimicry honeypot: an evolutionary
+  decoy system. Int. J. High Perform. Comput. Netw.,
+  14(2):157–164.
+                                                          A     Log File System
+
+Muris Sladić, Veronica Valeros, Carlos Catania, and      All logs are stored in JSON format to maximize in-
+ Sebastian Garcia. 2024. Llm in the shell: Generative     teroperability and machine readability. The JSON-
+ honeypots. In 2024 IEEE European Symposium on            based logging structure enhances automated anal-
+ Security and Privacy Workshops (EuroS&PW), pages         ysis, event correlation, and integration. Authenti-
+ 430–435.
+                                                          cation logs and session logs follow an append-only
+Muris Sladić, Veronica Valeros, Carlos Catania, and      pattern, where new entries are recorded sequen-
+ Sebastian Garcia. 2025. Vellmes: A high-interaction      tially using the format above. In contrast, system
+ ai-based deception framework. In 2025 IEEE Euro-         logs primarily store the environment snapshot, a
+ pean Symposium on Security and Privacy Workshops
+ (EuroS&amp;amp;PW), page 671–679. IEEE.                  dynamically maintained structured representation
+                                                          of the terminal simulator’s current state. Rather
+Qwen Team. 2025. Qwen3 technical report. Preprint,        than appending discrete messages, it is updated in
+  arXiv:2505.09388.                                       place to reflect key system properties, including
+Sam Toyer, Olivia Watkins, Ethan Adrian Mendes,           the directory tree, file metadata, and contents, and
+  Justin Svegliato, Luke Bailey, Tiffany Wang, Isaac      privilege-related information.
+                                                     32839
+
+===== PDF p.13 =====
+A.1 System Snapshot Representation                      B     Datasets
+The system snapshot is represented as a structured      B.1    Response Agent Fine-tune Dataset
+JSON object that captures the observable terminal
+state at a given interaction. It includes metadata,     The Response Agent is trained on a domain-
+security-relevant runtime attributes, and a hierar-     specific dataset consisting of 28,045 real-world ter-
+chical filesystem representation. Key fields are        minal input–output pairs, manually collected from
+summarized as follows:                                  a Kali Linux environment. The dataset covers a
+                                                        broad range of commonly used Linux commands
+   • timestamp and step: The recording time and         and their corresponding system-level responses,
+     the interaction index.                             with careful curation to preserve realistic output
+                                                        formatting and execution semantics.
+   • cwd: The current working directory.                   Each training instance follows a structured com-
+                                                        mand–response representation designed to closely
+   • identity: The active user and identity at-         mirror real Linux terminal behavior. An instance
+     tributes (e.g., user name, UID/GID, effective      comprises a system-level instruction that constrains
+     UID/GID, and group list).                          the model to act strictly as a Linux terminal, a
+                                                        user-issued shell command, and the corresponding
+   • privilege: Privilege-related settings, includ-     ground-truth terminal output. Outputs are recorded
+     ing whether privilege escalation via sudo          exactly as produced by the operating system, in-
+     is permitted (privilege.sudo_available), as        cluding formatted standard output, error messages,
+     well as umask and capability sets.                 and empty responses for commands that succeed
+                                                        silently (e.g., mkdir). All outputs are enclosed in
+   • persistence: Persistent execution hooks and
+                                                        code blocks to preserve formatting fidelity. This
+     service configurations (e.g., enabled systemd
+                                                        design enables the model to learn not only com-
+     units, cron state, and SSH authorized keys
+                                                        mand semantics but also realistic output structure
+     fingerprints).
+                                                        and execution behavior, including cases where no
+   • network: Externally visible network state,         output is emitted.
+     including listening ports and condensed fire-
+                                                        B.2    System Evaluation Dataset
+     wall/routing/interface fingerprints.
+                                                        This dataset contains 200 carefully selected instruc-
+   • critical_configs: Fingerprints and meta-           tions from the Response Agent fine-tuning dataset.
+     data of a predefined whitelist of security-        These commands are frequently used and require
+     critical configuration files (e.g., /etc/-         strict, format-faithful terminal outputs.
+     passwd, /etc/ssh/sshd_config).
+                                                        B.3    Multi-turn Dialogue Dataset
+   • filesystem: A recursive representation of di-
+     rectories and files under allowed roots, includ-   Our dataset consists of manually crafted multi-turn
+     ing per-file contents and metadata (e.g., mode,    interaction sessions that simulate diverse attacker
+     owner, timestamps, size, and content hashes).      behaviors, with conversation lengths ranging from
+                                                        3 to 20 turns. Approximately 800 sessions contain
+   • vulnerabilities: A list of simulated vulnera-      fewer than five turns, while the remaining sessions
+     bilities exposed by the system.                    are distributed across longer ranges in a largely
+                                                        random manner. Since all sessions were created
+   • last_output: The terminal output produced          by humans rather than generated automatically, the
+     by the previous interaction.                       dataset captures a wide variety of simulated ad-
+                                                        versarial actions, including file creation and dele-
+   Listing 1 shows a truncated example snapshot         tion, directory navigation, system state inspection,
+used by our terminal simulator. For the com-            configuration modification, and exploratory prob-
+plete snapshot, please refer to our source code and     ing. This intentional diversity produces a realistic
+data. Listing 2 is an example of JSONL-formatted        spectrum of behavior patterns and ensures that the
+SSH events. Listing 3 shows example command–            dataset covers both short, task-focused interactions
+response records used in our evaluation.                and longer, more complex attack sequences.
+                                                    32840
+
+===== PDF p.14 =====
+Listing 1: Example system snapshot in JSON format (truncated)
+
+ 1   {
+ 2       "timestamp": "2025-12-15T21:58:27Z",
+ 3       "cwd": "/home/user/logs",
+ 4       "identity": { "user": "user", "uid": 1000, "gid": 1000, "euid": 1000, "egid": 1000 },
+ 5       "privilege": { "sudo_available": true, "umask": "0022" },
+ 6
+ 7       "persistence": { "systemd": { "enabled_units": [ ] }, "cron": { "system_crontab_hash": "" } },
+ 8
+ 9       "network": {
+10          "listening_ports": [
+11            { "proto": "tcp", "ip": "0.0.0.0", "port": 22, "process": "sshd" },
+12            { "proto": "tcp", "ip": "0.0.0.0", "port": 8080, "process": "java" }
+13          ]
+14       },
+15
+16       "filesystem": {
+17         "/home/user": {
+18            "files": ["README.txt"],
+19            "folders": { "logs": { "files": ["access.log", "error.log"] } },
+20            "file_meta": { "README.txt": { "mode_octal": "0644", "size": 22, "hash": "3025cf2e..." } }
+21         },
+22         "/tmp": { "files": [ ] },
+23         "_omitted": true
+24       }
+25   }
+
+
+                                  Listing 2: Example auth snapshot in JSON format
+
+ 1   {"timestamp":"2025-12-01␣15:52:48","event":"ssh_auth_attempt","proto":"ssh","local_port":22,"
+          session_id":"<uuid>","username":"<user>","hostname":"<host>","remote_ip":"<ip>","
+          remote_port":"<port>","success":false,"note":"password␣auth␣failed","password":"<redacted>"}
+ 2   {"timestamp":"2025-12-01␣15:52:49","event":"disconnect","proto":"ssh","local_port":22,"session_id":"
+          <uuid>","username":"root","hostname":"<host>","remote_ip":"<ip>","remote_port":"<port>",
+          "success":true,"note":"session␣closed"}
+ 3   {"timestamp":"2025-12-01␣15:52:55","event":"connect","proto":"ssh","local_port":22,"session_id":"<
+          uuid>","username":"root","hostname":"<host>","remote_ip":"<ip>","remote_port":"<port>","
+          success":true,"note":"session␣opened"}
+
+
+                                    Listing 3: Example session log in JSON format
+
+ 1   {
+ 2     "timestamp": "2025-11-25T21:21:25Z",
+ 3     "command": "ls␣-al",
+ 4     "response": "total␣20
+ 5   drwxr-xr-x␣5␣user␣user␣4096␣Nov␣25␣16:20␣.
+ 6   drwxr-xr-x␣3␣user␣user␣4096␣Nov␣25␣16:20␣..
+ 7   drwxr-xr-x␣2␣user␣user␣4096␣Nov␣25␣16:20␣test123
+ 8   drwxr-xr-x␣2␣user␣user␣4096␣Nov␣25␣16:21␣test1234
+ 9   drwxr-xr-x␣4␣user␣user␣4096␣Nov␣25␣16:20␣logs
+10   -rw-r--r--␣1␣user␣user␣␣␣10␣Nov␣25␣16:20␣README.txt
+11   -rw-r--r--␣1␣user␣user␣␣␣12␣Nov␣25␣16:20␣main.py
+12   drwxr-xr-x␣4␣user␣user␣4096␣Nov␣25␣16:20␣ops_ec
+13   drwxr-xr-x␣2␣user␣user␣4096␣Nov␣25␣16:20␣test
+14   -rw-r--r--␣1␣user␣user␣␣␣␣6␣Nov␣25␣16:20␣test.txt",
+15     "classification": "safe"
+16   }
+17   {
+18     "timestamp": "2025-11-27T00:32:02Z",
+19     "command": "ls",
+20     "response": "README.txt␣␣main.py␣␣test.txt␣␣logs␣␣ops_ec␣␣test␣␣test123␣␣test1234",
+21     "classification": "safe"
+22   }
+
+
+
+
+                                                         32841
+
+===== PDF p.15 =====
+servable system state, including filesystem con-
+    You are the Strategic Agent for a Linux
+                                                            tents, permissions and identities, service and per-
+    honeypot terminal. Task: Produce the ex-
+                                                            sistence configuration, and network status.
+    act terminal output and response advice.
+                                                               We maintain: (i) a persistent history store Ht
+    You MUST be consistent with the provided
+                                                            that records all past interactions, and (ii) a bounded
+    snapshot and the interaction history.
+                                                            working context Wt ⊂ Ht that is provided to the
+    Single source of truth (snapshot): - If a
+                                                            language model. The working context is subject to
+    path/name is not present in the snapshot,
+                                                            a hard capacity constraint:
+    it does not exist. - Never assume anything
+    not explicitly present in the snapshot.                                      |Ct | ≤ K.
+    Read snapshot: - snapshot is a JSON object
+    that contains at least: * cwd: current work-              Crucially, the pruning policy is stateful. The
+    ing directory (string) * filesystem: directory          previous working context Wt−1 is treated as an
+    tree (absolute paths / nested nodes) * (op-             explicit internal state of the controller. The system
+    tional) processes/services/network/vulnera-             evolves according to:
+    bilities/plan_log - Resolve relative paths us-
+    ing snapshot.cwd. - Use permissions/own-                          Ht ← Ht−1 ∥ et ,
+    er/timestamps/content fingerprints if pro-                      U (t) ← Evict(et , Wt−1 , st , st−1 ),
+    vided.
+    Output requirements: - Output the parsed                where Evict denotes the history pruning policy.
+    version of the current command, along with                The pruning strategy must satisfy the following:
+    suggested responses. - Do NOT echo or re-                  • Hard constraint: |Wt | ≤ K.
+    peat the input command. - Preserve realistic
+    terminal formatting (exact newlines, spac-                 • Retention priority: interactions that induce
+    ing, canonical error messages). - Do not ask                 higher-grade system state transitions are re-
+    questions.                                                   tained preferentially.
+    Strict constraints: - Do NOT invent nonexis-
+                                                               • Eviction priority: read-only duplicates, low-
+    tent files/dirs/permissions/users/processes/-
+                                                                 grade events, stale entries, and redundant in-
+    ports. - Do NOT invent new state changes.
+                                                                 teractions are removed first.
+    - When uncertain, prefer a safe canonical
+    failure message (e.g., ’No such file or direc-          D.2   Unimportance as Deletability
+    tory’).
+                                                            Unimportance characterizes the cost of removal of
+                                                            a history entry under a hard capacity constraint,
+Figure 3: Instruction for the Strategic Agent: read snap-   rather than its intrinsic importance. Intuitively, it
+shot and generate advice                                    measures how little explanatory power would be
+                                                            lost if an interaction were evicted from the work-
+                                                            ing context. For each interaction h, we define a
+C    Strategic Agent Prompt                                 lexicographically ordered deletion key as
+Figure 3 shows an example of prompts used by the                                                         
+                                                                   U (h) = Udup (h), Ustd (h), Ustale (h) ,
+Strategic Agent.
+                                                            which induces a deterministic priority over candi-
+D    History Pruning
+                                                            date evictions.
+D.1 Problem Formulation                                        Each component is computed using simple, rule-
+We consider an interactive terminal environment             based criteria derived solely from observable state
+evolving over discrete time steps. At time step t,          differences and interaction order:
+the system observes a new interaction                          • Redundancy Udup (h). This term captures re-
+                     et = (ct , yt ),                            peated commands within the working context.
+                                                                 If there exists an interaction in the current
+where ct denotes the command and yt is the re-                   context whose stored command is identical to
+sponse or execution result. The environment main-                that of h, we increase the redundancy count.
+tains a structured system snapshot st capturing ob-              Concretely, whenever a new entry arrives, we
+                                                       32842
+
+===== PDF p.16 =====
+increment Ured (·) by 1 for all existing interac-       • ∆spersist
+                                                                   t     (persistence/services delta): any
+     tions whose stored command matches the new                change in the persistence group, includ-
+     command, so commands that appear more                     ing persistence hooks and service configu-
+     frequently accumulate larger Ured (·) and are             ration state (e.g., systemd, cron, and ssh
+     more likely to be evicted.                                authorized-keys fingerprints) that can affect
+                                                               future executions.
+   • Grade-based priority Ustd (h). This term
+     directly reflects the discrete state-transition         • ∆snet
+                                                                  t    (network delta): any change in the
+     grade. We use the grade itself as the compari-            network group that alters externally visible
+     son key, where higher-grade interactions are              network behavior, including the set of listen-
+     considered more deletable.                                ing ports and condensed fingerprints of fire-
+                                                               wall, routing, and interface state.
+   • Temporal staleness Ustale (h). This term cap-           • ∆scfg  (critical configuration delta): any
+                                                                  t
+     tures how outdated an interaction is with                 modification to the predefined whitelist of
+     respect to the current time step. It is de-               security-critical configuration files recorded
+     rived from interaction order rather than wall-            under critical_configs.files, detected via
+     clock time, such that older interactions re-              changes in the per-file fingerprint and
+     ceive larger staleness values. Within the same            metadata (e.g., hash, mode_octal, uid,
+     grade, this induces a chronological eviction              gid) for paths such as /etc/passwd and
+     policy.                                                   /etc/ssh/sshd_config. This category is trig-
+                                                               gered regardless of edit magnitude.
+   In the resulting ordering, interactions are com-
+pared first by redundancy, then by grade-based pri-          • ∆sfst (filesystem content/structure delta):
+ority, with temporal staleness used only to break              any filesystem side effect captured in the
+ties. Concretely, entries with larger Ured (·) are             filesystem group within the allowed roots,
+evicted first; for equal redundancy, lower-grade               including directory-structure changes (cre-
+interactions are removed before higher-grade ones;             ated/deleted files or folders reflected in
+among the remaining candidates, older interactions             files/folders), file content updates (changes in
+are removed before more recent ones. By relying on             file_contents or content hashes), and write-
+lexicographic comparison instead of scalar weight-             induced metadata updates (e.g., mtime/size
+ing or learned parameters, this formulation yields a           in file_meta).
+transparent, deterministic, and reproducible prun-
+                                                             • ∆sread   (read-only): interactions with no
+ing behavior.                                                     t
+                                                               persistent side effects, where none of the
+D.3 State Difference                                           above groups, identity, privilege, persis-
+                                                               tence, network, critical_configs, or filesys-
+We then compute the structured snapshot transition             tem changes between st−1 and st ; differences
+∆st ≜ (st−1 , st ), which captures concrete side               are limited to bookkeeping/output fields such
+effects induced by executing ct . We decompose                 as timestamp, step, and last_output (and
+∆st into the following dimensions:                             optionally cwd if treated as an ephemeral ses-
+                                                               sion variable).
+   • ∆sperm
+         t      (identity/privilege delta): any
+     change in identity or privilege that alters             • Grade 0 (Critical State Transition): identity
+     execution authority, including updates to                 or permission changes (∆sperm
+                                                                                          t    ); establish-
+     user/identity attributes (e.g., identity.user,            ment of persistence or services (∆spersist
+                                                                                                     t     );
+     UID/GID, effective UID/GID, and the group                 network exposure or policy changes (∆snet
+                                                                                                       t  ).
+     list) and privilege-related settings (e.g., priv-
+                                                             • Grade 1 (Sensitive System Modification):
+     ilege.sudo_available, privilege.umask, and
+                                                               modifications to critical system configuration
+     capability sets). In addition, permission-only
+                                                               files (∆scfg
+                                                                        t ).
+     updates in filesystem metadata (e.g., owner/-
+     mode, SUID/SGID, ACLs) are also counted                 • Grade 2 (Local State Modification): filesys-
+     as ∆sperm
+             t    even if file contents remain un-             tem writes, creations, deletions, or content
+     changed.                                                                    t ).
+                                                               modifications (∆sfs
+                                                     32843
+
+===== PDF p.17 =====
+• Grade 3 (No Persistent State Change): read-        steering the LLM to respond under a consistent
+      only interactions or failed executions with no     "vulnerable world state".
+      observable persistent side effects (∆sread
+                                             t   ).
+                                                         F   Routing Model Fine-tuning
+   When multiple change types co-occur, we con-
+servatively assign Ustd (t) to the most severe ap-       Dataset. The routing model is trained on a
+plicable grade, i.e., the minimum grade among all        dataset constructed from two sources: (i) 3,978 in-
+triggered categories.                                    dividual commands extracted from approximately
+                                                         1,000 multi-turn interaction sessions, where each
+D.4 Capacity-Constrained Pruning with                    command corresponds to a single turn, and (ii)
+    Grade-Aware Ordering                                 28,045 commands previously collected for training
+The pruning policy aims to curb the accumulation         the response generation model. After merging the
+of redundant or low-utility context by maintaining       two sources, a series of data preprocessing steps,
+a bounded working memory, i.e., enforcing |Wt | ≤        including filtering and deduplication, are applied,
+K over time. This hard capacity constraint induces       resulting in 23,501 command instances.
+a replacement strategy:                                     To further improve robustness against out-of-
+                                                         distribution and malformed inputs, we augment the
+    • Soft mode: when |Wt | < K, interactions are        training set with 2,361 externally collected adver-
+      ranked by grade and then by deletability.          sarial commands. These commands are syntacti-
+    • Hard mode: when |Wt | > K, interactions            cally similar to valid Linux commands but fail un-
+      with the lowest grades and highest deletability    der normal shell semantics (e.g., sl, ls-al), and the
+      are evicted until feasibility is restored.         collection also includes prompt-injection-style in-
+                                                         puts that attempt to elicit non-shell behaviors. The
+E    Vulnerability simulation                            final training dataset, therefore, contains 25,849
+                                                         command instances. All training instances consist
+Whenever the honeypot needs to expose an attack          solely of raw command strings paired with rout-
+surface, it selects a set of CVE-based vulnerabili-      ing labels, without any auxiliary context, system
+ties and records them in the snapshot as an explicit     prompts, or dialogue history.
+vulnerability list (e.g., "vulnerabilities": ["CVE-
+                                                            Routing labels are assigned through a two-stage
+2021-4034: ...", "Port 22 open with weak SSH
+                                                         annotation process. Each command is first inde-
+credentials."]). Each entry includes a CVE identi-
+                                                         pendently labeled by two large language models,
+fier (or observable weakness) and a one-line visible
+                                                         namely GPT and Gemini, following the same an-
+description, which serves as the single source of
+                                                         notation guidelines. For commands where the two
+truth for subsequent deception and cross-command
+                                                         model annotations agree, the label is accepted di-
+consistency. The system then uses each CVE iden-
+                                                         rectly. In cases of disagreement, the command is
+tifier as a key to retrieve a corresponding vulnera-
+                                                         manually reviewed and labeled by a human anno-
+bility profile from Vulhub (Vulhub, 2025).
+                                                         tator. The validation and test sets are split directly
+   Each profile contains only the minimal informa-
+                                                         from this dataset using standard proportion-based
+tion required for simulation: the affected compo-
+                                                         partitioning, with no additional data sources intro-
+nent and claimed version; the exposure surface
+                                                         duced. All splits preserve the original label distri-
+(port/service/banner/path); the artifacts to stage
+                                                         bution to ensure fair and consistent evaluation.
+(configuration files, logs, directory structure, and
+plausible traces); and response templates for com-       Model and Training Setup. We fine-tuned dif-
+mon probing commands. These retrieved profiles           ferent BERT-style encoders, including lightweight
+are compiled into a structured plan log (e.g., ports     distilled models (DistilBERT), widely adopted
+to expose, process names to surface, files/log snip-     general-purpose models (RoBERTa), attention-
+pets to materialize, and fields that must remain mu-     enhanced architectures (DeBERTa), and modern
+tually consistent) and written back into the snap-       efficiency-oriented designs (ModernBERT). All
+shot, ensuring stable and reproducible behavior          experiments are conducted on a single NVIDIA
+across turns. At runtime, before generating each         RTX 5090 GPU. The routing model is trained for
+terminal output, the LLM reads both the vulnera-         four epochs using the AdamW optimizer with a
+bility list and the plan log from the snapshot and in-   learning rate of 3 × 10−5 . A cosine learning-rate
+jects them into the prompt as structured constraints,    scheduler with a warm-up ratio of 0.06 is applied,
+                                                     32844
+
+===== PDF p.18 =====
+and gradients are clipped to a maximum norm of          ensuring multi-turn consistency.
+1.0. All runs use a fixed random seed of 42.
+                                                        top: snapshot-grounded periodic frame loop.
+G    Snapshot Update                                    Each top refresh constructs a top_state dictio-
+                                                        nary derived from snapshot. The process table
+In our implementation, snapshot updates follow a        is synthesized from observable snapshot artifacts
+hybrid design: rule-first, LLM-backup, balancing        (e.g., a baseline init process and one row per entry
+determinism and coverage. Given a command ct ,          in snapshot["network"]["listening_ports"] us-
+the Arbiter Agent first performs lightweight pars-      ing its (pid, process) fields, plus a session shell
+ing and routing. For common commands covered            process for realism). The state also includes up-
+by our rule set (e.g., cd, mkdir, touch, rm, mv,        time/load averages and CPU/memory/swap sum-
+cp, chmod, chown, sudo, and simple service/port-        maries, with deterministic defaults when missing.
+exposure commands), we apply a hand-written                To simulate stable runtime evolution, we main-
+semantic updater and deterministically execute          tain a per-PID accumulator and update TIME
+UpdateSnapshot(st−1 , ct ). The updater edits the       across frames based on elapsed time and %CPU.
+file tree only within controlled roots and synchro-     The interactive loop redraws a full-screen frame
+nizes key metadata such as permissions, ownership,      every fixed interval (4 s), polls keystrokes in non-
+modification time, file size, and content hashes,       blocking mode, and exits on q or Ctrl-C, after
+making the snapshot self-consistent and repro-          which it restores terminal state (cursor visibility
+ducible. For these commands, the update is fully        and channel timeouts). For presentation, each re-
+code-driven and does not rely on the LLM, avoid-        fresh exposes top_state via snapshot and calls
+ing hallucinated state changes.                         the response generator to format a single frame;
+   For commands outside the rule coverage (e.g.,        we validate the generated frame using lightweight
+pipelines, combined redirections, short script frag-    structural checks (e.g., requiring a PID header). If
+ments, or rare utilities), we enable an LLM backup      validation fails or the LLM is unavailable, we fall
+updater. The Arbiter Agent provides the pre-            back to a deterministic renderer that formats the
+execution snapshot st−1 , command ct , and basic        same top_state. We additionally support batch
+constraints, and prompts the LLM to propose the         mode (top -b with optional -n) by returning n
+necessary state updates in a structured form (e.g.,     frames as a standard line-based response rather
+created/deleted files, modified permission fields,      than entering full-screen mode.
+or newly opened ports). We then validate and san-
+                                                        nano: editor with snapshot-grounded commit.
+itize the proposed updates (e.g., restrict writable
+                                                        Upon nano <path>, we resolve paths against
+paths and reject unsupported entities) before merg-
+                                                        snapshot["cwd"], load initial contents from snap-
+ing them into the snapshot to obtain st .
+                                                        shot["filesystem"][dir]["file_contents"][file],
+H    Interactive Program Simulation                     and create an empty buffer if the file is absent.
+                                                        We implement a minimal full-screen editor with a
+Beyond single-shot commands (e.g., ls, cat), real       header (filename and modified flag), a scrollable
+attackers frequently rely on highly interactive TUI     text viewport, a help line for supported shortcuts,
+programs (e.g., top, nano) that maintain a full-        and a message line for prompts/status.
+screen interface, continuously refresh outputs, and        The keystroke handler supports printable charac-
+accept non-line-buffered keystrokes. These pro-         ter insertion, newline, backspace (including line
+grams pose a challenge for LLM-based terminal           merges), arrow-key navigation, Ctrl+O (write-
+emulation because they require (i) stateful screen      out), and Ctrl+X (exit with save confirmation
+rendering, (ii) low-latency, incremental updates,       when modified). On write-out, we commit
+and (iii) precise control sequences (cursor move-       the buffer back into the snapshot by updating
+ment, screen clear, key handling). We therefore         file_contents and file_meta (e.g., mtime and
+implement top and nano as built-in interactive          size), ensuring edits become visible to subsequent
+primitives that bypass the standard routing pipeline,   commands. We include a privilege gate: writes
+while remaining snapshot-grounded: observable           under /etc/ require euid==0 as recorded in snap-
+system state is read from a structured snapshot         shot["identity"]; otherwise nano reports a canon-
+object, and any file modifications are committed        ical permission error.
+back to the same snapshot (filesystem subtree),
+                                                    32845

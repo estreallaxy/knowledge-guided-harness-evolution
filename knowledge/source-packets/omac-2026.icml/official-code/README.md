@@ -1,0 +1,160 @@
+# OMAC: A Holistic Optimization Framework for LLM-Based Multi-Agent Collaboration
+
+[![arXiv](https://img.shields.io/badge/arXiv-2505.11765-b31b1b.svg?labelColor=555)](https://arxiv.org/pdf/2505.11765)
+[![ICML 2026](https://img.shields.io/badge/ICML-2026-4b43d1.svg?labelColor=555)](https://icml.cc/virtual/2026/oral/71174)
+
+This repository provides the official implementation of OMAC, accepted as an ICML 2026 Oral.
+
+OMAC addresses a core challenge in LLM-based multi-agent collaboration: the design of agents and collaboration structures is often handcrafted, task-specific, and difficult to optimize systematically. OMAC formulates multi-agent collaboration around five optimization dimensions covering both agent functionality and collaboration structure. For any single dimension, OMAC proposes an optimization algorithm that uses a Semantic Initializer to generate candidate agents or controllers, evaluates them through collaboration, and uses a Contrastive Comparator to compare high- and low-performing candidates and refine stronger ones. OMAC also proposes a multi-dimension optimization algorithm that iteratively optimizes multiple selected dimensions while carrying previously optimized agents/controllers into later optimization rounds.
+
+Paper links: [arXiv](https://arxiv.org/pdf/2505.11765) | [ICML 2026 Oral](https://icml.cc/virtual/2026/oral/71174)
+
+## Overview
+
+This repository provides OMAC experiments for three benchmarks: MMLU, HumanEval, and MATH. OMAC defines five optimization dimensions for LLM-based multi-agent collaboration:
+
+1. **Fun-1**: Optimize existing candidate agents, such as instruction prompts and context examples.
+2. **Fun-2**: Optimize the construction of new agents for collaboration.
+3. **Str-1**: Optimize an LLM controller to select candidate agents for global collaboration.
+4. **Str-2**: Optimize an LLM controller to select participating agents during a collaboration step.
+5. **Str-3**: Optimize an LLM controller to decide how agents communicate with each other in each step.
+
+
+<p align="center">
+  <img src="figs/single_opt_case.png" width="72%" alt="OMAC single-dimension optimization case study">
+</p>
+
+
+
+In the above example, the Semantic Initializer proposes multiple Programmer prompts, each prompt is evaluated inside the multi-agent collaboration process, and the Contrastive Comparator compares positive and negative candidates to identify useful prompt factors. The refined prompt is then fed back into the optimization loop for the next iteration.
+
+## Structure
+
+- `code/requirements.txt`: shared Python dependencies.
+- `code/MMLU`: OMAC on MMLU multiple-choice reasoning.
+- `code/HumanEval`: OMAC on HumanEval code generation.
+- `code/MATH`: OMAC on competition math problems.
+- `data/mmlu`: bundled downsampled MMLU data.
+- `data/MATH`: bundled MATH test data.
+
+HumanEval expects the `human_eval` package/data to be installed, and MATH expects the MATH dataset under `data/MATH/test`. If those data folders are not present, copy or install them before running the corresponding benchmark.
+
+## Installation
+
+```bash
+conda create -n OMAC python=3.9
+conda activate OMAC
+cd code
+pip install -r requirements.txt
+```
+
+For HumanEval, also install the HumanEval package if using a local copy:
+
+```bash
+cd ../data
+pip install -e human-eval
+```
+
+Set `OPENAI_API_KEY` in the environment, or fill it in the relevant `run_evol.py` / listwise script.
+
+## Running
+
+All three benchmark folders expose the same high-level interface through `run_evol.py`. Run commands from the benchmark directory and pass an ordered optimization sequence with `--optimization_points`.
+
+```bash
+cd code/<BENCHMARK>
+python -u run_evol.py --optimization_points <POINT_1>_<POINT_2>_...
+```
+
+The sequence order means that earlier optimized prompts are retained and used when optimizing later points. For example, on HumanEval:
+
+```bash
+cd code/HumanEval
+python -u run_evol.py --optimization_points ComputerScientist_rank_structure
+```
+
+This optimizes `ComputerScientist`, then optimizes `rank` using the optimized `ComputerScientist`, then optimizes `structure` using both earlier results.
+
+Common examples:
+
+```bash
+cd code/MMLU
+python -u run_evol.py --optimization_points Mathematician_rank
+
+cd ../HumanEval
+python -u run_evol.py --optimization_points ComputerScientist_rank_structure
+
+cd ../MATH
+python -u run_evol.py --optimization_points System_rank
+```
+
+
+Useful shared runtime arguments:
+
+- `--initialize_num`: number of Semantic Initializer prompts.
+- `--model_name`: OpenAI model used for prompt evolution.
+- `--FD_max_iter`: maximum contrastive feedback-mutation steps.
+- `--FD_min_improvement`: minimum score improvement before tolerance increases.
+- `--FD_tolerance_iter`: tolerated low-improvement mutation steps.
+- `--FD_sample_threshold`: prompt sampling threshold for parent selection.
+- `--Iter_num`: repeated optimization passes over the sequence.
+
+OpenAI API calls use a small retry loop for transient API/network errors. Tune it with `OMAC_OPENAI_MAX_RETRIES` and `OMAC_OPENAI_RETRY_SLEEP` if your run environment is noisy.
+
+
+## Configuration
+
+Each benchmark has an `agent_config.json` file controlling the collaboration space:
+
+- `candidate_agents`: optimizable existing agents or prompt components.
+- `candidate_controllers`: `construct-role`, `pre-rank`, `rank`, and `structure`.
+- `type_to_agents`: maps collaboration layer types to available agents.
+- `layer_type_list`: layer-by-layer collaboration structure.
+
+The same ideas apply to all benchmarks. Note that we use the same default agent collaboration setup before optimization as DyLAN:
+
+- **MMLU** uses one `Reasoner` layer type containing all subject-matter agents.
+- **HumanEval** uses alternating `Coder` and `Verifier` layer types.
+- **MATH** uses a `Solver` setup with `base_roles` because its agents are prompt bundles rather than named personas.
+
+HumanEval is a concrete example:
+
+```json
+{
+  "candidate_agents": ["PythonAssistant", "AlgorithmDeveloper", "ComputerScientist", "Programmer", "Passer", "Tester", "Reflector"],
+  "candidate_controllers": ["construct-role", "pre-rank", "rank", "structure"],
+  "type_to_agents": {
+    "Coder": ["PythonAssistant", "AlgorithmDeveloper", "ComputerScientist", "Programmer"],
+    "Verifier": ["Reflector", "Tester", "Passer", "Ranker"]
+  },
+  "layer_type_list": ["Coder", "Verifier", "Coder", "Verifier", "Coder"]
+}
+```
+
+In that configuration, the first layer generates code, the second layer evaluates it, and later layers refine it.
+
+## Optimization Points
+
+- **MMLU Fun-1**: `Economist`, `Doctor`, `Lawyer`, `Mathematician`, `Psychologist`, `Programmer`, `Historian`
+- **HumanEval Fun-1**: `PythonAssistant`, `AlgorithmDeveloper`, `ComputerScientist`, `Programmer`, `Passer`, `Tester`, `Reflector`
+- **MATH Fun-1**: `System`, `Examples`
+- **Shared controllers**: `construct-role`, `pre-rank`, `rank`, `structure`
+
+The order in `--optimization_points` defines the optimization sequence. For example, `ComputerScientist_rank_structure` first optimizes `ComputerScientist`, then optimizes the rank controller with that prompt retained, then optimizes the communication-structure controller with both prior optimizations retained.
+
+## Acknowledgments
+
+This project incorporates code from the [DyLAN package](https://github.com/SALT-NLP/DyLAN), originally licensed under the MIT License. Significant modifications have been made to adapt it to OMAC's goals and architecture.
+
+## Reference
+
+Please cite our paper if you use this code.
+```
+@inproceedings{li2025omac,
+  title={OMAC: A Holistic Optimization Framework for LLM-Based Multi-Agent Collaboration},
+  author={Li, Shijun and Hasson, Hilaf and Ghosh, Joydeep},
+  booktitle={ICML},
+  year={2026},
+  organization={PMLR}
+}
+```

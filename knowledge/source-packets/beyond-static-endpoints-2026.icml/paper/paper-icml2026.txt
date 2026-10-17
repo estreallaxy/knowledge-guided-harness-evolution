@@ -1,0 +1,899 @@
+===== PDF p.1 =====
+Beyond Static Endpoints: Tool Programs as an Interface
+                              for Flexible Agentic Web Services
+
+
+                                    Mugeng Liu 1 Shuoqi Li 2 Yixuan Zhang 1 Yun Ma 3
+
+
+                           Abstract                                        et al., 2024). The stepwise interface scales poorly, multiply-
+                                                                           ing network turns, systematically over- and under-fetching
+       In the agentic web era, LLM-based agents increas-                   data, and triggering cascading retries with inconsistent side
+       ingly invoke web services as tools, yet most in-                    effects upon partial failure.
+       terfaces remain static endpoints that poorly ex-
+       press long-horizon workflows with loops, condi-                     Our insight is that the inefficiency is fundamentally repre-
+       tionals, joins, and retries. We present T OOL P RO,                 sentational, as shown in Figure 1. Endpoint sequences are
+       which represents an agent’s tool intent as an ex-                   a weak interface for expressing tool intent, because they
+       ecutable tool program that compactly encodes                        fragment a coherent multi-step plan into local decisions
+       multi-step service interactions with explicit effect                conditioned on intermediate responses. As a result, both
+       types. T OOL P RO combines constraint-guided pro-                   client–service round trips and agent reasoning rounds grow
+       gram construction, effect-aware replay for exactly-                 with the number of procedural steps, while failures amplify
+       once state-modifying calls, and a profile-driven                    as a single mismatch can cascade into retries and state in-
+       policy that decides when program execution out-                     consistencies. Agentic workflows need an interface that
+       performs stepwise calling. We instantiate T OOL -                   can express “perform this multi-step interaction” as a sin-
+       P RO over MCP-style services with WebAssembly                       gle, composable object whose execution can be delegated,
+       sandboxing and evaluate it on diverse workflows                     optimized, and checked.
+       of real-world applications. T OOL P RO reduces                      To this end, we propose tool programs as an executable
+       end-to-end latency by up to 53.4% and client-side                   representation of tool intent. These programs compactly en-
+       traffic by up to 96.1%, with larger gains under                     code a multi-step service interaction, complete with control
+       higher network latency and workflow complexity.                     flow and intermediate bindings. Furthermore, they feature
+                                                                           explicit effect types that distinguish state-preserving READ
+                                                                           operations from state-modifying WRITE operations. Rather
+1. Introduction                                                            than repeatedly selecting endpoints on the client, an agent
+                                                                           synthesizes a tool program and delegates its execution to a
+LLM-based agents (Yao et al., 2023; Schick et al., 2023;
+                                                                           controlled service-side runtime. Making intent first-class en-
+Liu et al., 2024; Qin et al., 2024; Liu et al., 2026) are in-
+                                                                           ables three capabilities that static endpoints do not provide,
+creasingly expected to complete long-horizon workflows by
+                                                                           including (i) turn reduction by consolidating multi-step in-
+orchestrating web services. Yet most services are still ex-
+                                                                           teractions into fewer network round trips, (ii) effect-aware
+posed through static API endpoints—an interface designed
+                                                                           execution by enforcing different semantics for READ ver-
+for single-shot queries, not for procedural, multi-step in-
+                                                                           sus WRITE, and (iii) safe re-execution under repair without
+teraction. When a task requires control flow (e.g., loops,
+                                                                           duplicating side effects. Realizing tool programs in practice
+conditionals), intermediate bindings, or intent-dependent
+                                                                           raises three challenges: (1) Executability. LLM-produced
+data access, an agent must externalize the workflow into
+                                                                           programs may fail to compile or crash at runtime under a
+a brittle sequence of endpoint calls interleaved with multi-
+                                                                           typed, sandboxed substrate. (2) Side effects under repair.
+round reasoning (Yao et al., 2022; Deng et al., 2023; Zhou
+                                                                           Partial success before failure makes naive re-execution du-
+   1
+      School of Computer Science, Peking University, Beijing,              plicate WRITEs and corrupt service state. (3) When to
+China 2 School of Software & Microelectronics, Peking Univer-              consolidate. For short workflows or low-latency networks,
+sity, Beijing, China 3 Institute for Artificial Intelligence, Peking       program construction overhead can outweigh the savings
+University, Beijing, China. Correspondence to: Yun Ma                      from turn reduction.
+<mayun@pku.edu.cn>.
+                                                                           By addressing these challenges, we present T OOL P RO, the
+Proceedings of the 43 rd International Conference on Machine               first agentic web service runtime that operationalizes Tool
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026
+by the author(s).                                                          Programs as an interface for flexible agentic web services.
+
+                                                                       1
+
+===== PDF p.2 =====
+Beyond Static Endpoints: Tool Programs as an Interface for Flexible Agentic Web Services
+
+             Task Instruction
+           Book the highest rating hotel.
+
+            Dubai                                                                         Sydney
+                             Reasoning
+                             Round (RR) * 1       list_hotels()                                          Static MCP
+                 Client                                                                        MCP       Endpoint
+                             RR*n                get_hotel_details(hid) * n
+                                                                                                         1+n+1 Requests /
+                 Agent                                                                         Server
+                             RR*1                book_hotel(best_hotel_id)                               Reasoning Rounds
+
+
+                            hotels = []                                                                   ToolPro
+                            for hid in list_hotels():
+                 Client         hotels.append(get_hotel_details(hid))                          MCP
+                                                                                                          1 Request /
+                 Agent RR*1 best_hotel = sorted_by_rate(hotels)[0]                             Server
+                                                                                                          Reasoning Round
+                            book_hotel(best_hotel['id'])
+
+Figure 1. From static endpoints to tool programs. Stepwise endpoints force the agent to repeatedly call endpoints and re-prompt to
+realize control flow. Tool programs (T OOL P RO) instead package a multi-step interaction as one executable object with explicit effects,
+enabling service-side execution and safe re-execution under repair.
+
+Specifically, to improve executability, T OOL P RO introduces          2. Problem Formulation
+constraint-guided program construction, which combines
+lightweight formatting constraints with compiler/runtime               We study agentic web-service tool use where a client-side
+feedback, and resolves common failures via service-side                LLM agent orchestrates server-side web services to com-
+repair to avoid repeated client–server back-and-forth. To              plete procedural workflows. A tool-facing service exposes a
+control side effects, T OOL P RO enforces effect-aware replay          set of endpoints E over an internal service state s. A call is
+that provides exactly-once semantics for WRITE operations              C ALL(e, a) for e ∈ E and arguments a, returning an output
+across iterative repair and re-execution. To decide when               o (or an error) and possibly updating s. We focus on proce-
+consolidation is worthwhile, T OOL P RO applies a profile-             dural agentic workflows that inherently require control flow,
+driven consolidation rule that adaptively selects between              intermediate bindings, and intent-dependent data access.
+stepwise calling and program execution.                                Bottleneck: stepwise endpoint sequences. With static end-
+We implement T OOL P RO over MCP-style web services us-                points, an agent realizes an intent via a stepwise interaction
+ing WebAssembly sandboxing and evaluate it on diverse                  loop. At step i, it decides the next call (ei , ai ) conditioned
+workflows within realistic applications. T OOL P RO reduces            on the task context and past observations (o1 , . . . , oi−1 ),
+end-to-end latency by up to 53.4% and client-side traffic by           then issues the request and observes oi . This yields a call se-
+up to 96.1%, with gains increasing under higher network la-            quence π = ⟨(e1 , a1 ), . . . , (eN , aN )⟩ interleaving N client–
+tency and workflow complexity. These results highlight that            service round trips with N client-side decision rounds. This
+T OOL P RO lays an important foundation for agent-facing               interface makes the procedure reactive, which fragments a
+service interfaces in the emerging agentic web.                        coherent procedure into client-side next-call decisions. As
+                                                                       procedural length grows, this interface (i) inflates latency
+This paper makes the following contributions.1                         via repeated RTT and per-step decision overhead, (ii) in-
+                                                                       duces over-/under-fetching because control logic must be
+• We identify static endpoints as a representational bottle-
+                                                                       implemented outside the service, and (iii) makes recovery
+  neck for agentic web workflows and propose tool pro-
+                                                                       brittle, with partial failures triggering retries that can dupli-
+  grams as an agent-facing service interface.
+                                                                       cate state-modifying operations and corrupt state.
+• We present T OOL P RO to make tool programs practical by
+  addressing core challenges. It employs constraint-guided             Key idea: tool programs as an interface. We propose
+  construction for executability, effect-aware replay with             to make tool intent first-class by representing a workflow
+  exactly-once semantics for safe repairs, and a profile-              as an executable tool program. A tool program P is a pro-
+  driven policy for adaptive consolidation.                            cedure whose atomic operations are endpoint invocations
+• We evaluate T OOL P RO on real applications and work-                C ALL(e, a), composed with structured control flow and in-
+  flows, demonstrating substantial reductions in latency and           termediate bindings. Given an initial state s, executing P
+  client-side traffic, highlighting a promising direction to           produces a result y and a (possibly updated) state s′ . This
+  build an efficient agentic web.                                      shifts the interface from next-call selection to program sub-
+                                                                       mission, enabling service-side execution, optimization, and
+  1
+    Code is publicly available at https://github.com/m                 checking while preserving the service’s observable behavior.
+orgen52/toolpro_icml26.
+
+
+                                                                   2
+
+===== PDF p.3 =====
+Beyond Static Endpoints: Tool Programs as an Interface for Flexible Agentic Web Services
+
+Goals. We aim to make tool programs practical without                    3. T OOL P RO Design
+changing the observable outcomes of the underlying ser-
+vice interaction and without introducing prohibitive over-               T OOL P RO makes tool programs a first-class service inter-
+head compared to stepwise calling. Concretely, we target                 face for agentic workflows. Given an intent instance and
+(G1) effect-safe observable semantics under failures and                 tool specifications, the agent submits a single effect-typed
+retries; and (G2) improved end-to-end efficiency in latency              program P ; the service-side runtime then compiles, option-
+and client-side traffic.                                                 ally repairs, and executes P as a unit while enforcing an
+                                                                         interface contract. T OOL P RO achieves this interface shift
+(G1) Executing a tool program may fail (e.g., due to runtime             by addressing the three challenges (introduced in §2) in
+errors in generated code), triggering repair and re-execution.           operationalizing tool programs in practice.
+We aim for an interface-level guarantee: re-execution for
+the same high-level intent must not introduce additional                 T OOL P RO follows a synthesize–project–compile–execute
+side effects beyond stepwise execution. Note that we do                  pipeline with a conservative fallback path. (1) Given task in-
+not attempt to eliminate endpoint-level failures, which are              tent and service endpoints, the client synthesizes a candidate
+inherent to the underlying service and can equally occur                 tool program and performs lightweight structural checks to
+under stepwise execution.                                                reject obviously misaligned programs early. (2) The server
+                                                                         projects the program into a constrained interface-program
+To reason about side effects, we assume each endpoint                    surface that is analyzable and enforceable, then compiles
+has an effect label eff(e) ∈ {READ, WRITE}, distin-                      and executes it in a sandbox. (3) If compilation or execu-
+guishing state-preserving queries from state-modifying                   tion fails, the server performs bounded in-place repair using
+operations. An execution induces a trace τ (P ) =                        compiler diagnostics and runtime traces as verifiable feed-
+⟨(e1 , a1 , o1 ), . . . , (eN , aN , oN )⟩, where only WRITE calls       back. During any execution and re-execution, the runtime
+may change s. We target two interface-level properties: (i)              mediates external calls and enforces effect-aware replay to
+observational equivalence: conditioned on the same under-                prevent duplicated WRITE effects. Finally, a profile-driven
+lying sequence of endpoint outcomes, program execution                   consolidation policy decides whether to use program execu-
+exposes the same outputs/errors as stepwise execution; and               tion or revert to stepwise calling for the current task.
+(ii) retry safety: across repair-driven re-executions for the
+same intent, WRITE effects are not duplicated, yielding                  3.1. Tool Programs as an Interface
+interface-level exactly-once semantics.
+                                                                         T OOL P RO employs the tool program as the submitted in-
+(G2) Tool programs are beneficial only when their one-time               terface object and the contract that the runtime enforces for
+construction cost is amortized by reducing round trips. A                any accepted program.
+simple latency model contrasts stepwise calling and program
+execution, as follows:                                                   The tool program serves as the interface object, which is
+                      N
+                                                                         the unit of interaction at the interface. A client represents
+                      X                                                 an agentic workflow as a tool program P (defined in §2)
+            TSTEP ≈         TRTT + TDEC + TAPI ,
+                                                                         and submits it to the runtime for execution as a unit. The
+                      i=1
+                                                              (1)        only way for P to interact with the underlying service is
+                                         N        
+                                                                         via a unified stub C ALL(e, a), where each dynamic call (a
+                                          X
+           TPROG ≈ TBUILD + TRTT +              TAPI ,
+                                          i=1
+                                                                         runtime instance of C ALL) triggers one endpoint invocation
+                                                                         and returns an output (or error) observable to the program.
+where TRTT is client–service RTT, TDEC is per-step decision              This makes the workflow logic explicit and inspectable on
+overhead on the client-side agent, TAPI is endpoint execu-               the server side.
+tion time, and TBUILD includes program construction, com-
+pilation, and potential repair. Client-side traffic follows a            To make such a program P enforceable and safe as an inter-
+similar trade-off. Stepwise calling repeatedly transmits re-             face, the runtime cannot accept arbitrary code, which moti-
+quests and prompts across N rounds, whereas tool programs                vates a constrained surface. T OOL P RO restricts submitted
+consolidate interaction into a small number of uploads and               programs to a constrained surface that expresses service-
+responses.                                                               interaction logic rather than arbitrary application logic. Con-
+                                                                         cretely, the runtime enforces: (i) structured control flow
+Challenges. This formulation surfaces three challenges in                only (if/else, for/while); (ii) external interaction only
+operationalizing tool programs in practice: (C1) executabil-             through C ALL(·) with explicit effect annotations at each
+ity of LLM-produced programs under a typed, sandboxed                    call site; (iii) no exceptions, threads, dynamic linking, or un-
+substrate; (C2) exactly-once effect semantics for WRITE                  safe memory operations; and (iv) no ad-hoc networking or
+calls under repair and re-execution; and (C3) adaptive con-              filesystem access beyond the tool-facing service boundary.
+solidation to decide when program execution is more effi-                These restrictions ensure that compilation errors, runtime
+cient than stepwise calling.
+
+                                                                     3
+
+===== PDF p.4 =====
+Beyond Static Endpoints: Tool Programs as an Interface for Flexible Agentic Web Services
+
+   Client Task Instruction             Server                         tion pipeline with four steps, which turns failures into
+                                                                      bounded, checkable repairs using compiler and runtime
+                                                MCP
+                  Agent                                               feedback.
+                                                Services
+
+   ToolPro           API Access
+                                                                      Step 1: client-side synthesis with lightweight interface
+                       Tasks Stepwise                                 checks. Given the task intent and tool specifications, the
+             Consolidation     Access      Effect-Aware               client synthesizes a candidate program P and performs con-
+             Policy (§3.4)      (OPT1)     Replay (§3.3)              servative checks that are cheap yet effective at filtering ob-
+      Consolidated                                                    viously misaligned candidates. Concretely, it verifies (i)
+                   (OPT2)                         API Access
+        Access
+                                                                      endpoint coverage (required endpoints appear), (ii) a control-
+             Constraint-Guided Construction with Compiler
+                     and Runtime Feedback (§3.2)
+                                                                      flow skeleton consistent with the intent (e.g., a bounded loop
+                                                                      and necessary conditionals), and (iii) basic value-flow sanity
+          Figure 2. Three mechanisms of T OOL P RO.                   (outputs of earlier READ calls can be bound and used as
+                                                                      inputs to later calls). These checks avoid sending clearly
+                                                                      ill-formed programs into server-side compilation.
+traces, and call events refer to a stable, analyzable surface         Step 2: server-side projection into a constrained surface.
+that the runtime can repair and mediate reliably.                     Upon receiving P , the server applies a deterministic projec-
+Moreover, T OOL P RO makes side effects explicit via effect           tion Π(·) to rewrite it into the constrained interface-program
+typing. Concretely, every external call site in P must declare        surface. The projection (i) rewrites all external interactions
+an effect label (READ/WRITE), which the runtime checks                to the unified stub C ALL(·) with explicit READ/WRITE an-
+against the endpoint’s declared effect eff(e). These annota-          notations, (ii) removes or replaces unsupported imports and
+tions serve as the handle for retry protection. READ calls            patterns, and (iii) rejects any syntax or language features
+may be safely re-issued, whereas completed WRITE calls                outside the allowed surface. The result, a canonical form
+must be replay-protected under repair-driven re-execution.            Π(P ), ensures that subsequent diagnostics and traces are
+                                                                      expressed over a stable surface that the runtime can interpret,
+Building on the interface object, constrained surface, and            enforce, and modify reliably.
+effect-typed boundaries, T OOL P RO enforces the following
+contract for any well-formed program P .                              Step 3: compile and execute with feedback-driven,
+                                                                      bounded in-place repair. The server then compiles and
+• Program order. T OOL P RO processes dynamic calls in                executes Π(P ) in a sandbox and uses the resulting feed-
+  program order and never reorders external invocations.              back to repair and re-run within a fixed attempt budget. On
+• Observable preservation. Conditioned on identical end-              compilation failure, the compiler returns precise diagnostics
+  point outcomes (including inherent service errors), T OOL -         that localize missing symbols, type mismatches, and offend-
+  P RO exposes the same per-call outputs/errors as step-              ing code spans. On runtime failure, the runtime records a
+  wise execution. Across repair-driven re-executions for              lightweight trace that identifies the failing region together
+  the same intent instance, completed WRITE effects are               with the prefix of dynamic calls already observed. T OOL -
+  not duplicated at the service boundary.                             P RO applies in-place repairs conditioned on this verifiable
+                                                                      feedback and re-enters the loop. It re-projects the revised
+• Safe fallback. If construction or repair exceeds the at-            program if needed, recompiles, and re-executes until suc-
+  tempt budget, violates constraints, or encounters unsup-            cess or the budget is exhausted. Repairs are localized when-
+  ported WRITE semantics, T OOL P RO falls back to step-              ever possible. Invocation errors trigger edits at the relevant
+  wise endpoint calling and surfaces diagnostics.                     call site (endpoint, arguments, or effect annotation), while
+The contract is realized by three mechanisms, each address-           control-flow/logic errors trigger rewrites of the minimal
+ing one of the three challenges (introduced in §2), as shown          affected block with the rest preserved.
+in Figure 2.                                                          Step 4: Safe fallback with diagnostics. If the attempt bud-
+                                                                      get is exceeded or a repair violates the constrained surface,
+3.2. Constraint-Guided Construction with Compiler                     T OOL P RO falls back to stepwise endpoint calling and sur-
+     and Runtime Feedback                                             faces the diagnostics collected during steps. This ensures
+The first challenge to realize tool programs is to ensure reli-       that program execution is attempted only when it is demon-
+able program execution (C1). In practice, LLM-produced                strably viable, and that failures are surfaced with auditable
+programs are often structurally plausible yet fail under              diagnostics rather than silently ignored.
+a typed sandbox due to unsupported libraries, type mis-
+matches, missing imports, or brittle error handling. T OOL -
+P RO addresses this gap with a constraint-guided construc-
+
+                                                                  4
+
+===== PDF p.5 =====
+Beyond Static Endpoints: Tool Programs as an Interface for Flexible Agentic Web Services
+
+3.3. Effect-Aware Replay for Retry-Safe Semantics                    Algorithm 1 Effect-Aware Replay for Retry-Safe Semantics
+The second challenge (C2) is retry safety under repair-driven        Require: H: ordered history of completed WRITE calls
+re-execution. A tool program may partially succeed be-                  across prior executions
+fore failing. Naively re-running repaired code can re-emit           Require: W: ordered log of completed WRITE calls in the
+state-modifying WRITE calls, duplicating side effects and               current execution
+corrupting service state. T OOL P RO prevents this by medi-
+ating runtime calls at the interface boundary and replaying           1: procedure O N R E E XECUTION
+outcomes of completed WRITE calls across re-executions.               2:    H ← Concat(H, W) ▷ Append last execution in
+                                                                           order
+Because retry safety must hold at runtime, T OOL P RO inter-          3:      W←∅
+cepts each dynamic call (a runtime instance of C ALL(e, a))           4:      for each entry x ∈ H do
+along the taken control-flow path. READ calls are always              5:          x.used ← False
+forwarded to the service, since re-issuing them does not
+introduce new side effects. In contrast, WRITE calls are              6: function H ANDLE C ALL((e, a, eff))
+replay-protected. Once a WRITE completes, subsequent re-              7:    if eff = READ then
+executions must not re-emit it, while the program continues           8:        return E MIT((e, a))
+to observe the same outcome.                                          9:    else                                ▷ eff = WRITE
+To support such replay, T OOL P RO maintains a per-intent-           10:        for each entry x ∈ H in order do
+instance log of committed WRITE outcomes. Specifically,              11:            if x.(e, a) = (e, a) and ¬x.used then
+it keeps (i) an ordered history log H containing WRITE               12:                x.used ← True
+calls completed in prior executions, and (ii) a working log          13:                return x.o            ▷ Replay outcome
+W for WRITE calls completed in the current execution.                14:         o ← E MIT((e, a))
+Each entry stores (e, a, o) along with a per-re-execution flag       15:         W.append((e, a, o))
+used. Both logs are scoped to a single intent instance,              16:         return o
+ensuring replay does not leak across unrelated tasks.
+Since replay is only sound when repairs do not attempt to            WRITE call to the underlying service at most once, and later
+revise already committed effects, T OOL P RO enforces a con-         re-executions replay its cached outcome.
+servative replay discipline. If a repaired program changes
+the arguments or relative order of any committed WRITE               Proof. The only emission of a WRITE occurs when no
+prefix already recorded in H, T OOL P RO disables replay and         unused matching entry exists in H (Lines 9–16), in which
+falls back to stepwise calling. This turns a potential silent        case the emitted outcome is recorded and later archived into
+semantic divergence into an explicit, auditable condition.           H. In subsequent re-executions, the same dynamic WRITE
+Under this discipline, replay reduces to a simple matching           must match an unused entry and be replayed (lines 10–13),
+problem at each WRITE. On re-execution, when the pro-                so it cannot be emitted again.                            □
+gram reaches the next dynamic WRITE with parameters                  Moreover, practical services often provide idempotency
+(e, a), T OOL P RO matches it to the earliest unused entry           keys or exhibit nondeterminism, which affects replay match-
+in H with the same (e, a). If a match exists, the runtime            ing. When idempotency keys are available, T OOL P RO in-
+returns the cached outcome o without issuing the external            cludes them in argument a, strengthening matching and
+call; otherwise, it emits the call, obtains o, and appends           aligning replay with the service’s own exactly-once intent.
+(e, a, o) to W. Ordered matching treats repeated writes with         If an endpoint is meaningfully nondeterministic under iden-
+identical (e, a) as distinct dynamic calls within a run, while       tical (e, a) and no idempotency is available, T OOL P RO con-
+still preventing duplication across re-executions.                   servatively falls back to stepwise calling, as replay could
+The log-based replay mechanism is shown in Algorithm 1.              otherwise lead to different results compared to stepwise
+Before each re-execution, the runtime archives the WRITE             execution.
+calls completed in the last execution by appending W to H,
+clears W, and resets all used flags. READ calls are always           3.4. Profile-Driven Consolidation Policy
+emitted, whereas WRITE calls are either replayed from H              The remaining challenge (C3) is when to pay the one-time
+(if matched) or emitted and recorded into W.                         build cost of program execution. While tool programs can
+Proposition 3.1 (Retry-safe WRITE emissions). Fix an                 reduce client-server turns, their construction (synthesis, pro-
+intent instance and a well-formed interface program P .              jection, compilation, and possible repair) is nontrivial, so
+Across repair-driven re-executions that satisfy the replay           consolidation should be used only when it is predicted to re-
+discipline above, T OOL P RO emits each completed dynamic            duce end-to-end cost. T OOL P RO therefore uses lightweight
+
+                                                                 5
+
+===== PDF p.6 =====
+Beyond Static Endpoints: Tool Programs as an Interface for Flexible Agentic Web Services
+
+online profiling and decision rules to choose between the             ceeds the attempt budget, T OOL P RO falls back to stepwise
+tool program and stepwise calling.                                    calling with diagnostics.
+To make this choice instance-adaptive, T OOL P RO main-               We use Wasm as the execution substrate because it provides
+tains moving averages from recent runs for TRTT , TDEC , and          (i) a strong sandbox boundary for untrusted, LLM-generated
+TBUILD . Here TRTT is the client–service round-trip time, TDEC        code with no ambient authority, (ii) a capability-style host
+is per-step client-side decision overhead, and TBUILD includes        interface that lets us expose only the unified C ALL(e, a, eff)
+program synthesis, projection, compilation, and any repair            stub and mediate all side effects, and (iii) portable, low-
+time. In addition, T OOL P RO estimates N , the number of dy-         overhead execution suitable for short-lived procedural work-
+namic endpoint invocations in the candidate program, using            loads. Additional implementation details appear in Ap-
+synthesized structure and loop bounds when available.                 pendix A.
+Given these estimates, the policy follows the cost model in
+Equation 1. Consolidation primarily saves (N−1) additional            4.2. Experimental Setup
+RTTs and decision rounds, while endpoint execution time               Benchmarks. We evaluate T OOL P RO on three widely-used
+largely appears in both modes. T OOL P RO predicts the net            open-source applications (Memos, Directus, and MinIO)
+benefit of program execution over stepwise calling as                 from GitHub, following prior studies (Gu et al., 2025). De-
+                                                                      tails on these applications are shown in Appendix B.1. Each
+       ∆T = (N − 1) · (TRTT + TDEC ) − TBUILD .            (2)        application is exposed as an MCP-style tool-facing service
+                                                                      with fixed endpoints, and we construct procedural work-
+If ∆T > 0, T OOL P RO executes the tool program; otherwise            flows that require loops/conditionals and intermediate bind-
+it selects stepwise calling.                                          ings.
+Because profiles may be inaccurate at cold start, T OOL P RO          For each application, we construct two workflows: a read-
+bootstraps with a small number of stepwise runs to initialize         only workflow (suffix .r) and a read-write workflow (suffix
+TRTT and TDEC , and enables tool program execution only               .w). Each workflow is parameterized by N , which con-
+when the synthesized structure is clearly multi-step (e.g.,           trols procedural length (and equals the number of endpoint
+a bounded loop). Once estimates stabilize, Equation 2 is              invocations in stepwise execution). More details on the con-
+applied to make per-instance decisions.                               structed workflows are shown in Appendix B.2. We also add
+This policy integrates naturally with the end-to-end control          supplemental realistic workflows in Appendix B.3 to stress
+flow. Given an intent, T OOL P RO synthesizes a candidate             nondeterministic retrieval, branching, coordinated writes,
+program, estimates ∆T , and selects the mode. If program              non-idempotent effects, and cross-service execution.
+execution is chosen, the server runs projection, compilation,         Metrics. We report end-to-end latency and client-side traf-
+and bounded in-place repair under effect-aware execution.             fic volume, two widely used metrics (Gu et al., 2025). La-
+If repair exceeds the attempt budget, violates constraints,           tency measures the time to complete a workflow, including
+or encounters unsupported WRITE semantics, T OOL P RO                 client-side LLM time, client-server communication, and
+falls back to stepwise calling with diagnostics. As a result,         server-side execution. Client-side traffic measures bytes
+T OOL P RO uses tool programs only when they are predicted            transmitted by the client during workflow execution, includ-
+to be beneficial in efficiency.                                       ing both client-server payloads and client-to-LLM prompts.
+                                                                      For supplemental workflows, we also report task accuracy.
+4. Experiments                                                        Baselines and variants. We compare T OOL P RO against
+4.1. Implementation                                                   the prevailing stepwise endpoint interface and include two
+                                                                      T OOL P RO variants to isolate the effect of consolidation.
+We instantiate T OOL P RO over MCP-style tool-facing ser-
+vices and implement the service-side runtime using We-                • Stepwise MCP Web Service (MWS). The prevailing
+bAssembly (Wasm). On the client, an LLM synthesizes                     fully stepwise baseline. At each step, the agent replans
+a tool program P from the intent and tool specifications                the next endpoint call (ei , ai ) given the intent, tool specs,
+and applies lightweight interface checks; the consolidation             and prior observations, leading to N requests and typi-
+policy selects between program mode and stepwise calling.               cally N LLM decision rounds with repeated tool-context
+On the server, T OOL P RO projects P into the constrained               transmission.
+interface-program surface via Π(·), compiles and executes             • T OOL P RO-step. A stepwise T OOL P RO variant (no con-
+it in a sandbox with bounded in-place repair, and enforces              solidation) that replaces replanning with intent-structured
+retry-safe WRITE semantics by mediating every dynamic                   guidance: it first derives a coarse call skeleton from the
+C ALL and replaying completed WRITE outcomes across                     intent (e.g., required endpoints and loop/conditional struc-
+re-executions. If projection/repair violates constraints or ex-         ture), and then per step only instantiates/validates the
+
+                                                                  6
+
+===== PDF p.7 =====
+Beyond Static Endpoints: Tool Programs as an Interface for Flexible Agentic Web Services
+
+           35                             MWS: E2E              TP: E2E                                    40.8                       MWS: Comm.            TP: Comm.
+           30                             MWS: Comm.            TP: Comm.                             40                              MWS: LLM              TP: LLM
+                          24.7            MWS: LLM              TP: LLM
+
+
+
+
+                                                                                Traffic Volume (KB)
+           25                                                     22.9                                                         31.3
+                20.0                              19.718.6                                            30             26.6               27.3       25.3      27.4
+                                          19.0
+Time (s)
+
+
+
+
+           20                     18.1                              17.4
+                   16.8      15.5            16.8
+           15                        14.4                                                             20      17.8
+           10
+                                                                                                      10                 5.8                5.5       4.9
+            5                                                                                                                     4.6                            4.8
+            0                                                                                          0
+                Memos.r Memos.w Directus.r Directus.w MinIO.r    MinIO.w                                   Memos.r Memos.w Directus.r Directus.w MinIO.r     MinIO.w
+Figure 3. Latency comparison. ‘TP’ indicates T OOL P RO. ‘E2E’ is                Figure 4. Client-side traffic volume. ‘Comm.’ denotes client-server
+the end-to-end latency. ‘Comm.’ is client-server communication                   bytes. ‘LLM’ denotes client-to-LLM bytes.
+latency. ‘LLM’ is latency involving client-side LLM inference.
+                                                                                  ate context across N rounds, whereas program mode trans-
+                                                                                  mits a compact tool program once (plus bounded repair
+   next call using current observations (e.g., filling argu-
+                                                                                  prompts when needed). Client–server bytes may fluctuate
+   ments from prior READ outputs), still incurring N re-
+                                                                                  because program mode uploads program source/bytecode,
+   quests/rounds but with lower per-step decision overhead
+                                                                                  but the reduction in repeated prompting and over/under-
+   and less repeated tool context.
+                                                                                  fetching dominates for procedural workflows.
+ • T OOL P RO-prog. T OOL P RO-prog always executes in pro-
+   gram mode. The agent submits one effect-typed tool pro-                        Realistic workflows and reliability. To test whether the
+   gram, which the server projects (Π(·)), compiles/repairs,                      gains go beyond fixed-N procedural loops, we add four
+   and executes under call interception. This isolates the                        supplemental complex benchmarks (cbench1–cbench4) that
+   benefits of consolidation (turn reduction) while paying                        require nondeterministic retrieval, loop/branch logic, coor-
+   the one-time build cost.                                                       dinated multi-record writes, non-idempotent side effects,
+ • T OOL P RO. Full system with the profile-driven consolida-                     and cross-service branching. Across cbench1–cbench3 with
+   tion policy, selecting between program mode and stepwise                       complex realistic workflows, T OOL P RO reduces end-to-end
+   mode per instance.                                                             latency from 30.16s to 17.91s (40.6%), improves task accu-
+                                                                                  racy from 0.60 to 0.93, and reduces client-side LLM latency
+ Details on experimental environments are shown in Ap-
+                                                                                  from 14.98s to 7.08s (52.8%). On the cross-service bench-
+ pendix B.4.
+                                                                                  mark (cbench4), T OOL P RO reduces latency from 52.68s
+                                                                                  to 24.54s (53.4%), cuts client-side traffic by 96.1%, and
+ 4.3. Overall Efficiency                                                          improves accuracy from 0.20 to 0.80.
+We first evaluate end-to-end efficiency by comparing T OOL -                     We observe that the program-mode failure rate is relevant to
+P RO against MWS across workflows with N = 10. Unless                            the coding capability of LLMs. On the Rust-based cbench2,
+specified otherwise, the server is hosted in Sydney and the                      qwen3-coder-flash reaches 80% success rate, while gpt-
+client in Beijing.                                                               5.1 and gemini-3-flash-preview each reach 100% success
+Service latency. As shown in Figure 3, T OOL P RO con-                           rate with no observed compilation failure or fallback. In
+sistently reduces end-to-end latency across all workflows.                       addition, replay also matters operationally: over a 15-run
+The main source of improvement is turn reduction: pro-                           no-replay ablation on cbench1–cbench3, disabling replay
+gram mode packages a multi-step interaction into a single                        increases average latency from 17.92s to 21.45s (+19.7%)
+submission/execution cycle, avoiding the repeated client-                        and fallback from 0/15 to 3/15. Thus T OOL P RO fails closed
+side decide-next-call loop in MWS and reducing (N − 1)                           when replay safety cannot be guaranteed, and fallback does
+additional RTTs and reasoning rounds. While T OOL P RO                           not erase the overall gains over complex realistic workflows.
+incurs a one-time build cost (program synthesis, projection,
+compilation, and occasional bounded repair), this overhead                        4.4. Sensitivity
+is amortized for procedural workflows and higher RTT set-
+                                                                                 We next study how network conditions and workflow com-
+tings, consistent with the proposed policy model. Latency
+                                                                                 plexity affect performance, using Memos.w.
+improvements remain consistent for read-write workflows,
+indicating that enforcing retry-safe semantics does not dom-                      Impact of network conditions. To vary network conditions,
+inate end-to-end cost.                                                            we deploy servers in London, Sydney, and San Francisco
+                                                                                  with a client in Beijing, and also inject additional one-way
+ Client-side traffic volume. As shown in Figure 4, T OOL -
+                                                                                  delays of 50ms, 100ms, 150ms, and 200ms. We run with
+ P RO reduces client-side traffic by up to 85.3%. This reduc-
+                                                                                  N = 10.
+ tion is primarily driven by fewer client-to-LLM exchanges:
+ MWS repeatedly transmits tool specifications and intermedi-                      As shown in Figure 5, T OOL P RO outperforms MWS across
+
+                                                                            7
+
+===== PDF p.8 =====
+Beyond Static Endpoints: Tool Programs as an Interface for Flexible Agentic Web Services
+
+           40                                                                                                       60   Method:                MWS              TP              TP-step             TP-prog
+           35      MWS           E2E                         Comm.                                                       Traffic:               Comm.            LLM
+                                                                                                                                                                                            53.2
+                   TP            LLM                                                      29.4                      50
+           30                                                                                                                                                          39.9
+                       23.9 24.7 24.9                               25.3                                            40
+           25 23.2
+
+
+
+
+                                                                                                     Traffic (KB)
+Time (s)
+
+
+
+
+           20                                                       15.9                  16.1                      30                           26.6
+                       14.9 15.5 15.6
+           15 13.8                                                                                                  20
+           10                                                                                                            13.3
+                                                                                                                                                                                                         10.4
+            5                                                                                                       10                    5.3           5.8 6.0 5.9           6.7 7.8 6.7          7.4          7.5
+                                                                                                                                2.6 2.6
+            0                                                                                                        0
+               50        81 89 100                                  150               200                                         5                  10               15                            20
+                      LON SYD SFO                                      Network Latency (ms)                                                     Complexity (# of API Accesses)
+                  Figure 5. Impact of varying network conditions.                                               Figure 7. Impact of workflow complexity on traffic volume.
+
+           60            Method:           MWS          TP            TP-step         TP-prog
+           50            Latency:          E2E          Comm.         LLM 45.9                        N due to repeated prompts and tool-context transmission.
+                                                             43.2
+           40                                                                                         T OOL P RO-prog maintains low traffic for larger N by avoid-
+Time (s)
+
+
+
+
+                                                                                                      ing multi-round prompting. By switching between stepwise
+           30                             24.7
+                                                                                  27.2
+                                                                    22.1                              and program modes, T OOL P RO minimizes client-side traffic
+           20                      15.6       15.515.515.6      15.9 15.9      16.5     16.6          across complexity conditions.
+                  12.1
+           10            8.6 9.4
+                                                                                                      Moreover, we break down the overhead of T OOL P RO-prog
+            0                                                                                         in Appendix C.
+                           5                   10               15               20
+                                          Complexity (# of API Accesses)
+                Figure 6. Impact of workflow complexity on latency.
+                                                                                                      5. Related Work
+                                                                                                      Interfaces and representations for agent tool use. LLM-
+network settings. As RTT increases, the performance gap
+                                                                                                      based agents increasingly solve tasks by invoking tools and
+widens because consolidation saves (N − 1) additional
+                                                                                                      APIs (Shen et al., 2025a; Liu et al., 2026; Shen et al., 2025b;
+round trips, and the policy increasingly favors program
+                                                                                                      Du et al., 2024; Song et al., 2025; Schick et al., 2023; Qin
+mode when the predicted benefit exceeds build cost. In low-
+                                                                                                      et al., 2024). The dominant interface remains stepwise
+latency conditions, the policy more often selects stepwise
+                                                                                                      endpoints, where intent is implicit in a sequence of endpoint
+mode to avoid paying the one-time build cost, yielding ro-
+                                                                                                      calls interleaved with multi-round reasoning. This makes
+bust performance across conditions. An extended 1–2000ms
+                                                                                                      control flow and intermediate bindings an emergent property
+RTT sweep on Memos.w (N = 8) makes the mode switch
+                                                                                                      of the agent policy, inflating network turns and reasoning
+explicit. T OOL P RO-step is better at 1–100ms (14.50–15.30s
+                                                                                                      as workflows lengthen. In contrast, T OOL P RO makes intent
+versus 15.51–15.60s for T OOL P RO-prog), while T OOL P RO-
+                                                                                                      explicit as an executable tool program with a constrained
+prog is better at 1000–2000ms (16.50–17.51s versus 22.48–
+                                                                                                      surface and effect types, enabling compilation, inspection,
+30.50s for T OOL P RO-step). The full T OOL P RO policy stays
+                                                                                                      enforcement, and optimization at the interface boundary.
+close to the empirically better mode across the sweep, select-
+ing stepwise execution in low-latency settings and program                                            From expressive queries to executable interaction logic.
+execution as RTT dominates.                                                                           Web APIs evolved from RESTful endpoints (Fielding, 2000)
+                                                                                                      to flexible query interfaces such as GraphQL (GraphQL,
+ Impact of workflow complexity. We vary workflow com-
+                                                                                                      2015), reducing over/under-fetching by letting clients shape
+ plexity by setting N = 5, 10, 15, 20 and compare MWS,
+                                                                                                      responses. However, GraphQL is not designed to encode
+ T OOL P RO-step, T OOL P RO-prog, and T OOL P RO, with the
+                                                                                                      procedural interaction logic (loops, conditionals, retries) as
+ server hosted in Sydney and the client in Beijing.
+                                                                                                      a single interface object (Stack-Overflow, 2018a; Hartig &
+As shown in Figure 6, MWS scales roughly linearly with                                                Pérez, 2018; Stack-Overflow, 2018b). Recent systems exe-
+N due to N rounds of RTT and reasoning. T OOL P RO in                                                 cute user-supplied logic near the service; e.g., ORFA (Gu
+stepwise mode improves modestly by reducing per-step de-                                              et al., 2025) uses Wasm modules as a Turing-complete query
+cision overhead with intent-structured guidance, but still                                            language. T OOL P RO instead focuses on agentic workflows
+pays N rounds. In contrast, T OOL P RO-prog remains com-                                              where the core bottlenecks are executability and side effects
+paratively stable with N because it pays a one-time build                                             under re-execution, using LLM-synthesized, repairable tool
+cost and executes the interaction logic server-side. The full                                         programs with an effect-typed contract and retry-safe se-
+T OOL P RO achieves the best of both by switching between                                             mantics under iterative repair.
+modes, validating the profile-driven policy.
+                                                                                                      Programmatic agents and in-situ execution. Code-based
+As shown in Figure 7, client-side traffic in MWS grows with                                           agent methods such as CodeAct (Wang et al., 2024) use
+
+                                                                                                 8
+
+===== PDF p.9 =====
+Beyond Static Endpoints: Tool Programs as an Interface for Flexible Agentic Web Services
+
+executable code as an agent action space, and workflow-               consequences of our work, none of which we feel must be
+generation methods such as AFlow (Zhang et al., 2025a)                specifically highlighted here.
+search over code-represented agent workflows. T OOL P RO is
+complementary but targets a different boundary: the submit-           References
+ted program is an effect-typed service interface object, not
+only an internal reasoning/action representation, and the run-        Deng, X., Gu, Y., Zheng, B., Chen, S., Stevens, S., Wang,
+time must enforce replay-safe WRITE behavior across re-                 B., Sun, H., and Su, Y. Mind2web: Towards a generalist
+pair and re-execution. The design is also analogous to in-situ          agent for the web. Proceedings of the Advances in Neu-
+programmable execution systems such as eBPF (Hoiland-                   ral Information Processing Systems (NeurIPS 2023), pp.
+Jorgensen et al., 2018), which move logic closer to the exe-            28091–28114, 2023.
+cution boundary to reduce repeated control transfers. Unlike
+eBPF’s pre-verified kernel packet programs, T OOL P RO han-           Du, Y., Wei, F., and Zhang, H. Anytool: self-reflective, hier-
+dles dynamically generated tool programs over web-service               archical agents for large-scale api calls. In Proceedings of
+endpoints with explicit effect annotations, sandboxed execu-            the 41st International Conference on Machine Learning
+tion, and fail-closed fallback.                                        (ICML 2024), pp. 11812–11829, 2024.
+
+Wasm sandboxing as a substrate. WebAssembly (Wasm)                    Fielding, R. T. Architectural styles and the design of
+provides a portable sandbox with near-native perfor-                    network-based software architectures. University of Cali-
+mance (Liu et al., 2025b; Yan et al., 2021; Liu et al., 2025a)          fornia, Irvine, 2000.
+and is widely adopted beyond browsers, including server-
+less and edge settings (Hoque & Harras, 2023; Ménétrey              Gackstatter, P., Frangoudis, P. A., and Dustdar, S. Push-
+et al., 2022; Kjorveziroski & Filiposka, 2023; Gackstatter              ing serverless to the edge with WebAssembly runtimes.
+et al., 2022; Zhang et al., 2025b). T OOL P RO uses Wasm as             In Proceedings of the 22nd IEEE International Sympo-
+a supporting substrate to securely execute the constrained              sium on Cluster, Cloud and Internet Computing (CCGrid
+tool-program surface.                                                   2022), pp. 140–149, 2022.
+
+                                                                      GraphQL. The query language for modern APIs. https:
+6. Conclusion                                                           //graphql.org/, 2015. Accessed: 2025-07-28.
+We introduced T OOL P RO, which makes tool programs a                 Gu, Y., Chen, C., Du, J., Zhang, X., and Zhang, X. ORFA:
+first-class agent-facing service interface. By compiling                Exploring WebAssembly as a turing complete query lan-
+effect-typed programs with projection and bounded repair,               guage for web APIs. In Proceedings of the ACM on Web
+T OOL P RO consolidates multi-step workflows into fewer                Conference 2025 (WWW 2025), pp. 1856–1865, 2025.
+turns while ensuring retry-safe execution via effect-aware
+replay. A profile-driven policy selects program execution             Hartig, O. and Pérez, J. Semantics and complexity of
+only when it is predicted to reduce end-to-end cost. Across             graphql. In Proceedings of the 2018 World Wide Web
+complex workflows within realistic applications, T OOL P RO             Conference (WWW 2018), pp. 1155–1164, 2018.
+reduces latency and client-side traffic, with gains growing
+under higher RTT and increased workflow complexity. We                Hoiland-Jorgensen, T., Brouer, J. D., Borkmann, D.,
+believe T OOL P RO is a practical step toward executable and            Fastabend, J., Herbert, T., Ahern, D., and Miller, D. The
+effect-safe representations of tool intent for the agentic web.         express data path: Fast programmable packet processing
+                                                                        in the operating system kernel. In Proceedings of the
+                                                                       14th international conference on emerging networking
+Acknowledgements                                                        experiments and technologies, pp. 54–66, 2018.
+This work was supported by National Natural Science Foun-             Hoque, M. N. and Harras, K. A. WebAssembly for edge
+dation of China under the grant number 62595734, the                    computing: Potential and challenges. IEEE Communica-
+Key Laboratory of High Confidence Software Technolo-                    tions Standards Magazine, pp. 68–73, 2023.
+gies (Peking University), the Ministry of Education, and
+the Center for Data Space Technology and System, Peking               Kjorveziroski, V. and Filiposka, S. WebAssembly as an
+University.                                                             enabler for next generation serverless computing. Journal
+                                                                        of Grid Computing, pp. 34, 2023.
+Impact Statement                                                      Liu, M., Shen, H., Zhang, Y., Mei, H., and Ma, Y. We-
+This paper presents work whose goal is to advance the field             bassembly for container runtime: Are we there yet? ACM
+of Machine Learning. There are many potential societal                  Transactions on Software Engineering and Methodology
+                                                                        (TOSEM 2025), pp. 22, 2025a.
+
+                                                                  9
+
+===== PDF p.10 =====
+Beyond Static Endpoints: Tool Programs as an Interface for Flexible Agentic Web Services
+
+Liu, M., Zhong, S., Yang, Q., Han, Y., Liu, X., and Ma, Y.            Stack-Overflow. GraphQL: can you mutate the results of
+  Webanns: Fast and efficient approximate nearest neigh-                a query? https://stackoverflow.com/ques
+  bor search in web browsers. In Proceedings of the 48th                tions/52330018/graphql-can-you-mutat
+  International ACM SIGIR Conference on Research and                    e-the-results-of-a-query, 2018a. Accessed:
+  Development in Information Retrieval (SIGIR 2025), pp.                2025-07-28.
+  2483–2492, 2025b.
+                                                                      Stack-Overflow. Graphql loop through array and get all
+Liu, M., Ma, X., Xie, Y., Chen, Q., Liu, X., and Ma, Y.                 results. stack overflow. https://stackoverflow.
+  ROGA: Scaling generalist agents for office productivity               com/questions/48321689/graphql-loop-t
+  tasks via tool generation. In Proceedings of the Four-                hrough-array-and-get-all-results, 2018b.
+  teenth International Conference on Learning Representa-               Accessed: 2025-07-28.
+  tions (ICLR 2026), 2026.                                            Wang, X., Chen, Y., Yuan, L., Zhang, Y., Li, Y., Peng, H.,
+                                                                       and Ji, H. Executable code actions elicit better LLM
+Liu, X., Yu, H., Zhang, H., Xu, Y., Lei, X., Lai, H., Gu, Y.,
+                                                                       agents. In Proceedings of the Forty-first International
+  Ding, H., Men, K., Yang, K., et al. Agentbench: Evalu-
+                                                                       Conference on Machine Learning (ICML 2024), 2024.
+  ating llms as agents. In Proceedings of the International
+  Conference on Learning Representations (ICLR 2024),                 Yan, Y., Tu, T., Zhao, L., Zhou, Y., and Wang, W. Under-
+  pp. 52989–53046, 2024.                                                standing the performance of webassembly applications.
+                                                                        In Proceedings of the 21st ACM Internet Measurement
+Ménétrey, J., Pasin, M., Felber, P., and Schiavoni, V. We-            Conference, pp. 533–549, 2021.
+ bAssembly as a common layer for the cloud-edge contin-
+ uum. In Proceedings of the 2nd Workshop on Flexible                  Yao, S., Chen, H., Yang, J., and Narasimhan, K. Web-
+ Resource and Application Management on the Edge, pp.                   shop: Towards scalable real-world web interaction with
+ 3–8, 2022.                                                             grounded language agents. Proceedings of the Advances
+                                                                        in Neural Information Processing Systems (NeurIPS
+Qin, Y., Liang, S., Ye, Y., Zhu, K., Yan, L., Lu, Y., Lin, Y.,          2022), pp. 20744–20757, 2022.
+  Cong, X., Tang, X., Qian, B., et al. Toolllm: Facilitat-
+  ing large language models to master 16000+ real-world               Yao, S., Zhao, J., Yu, D., Du, N., Shafran, I., Narasimhan,
+  apis. In Proceedings of the International Conference on               K., and Cao, Y. React: Synergizing reasoning and acting
+  Learning Representations (ICLR 2024), pp. 9695–9717,                  in language models. In Proceedings of the International
+  2024.                                                                 Conference on Learning Representations (ICLR 2023),
+                                                                        2023.
+Qwen-Team. Qwen3-Max: Just scale it, September 2025.                  Zhang, J., Xiang, J., Yu, Z., Teng, F., Chen, X., Chen, J.,
+                                                                        Zhuge, M., Cheng, X., Hong, S., Wang, J., et al. Aflow:
+Schick, T., Dwivedi-Yu, J., Dessı̀, R., Raileanu, R., Lomeli,
+                                                                        Automating agentic workflow generation. In Proceedings
+  M., Hambro, E., Zettlemoyer, L., Cancedda, N., and
+                                                                        of the International Conference on Learning Representa-
+  Scialom, T. Toolformer: Language models can teach
+                                                                        tions (ICLR 2025), pp. 34040–34077, 2025a.
+  themselves to use tools. Proceedings of the Advances in
+  neural information processing systems (NeurIPS 2023),               Zhang, Y., Liu, M., Wang, H., Ma, Y., Huang, G., and Liu,
+  pp. 68539–68551, 2023.                                                X. Research on webassembly runtimes: A survey. ACM
+                                                                        Transactions on Software Engineering and Methodology
+Shen, H., Li, Y., Meng, D., Cai, D., Qi, S., Zhang, L.,                 (TOSEM 2025), pp. 1–47, 2025b.
+  Xu, M., and Ma, Y. Shortcutsbench: A large-scale real-
+  world benchmark for api-based agents. In Proceedings                Zhou, S., Xu, F. F., Zhu, H., Zhou, X., Lo, R., Sridhar, A.,
+  of the Thirteenth International Conference on Learning                Cheng, X., Ou, T., Bisk, Y., Fried, D., et al. Webarena:
+  Representations (ICLR 2025), 2025a.                                   A realistic web environment for building autonomous
+                                                                        agents. In Proceedings of the 2024 International Con-
+Shen, H., Yan, H., Xing, Z., Liu, M., Li, Y., Chen, Z., Wang,           ference on Learning Representations (ICLR 2024), pp.
+  Y., Wang, J., and Ma, Y. RAGSynth: Synthetic data for                 15585–15606, 2024.
+  robust and faithful rag component optimization, 2025b.
+
+Song, Y., Xu, F. F., Zhou, S., and Neubig, G. Beyond
+  browsing: Api-based web agents. In Findings of the
+  Association for Computational Linguistics: ACL 2025,
+  pp. 11066–11085, 2025.
+
+                                                                 10
+
+===== PDF p.11 =====
+Beyond Static Endpoints: Tool Programs as an Interface for Flexible Agentic Web Services
+
+A. Implementation Details                                                         particular, it rewrites all external interactions to the stub,
+                                                                                  rejects disallowed constructs (exceptions/threads/dynamic
+This appendix provides additional details of T OOL P RO’s                         linking/unsafe features), and ensures effect annotations are
+Wasm-based runtime, including the host interface, replay                          explicit at each call site. This makes compiler diagnostics
+state management, and policy instrumentation.                                     and runtime traces comparable across repair iterations.
+
+A.1. Runtime Architecture                                                         A.3. Effect Mediation and Replay State
+T OOL P RO is a client-server system. The client produces                         Effect-aware replay is implemented inside the mediator that
+a candidate tool program P in Rust and an intent-instance                         handles every dynamic C ALL from the Wasm module. For
+identifier, and then either (i) submits P to the server for                       each intent instance, the mediator maintains (i) a history log
+program-mode execution or (ii) performs stepwise call-                            H of completed WRITE calls from prior executions, and (ii)
+ing. In program mode, the server executes the following                           a working log W for completed WRITE calls in the current
+stages. (1) Projection Π(·) rewrites P into the constrained                       execution. Each entry stores (e, a, o) and a per-run used
+interface-program surface. (2) Compilation/repair utilizes                        flag.
+Rustc to compile the projected Rust program and performs
+bounded in-place repair using compiler diagnostics and run-                       Re-execution protocol. Before each repair-driven re-
+time traces. (3) Sandboxed execution runs the resulting                           execution, the mediator archives W into H, clears W, and
+module while intercepting every dynamic C ALL to enforce                          resets all used flags. During execution, READ calls are
+program order and effect-aware replay. If any stage ex-                           always forwarded to the service. For a WRITE call with
+ceeds budgets or violates constraints, the server triggers safe                   parameters (e, a), the mediator matches it to the earliest
+fallback to stepwise calling and returns diagnostics.                             unused entry in H; if matched, it returns the cached out-
+                                                                                  come without emitting the call, otherwise it emits once and
+A.2. Wasm Runtime Configuration and Host Interface                                appends the outcome to W.
+
+The overall Wasm generation pipeline is shown in Figure 8.                        Fail-closed conditions. Replay is enabled only under the
+T OOL P RO compiles the LLM-generated Rust program into a                         replay discipline. If a repaired program attempts to revise a
+Wasm module and executes it using Wasmtime. The module                            committed WRITE prefix (by changing arguments or rela-
+runs with no ambient authority. It cannot issue network                           tive order), replay is disabled, and the system falls back to
+requests, access the filesystem, or load dynamic libraries.                       stepwise calling with diagnostics.
+All external interaction is mediated through a minimal set
+of host imports.                                                                  B. Experimental Details
+             Agent                                 MCP Services
+                                                                                  B.1. Application Benchmarks
+ Client                               Server               API Access             Details of employed applications are listed below.
+ Aggregated      Code     Intent
+ API Access              Confirm                                                  • Memos2 (56k stars): A lightweight, self-hosted knowl-
+                                         Rust
+      Code Generator                                   Debugger
+                                       Projector                                    edge management platform in Go, exposing OpenAPI-
+               Code
+                               Code             Wasm               Wasm
+                                                                                    compliant REST interfaces.
+      Code Formatter
+                                               Compiler           Executor        • Directus3 (34k stars): An API layer providing REST and
+                                                                                    GraphQL endpoints over SQL backends.
+          Figure 8. Wasm generation pipeline of T OOL P RO.                       • MinIO4 (60k stars):        An S3-compatible, high-
+                                                                                    performance object storage system.
+Unified call stub. The only capability needed by tool pro-
+grams is the unified stub C ALL(e, a, eff). We implement                          B.2. Constructed Workflows
+this as a host-imported function that takes (i) an endpoint
+                                                                                  Table 1 shows the constructed procedural agentic workflows
+identifier e (interned string or integer id), (ii) a serialized
+                                                                                  used in our experiments.
+argument object a (e.g., JSON bytes), and (iii) an effect tag
+eff ∈ {READ, WRITE}. The host returns a serialized result                            2
+                                                                                       https://github.com/usememos/memos
+                                                                                     3
+object or a typed error. This import is the enforcement point.                         https://github.com/directus/directus
+                                                                                     4
+The mediator can log calls, enforce program order, check                               https://github.com/minio/minio
+effect labels, and apply replay semantics without requiring
+the module to embed networking logic.
+Deterministic projection target. Projection Π(·) targets a
+stable surface that compiles deterministically to Wasm. In
+
+                                                                             11
+
+===== PDF p.12 =====
+Beyond Static Endpoints: Tool Programs as an Interface for Flexible Agentic Web Services
+
+Table 1. Composed procedural workflows over fixed endpoints.                0.93, and lowers client-side LLM latency from 14.98s to
+                                                                            7.08s. For cbench4, T OOL P RO reduces latency from 52.68s
+ App         Read-Only                   Read-Write                         to 24.54s (53.4%), cuts client-side traffic by 96.1%, and
+             Workflow (.r)               Workflow (.w)                      improves accuracy from 0.20 to 0.80. The policy selects
+ Memos       Get memos of N              Change the visibility              program mode in 12/15 cold-start runs and in all 12/12
+             users                       of N memos. N is                   warm-start runs after profiles are available; no fallback is
+             (user id=1,2,. . . ,N ).    the memo number.                   observed once program mode is selected in these measure-
+             N is the user number.                                          ments.
+ Directus Get detailed                   Modify author                      Replay and model comparison. In a 15-run no-replay
+          information of N               information of N                   ablation on cbench1–cbench3, disabling replay increases av-
+          articles                       draft articles. N is               erage latency from 17.92s to 21.45s and fallback from 0/15
+          (id=1,2,. . . ,N ). N is       the number of                      to 3/15. On cbench2, gpt-5.1 and gemini-3-flash-preview
+          the article number.            articles.                          each reach 100% success rate with no observed compila-
+ MinIO       Download N files.           Upload N files. N is               tion failure or fallback, while qwen3-coder-flash reaches
+             N is the file number.       the file number.                   80%, indicating that compilation failures are primarily a
+                                                                            model-capability bottleneck.
+                                                                                Table 3. Extended RTT sweep on Memos.w with N = 8.
+B.3. Supplemental Realistic Workflows and Results
+                                                                                    RTT     T OOL P RO-step         T OOL P RO-prog             T OOL P RO policy
+The supplemental realistic benchmarks were added to mea-                         1ms                     14.50s                   15.51s                         14.54s
+sure T OOL P RO under complex situations. They keep the                         10ms                     14.57s                   15.52s                         14.57s
+same MCP-style endpoint setting but require runtime bind-                      100ms                     15.30s                   15.60s                         15.43s
+                                                                              1000ms                     22.48s                   16.50s                         16.22s
+ing, branch-dependent control flow, state consistency across                  2000ms                     30.50s                   17.51s                         17.64s
+multiple records, and cross-service side effects.
+            Table 2. Supplemental realistic workflows.                      This sweep makes the profile-driven switch explicit: step-
+                                                                            wise execution is preferable at low RTT, while program
+  Bench        Core challenge           Representative task                 execution dominates once RTT becomes the main cost.
+  cbench1      Nondeterministic re-     Find customer Mei Pa-               Table 4. Language comparison on cbench2. Rust is an implemen-
+               trieval                  tel by ZIP 76165, iden-             tation choice rather than a conceptual requirement.
+                                        tify the correct pending or-
+                                        der at runtime, and update           Language     Avg. seconds   Accuracy   Note
+                                        that order to contain only           Rust             19.4052        0.80   Mature direct-to-Wasm frontend in our setting.
+                                                                             Go               50.2153        0.40   More brittle direct-to-Wasm compilation in our setting.
+                                        item 1096508426 with to-             Lua                  N/A        N/A    No practical direct-to-Wasm path for this use case.
+                                        tal 55.0.
+  cbench2      Loop, branching, and     Update all pending or-
+               coordinated writes       ders and the customer’s             These results support using Rust in the prototype because it
+                                        primary address; if or-             integrates cleanly with Wasmtime and provides actionable
+                                        der #W4082615 has not               compiler diagnostics, while a lighter DSL/IR remains a
+                                        shipped, replace its items
+                                        and set the total to 25.0.          promising future direction.
+  cbench3      Non-idempotent side      For      delivered    order
+               effects                  #D12345, change status              Generated tool programs remain compact in the supplemen-
+                                        to exchange requested,              tal runs: sampled programs have a median of 70 non-empty
+                                        replace its items, and              lines of code, 4 MCP tool calls, and 1 branch/loop keyword
+                                        create an exchange log              hit; the shortest and longest samples are 43 and 102 non-
+                                        recording old and new
+                                        items.                              empty lines. The 102-line sample includes 6 tool calls (3
+  cbench4      Cross-service branch-    Upload five local doc-              READ, 3 WRITE) plus a conditional branch, with explicit
+               ing                      uments to MinIO, in-                effect annotations at call sites.
+                                        spect object text, route
+                                        objects across prefixes,
+                                        create follow-up memos              B.4. Environments
+                                        when required, then clean
+                                        up generated files and              We run servers on AWS c7i-flex.large instances (In-
+                                        memos.                              tel Xeon Sapphire Rapids @2.40GHz, 2 vCPUs, 4GB RAM,
+                                                                            up to 12.5Gbps). Servers are hosted in Sydney, London, and
+Supplemental benchmark results. Across cbench1–                             San Francisco. The client runs in Beijing on a machine
+cbench3, T OOL P RO reduces average latency from 30.16s                     with an Intel Core i9-14900HX CPU, 16GB RAM, and a
+to 17.91s (40.6%), improves task accuracy from 0.60 to                      gigabit network connection. T OOL P RO is implemented in
+
+                                                                       12
+
+===== PDF p.13 =====
+Beyond Static Endpoints: Tool Programs as an Interface for Flexible Agentic Web Services
+
+Python, utilizing the Wasmtime5 for WebAssembly execu-
+tion. T OOL P RO uses Rust6 as the high-level language for
+Wasm compilation. We use Qwen3-Max-Instruct (Qwen-
+Team, 2025) for program synthesis and repair prompting on
+the client. Unless otherwise specified, results are averaged
+over five runs.
+
+C. Overhead Breakdown
+Table 5. Breakdown of tool-program build pipeline latency (sec-
+onds and percentage of total end-to-end latency).
+
+ App       N      Program        Compila-        Sandbox         Service
+                  Synthesis          tion       Execution      Execution
+            5   7.31 (41.9%)   5.39 (30.9%)   2.44 (14.0%)   2.06 (11.8%)
+           10   7.32 (40.9%)   5.43 (30.3%)   2.46 (13.7%)   2.40 (13.4%)
+ Memos.r
+           15   7.61 (41.9%)   5.39 (29.7%)   2.45 (13.5%)   2.58 (14.2%)
+           20   7.61 (41.3%)   5.42 (29.4%)   2.47 (13.4%)   2.81 (15.2%)
+            5   7.31 (42.4%)   5.17 (30.0%)   2.47 (14.3%)   2.16 (12.5%)
+           10   7.51 (42.0%)   5.21 (29.2%)   2.48 (13.9%)   2.20 (12.3%)
+ Memos.w
+           15   7.62 (42.3%)   5.37 (29.8%)   2.47 (13.7%)   2.38 (13.2%)
+           20   7.86 (41.3%)   5.45 (28.6%)   2.49 (13.1%)   3.09 (16.2%)
+
+
+We break down the overhead of program mode by mea-
+suring T OOL P RO-prog on Memos.r and Memos.w with
+N = 5, 10, 15, 20 (server in Sydney, client in Beijing). Ta-
+ble 5 shows that program synthesis dominates the one-time
+build cost, while compilation and sandbox execution remain
+stable across N . This suggests that model specialization for
+the constrained interface-program surface (or more efficient
+synthesis/repair prompting) could further reduce overhead.
+Importantly, sandbox execution includes effect mediation
+for WRITE calls, yet contributes a relatively small frac-
+tion of end-to-end time, indicating that retry safety can be
+enforced with modest overhead in practice.
+
+
+
+
+   5
+    https://github.com/bytecodealliance/wasm
+time
+  6
+    https://rust-lang.org/
+
+                                                                            13

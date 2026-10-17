@@ -1,0 +1,1135 @@
+===== PDF p.1 =====
+Conjunctive Prompt Attacks in Multi-Agent LLM Systems
+
+
+                                Nokimul Hasan Arif, Qian Lou, Mengxin Zheng
+                                     University of Central Florida, USA
+                                          {no643252, qian.lou, mengxin.zheng}@ucf.edu
+
+
+
+
+                           Abstract                                                        blackbox
+                                                                                                           collect
+                                                                             User
+         Most LLM safety work studies single-agent                                                          data
+         models, but many real applications rely on                                                      (vulnerable)
+         multiple interacting agents. In these systems,                                                                  Flight
+         prompt segmentation and inter-agent routing                                     Flight Agent
+                                                                     input                                              Database
+         create attack surfaces that single-agent evalu-            prompt                                 collect
+         ations miss. We study conjunctive prompt at-
+                                                                                                            data
+         tacks, where a trigger key in the user query and
+         a hidden adversarial template in one compro-                                                    (vulnerable)
+
+         mised remote agent each appear benign alone                      Trip            Hotel Agent                    Hotel
+         but activate harmful behavior when routing                  Planning Agent                                     Database
+         brings them together. We consider an attacker
+         who changes neither model weights nor the                 Figure 1: Normal multi-agent LLM pipeline without
+         client agent and instead controls only trigger            adversarial manipulation. A user interacts with a
+         placement and template insertion. Across star,            client (orchestrator) agent that decomposes the request
+         chain, and DAG topologies, routing-aware opti-            into subtasks and routes them to specialized remote
+         mization substantially increases attack success           agents (e.g., flight and hotel agents), each connected to
+         over non-optimized baselines while keeping                external tools or databases. Remote agents operate as
+         false activations low. Existing defenses, in-             black boxes to the client, exposing only their natural-
+         cluding PromptGuard, Llama-Guard variants,                language interfaces.
+         and system-level controls such as tool restric-
+         tions, do not reliably stop the attack because
+         no single component appears malicious in iso-             into subtasks, routes them to specialized remote
+         lation. These results expose a structural vul-
+                                                                   agents, and aggregates the results, often through
+         nerability in agentic LLM pipelines and mo-
+         tivate defenses that reason over routing and              tool calls or database access. This modular design
+         cross-agent composition. Code is available                is powerful, but it also creates attack surfaces that
+         at https://github.com/UCF-ML-Research/                    single-agent evaluations do not capture (Du, 2025;
+         ConjunctiveAgents.                                        Li et al., 2025a,c; Asthana et al., 2025).
+                                                                      The key security challenge is that behavior in a
+    1    Introduction                                              multi-agent pipeline depends not only on the user
+    Foundation models such as Large Language Mod-                  prompt, but also on segmentation, routing, and
+    els (LLMs) are increasingly deployed as agentic                the hidden wrappers or system prompts of remote
+    systems rather than standalone chat models. In                 agents. As a result, prompt injection can become
+    these systems, multiple specialized agents collabo-            more dangerous in agentic systems, where seem-
+    rate through task decomposition, communication,                ingly benign content may indirectly influence priv-
+    and tool use, enabling stronger performance on                 ileged components or tool-using agents through
+    complex tasks and driving adoption in assistants,              agent-to-agent communication (Wen et al., 2025;
+    copilots, and autonomous workflows (Sidahmed                   Hossain et al., 2025; Triedman et al., 2025).
+    et al., 2024; Roy et al., 2025; Lou et al., 2022b;                We focus on an underexplored supply-chain
+    Hsu et al., 2022; Lou et al., 2022a; Li et al., 2025a).        threat in which remote agents are black boxes to
+       In a typical agentic LLM system, shown in Fig-              the client: their weights, prompts, or wrapper tem-
+    ure 1, a client agent decomposes a user request                plates may be proprietary, externally hosted, or
+                                                             34175
+Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 34175–34191
+                                 July 2-7, 2026 ©2026 Association for Computational Linguistics
+
+===== PDF p.2 =====
+provided by third parties (Boisvert et al., 2025).      user inputs or retrieved content override developer
+In this setting, an attacker does not modify model      intent (Zheng et al., 2022; Greshake et al., 2023;
+weights or the client agent, but tampers with a hid-    Xue et al., 2024; Lou et al., 2024). The threat
+den template inside one remote agent (Mo et al.,        becomes sharper in retrieval-augmented and
+2025). The resulting attack is conjunctive: a trigger   tool-using settings, where untrusted external
+key in the user query and the injected template each    content can steer privileged behavior and enable
+appear benign in isolation, yet together can activate   indirect prompt injection (Wang et al., 2025a).
+harmful behavior only when routing brings them to       Recent work also highlights the tension between
+the same compromised agent (Wang et al., 2025b).        aggressive filtering and usability, showing that
+   This vulnerability is inherently topology-           simple trigger-based defenses can over-reject be-
+dependent. A trigger is effective only if it reaches    nign inputs and degrade normal task performance
+the compromised agent, and different communi-           (Li and Liu, 2025; Lou et al., 2023; Zheng et al.;
+cation structures—such as star, chain, and DAG          Al Ghanim et al., 2023).
+topologies—induce different routing dynamics and
+                                                        Safety in agentic and multi-agent systems. A
+exposure patterns (Yu and Wang, 2010; Wang et al.,
+                                                        growing literature argues that safety results from
+2025c). This also explains why existing defenses
+                                                        single-model chat settings do not directly trans-
+often fail: prompt- and output-level guard mod-
+                                                        fer to agentic systems, where behavior emerges
+els inspect isolated messages, but conjunctive ac-
+                                                        from message passing, tool use, and routing across
+tivation emerges only after cross-agent composi-
+                                                        multiple agents (Yu et al., 2025; Kavathekar et al.,
+tion, when individually benign-looking compo-
+                                                        2025). Multi-agent pipelines introduce additional
+nents align at the compromised agent (Touvron
+                                                        attack surfaces, including delegation boundaries,
+et al., 2023).
+                                                        coordination failures, and topology-dependent ex-
+   In this paper, we study conjunctive prompt
+                                                        posure that changes which components observe
+attacks in multi-agent LLM systems under ex-
+                                                        which information and when (Liang et al., 2025;
+plicit communication topologies. We introduce a
+                                                        Zhu et al., 2025; Xu et al., 2025; Krawiecka and
+topology- and routing-aware attack framework that
+                                                        de Witt, 2025).
+operates purely at the prompt level by optimizing
+trigger placement, template placement, and routing      Jailbreak evaluation and attack metrics. Prior
+bias, without modifying model weights. Across           jailbreak and red-teaming work typically measures
+star, chain, and DAG topologies, we show that           attack success rate (ASR) for a single model in-
+routing-aware optimization substantially strength-      vocation under different prompt strategies and
+ens attacks over non-optimized baselines while          threat models (Ntais, 2025; Rahman et al., 2025;
+maintaining low false activation.                       Al Ghanim et al., 2024). In agentic systems, how-
+   Our contributions are threefold. First, we formal-   ever, success depends not only on whether mali-
+ize a realistic black-box threat model for conjunc-     cious content exists, but also on whether it reaches
+tive prompt attacks in which compromise arises          the relevant component and produces a harmful
+from the interaction between user-side triggers and     downstream effect (Boisvert et al., 2025; Hazan
+a tampered remote-agent template. Second, we de-        et al., 2025). This motivates our four-regime evalu-
+velop a topology- and routing-aware prompt-level        ation (clean, key-only, template-only, both), which
+optimization framework for constructing such at-        treats success as an end-to-end compromise rather
+tacks without changing model weights or the client      than a local refusal failure.
+agent. Third, we show empirically that these at-
+tacks transfer across topologies and backbones,         Guardrails and prompt-injection defenses. A
+while widely used guard models and system-level         parallel line of work proposes detectors, guard
+controls remain poorly matched to the underlying        models, and sanitization schemes for prompt in-
+cross-agent activation mechanism.                       jection (Li and Liu, 2025). Recent results are es-
+                                                        pecially relevant to our setting. First, over-defense
+2   Related Work                                        is a real concern: PIGuard introduces the NotIn-
+                                                        ject benchmark to measure false rejections on be-
+Prompt injection and indirect injection.                nign inputs containing common trigger patterns and
+Prompt injection is commonly framed as a failure        proposes training strategies to reduce such errors
+mode in which adversarial strings embedded in           (Li et al., 2025b). Second, defenses are becom-
+                                                   34176
+
+===== PDF p.3 =====
+ing more agent- and tool-aware: IPIGuard con-            deterministically decomposes x into a sequence of
+strains how indirect instructions propagate through      segments:
+tool dependencies in LLM agents (An et al., 2025),
+                                                                           S
+while mixture-of-encodings defenses separate in-                       x −−→ (s1 , s2 , . . . , sS ),        (1)
+structions from data through transformed external
+inputs (Zhang et al., 2025). These directions moti-      where S denotes the segmentation function and S is
+vate our emphasis on both attack success and false       the number of segments. Segments may correspond
+activation, and on evaluating defenses across com-       to subtasks such as flight search, hotel booking, or
+munication topologies rather than isolated prompts       account-related operations.
+alone.                                                      Each segment si is then routed independently to
+                                                         a remote agent through a stochastic routing mecha-
+Optimization over discrete prompt variables.             nism:
+Optimizing discrete prompt decisions, such as                              ai ∼ R(si ; ρ),                (2)
+trigger placement or template position, is often
+handled through differentiable relaxations such as       where ai ∈ A is the selected agent, A is the set of
+Gumbel-Softmax (Xue et al., 2024; Shah et al.,           remote agents, and ρ is a routing-bias parameter
+2026; Kuśmierczyk and Klami, 2021). Our ap-             controlling how strongly certain segment features
+proach follows this paradigm: we optimize a dif-         influence routing.
+ferentiable objective over discrete placements and
+                                                         Routing Distribution. To make R(s; ρ) concrete
+a routing-bias variable, then decode the learned
+                                                         and reproducible, we instantiate it as a stochastic
+distributions into a concrete black-box attack con-
+                                                         dispatcher that routes each segment either to the
+figuration.
+                                                         compromised agent a⋆ or to a benign agent selected
+Positioning against prior propagation attacks.           uniformly at random.
+Prior multi-hop prompt-propagation attacks fo-              Let Iacc (s) ∈ {0, 1} denote whether segment s
+cus on transmitting a single malicious instruction       is account-sensitive (e.g., contains account-lookup
+across agents until it triggers harmful downstream       semantics), and let Ik (s) ∈ {0, 1} denote whether
+behavior (Tan et al., 2024). Our setting is different.   the trigger key appears in s. We define the routing
+Conjunctive activation requires the alignment of         probability to the compromised agent as
+three conditions: a trigger-bearing segment, rout-
+ing to a specific compromised agent, and a hidden
+                                                                                     Pr[a = a∗ | s] =
+injected template inside that agent. No individ-                                                           (3)
+ual component need appear malicious in isolation.              clip[0,1] α Iacc (s) + ρ Iacc (s) Ik (s) ,
+This dependency on segmentation, routing, and hid-
+den templates distinguishes our setting from prior         where α ∈ [0, 1] is a fixed account-affinity pa-
+propagation-based attacks and highlights a vulner-       rameter capturing the baseline tendency to route
+ability specific to topology-aware multi-agent sys-      account-related requests to privileged agents, and
+tems (Liang et al., 2025; Wang et al., 2025c).           ρ ∈ [0, 1] is the routing bias parameter controlled
+                                                         by the attacker.
+3   Threat Model                                           The remaining probability mass is distributed
+We now formalize the threat model for conjunc-           uniformly over the benign agent set Abenign :
+tive prompt attacks in multi-agent systems. We
+describe the agentic environment, the adversary’s                                     1 − Pr[a = a⋆ | s]
+capabilities and constraints, and the activation con-       Pr[a ∈ Abenign | s] =                        .   (4)
+                                                                                          |Abenign |
+dition under which components that appear benign
+in isolation become harmful only when they align           Intuitively, ρ increases the probability that a key-
+at a compromised agent.                                  bearing, account-sensitive segment is routed to
+                                                         the compromised agent, while α captures realistic
+3.1 Agentic System Model                                 baseline affinity in systems that naturally dispatch
+We consider an agent-to-agent (A2A) LLM system           account-like queries to specialized agents. This
+composed of one client agent and a set of remote         makes R(s; ρ) directly parameterized, concrete,
+agents. Given a user query x ∈ X , the client agent      and reproducible.
+                                                    34177
+
+===== PDF p.4 =====
+optimized
+                                                                                                               blackbox
+                                                                                  template
+
+
+
+                                                                    opti                                                          privileged
+                                                                        m ized
+  Dataset Construction                                                 ke                                                            tool
+                                                                  plac y
+                                                                      eme                                                           access
+                                                                          nt
+                                     Optimal Config θ ∗                                                    Compromised Agent
+                                                                                                                                               Database
+                              (key placement, template slot, ρ)                                             (Injected Template)
+                                                                              Query
+               Four                             optimize                    (contains
+                                                                               key)               y
+             regimes                               θ∗                                           ke
+                         surrogate
+                         objective
+
+
+   Counterpart Model                 Gradient Optimization                                                 Remote LLM Agent                    Database
+                                                                                 Client Agent
+
+
+Figure 2: End-to-end pipeline for conjunctive attack in multi-agent systems. Left: The attacker learns a
+prompt-level configuration θ∗ over key placement, template placement, and routing bias using a differentiable
+counterpart objective. Right: At inference time, a single key-bearing query is routed through the multi-agent system;
+activation occurs only when the key-bearing segment reaches the compromised agent and interacts with the injected
+template. This conjunctive alignment enables privileged behavior (e.g., tool access), while partial conditions remain
+benign.
+
+
+   Once routed, the selected agent ai generates a                                     Crucially, the adversary cannot deterministically
+response using its internal prompt template Tai :                                   choose which agent processes a given segment. All
+                                                                                    assignments are mediated by the routing function
+                       yi = fai (Tai (si )),                            (5)         R, making attack success inherently probabilistic
+where fai is a black-box LLM. Some agents may                                       and topology-dependent.
+have access to external tools or databases, while                                   3.3      Trigger and Template Structure
+others do not (Figure 1).
+                                                                                    The attack relies on two separate components
+3.2 Adversary Capabilities and Constraints                                          whose conjunction is required for activation.
+We assume a constrained but realistic adversary                                     Trigger Key. A discrete trigger key k is inserted
+with the following capabilities:                                                    into exactly one segment. Let j ∈ {1, . . . , S} de-
+   • The adversary fully controls the user input x                                  note the index of the key-bearing segment:
+     and can choose where to place a trigger key
+                                                                                                             sj ← sj ∥ k.                            (6)
+     across the segmented query.
+
+   • Exactly one remote agent a⋆ ∈ A is compro-                                     The key is not meant to look adversarial by itself; it
+     mised through an injected template.                                            serves as one half of a distributed trigger condition.
+
+   • The adversary does not modify model weights,                                   Injected Template. The compromised agent a⋆
+                                                                                                                   (τ )
+     the client agent, or the routing mechanism.                                    contains an injected template Ta⋆ , where τ denotes
+                                                                                    the placement slot:
+   At the same time, the adversary faces two im-
+portant constraints. First, the trigger key is not                                                    τ ∈ {prefix, wrap, suffix}.                    (7)
+intended to look overtly malicious on its own; it
+is designed to appear benign within the user query.                                 The slot determines where the template appears
+Second, the injected template is also intended to                                   relative to the user segment and therefore how
+appear benign or innocuous when viewed in isola-                                    strongly it influences generation. As with the
+tion. Attack success therefore does not come from                                   key, the template need not look malicious when
+any single suspicious component, but from the con-                                  inspected alone; its harmful effect emerges only
+junction of key placement, template presence, and                                   when it interacts with the routed key-bearing seg-
+routing to the compromised agent.                                                   ment.
+                                                                            34178
+
+===== PDF p.5 =====
+Operational Prompt Construction. For re-                  where D is the distribution of user queries and
+producibility, we define the concrete prompt-          the inner expectation is over routing randomness.
+construction operator used by the compromised             This definition is intentionally end-to-end: suc-
+agent. Let si denote the routed user segment and       cess is counted only when the key-bearing segment
+     (τ )
+let Ta⋆ denote the injected template. The final        reaches the compromised agent and the injected
+prompt provided to the backbone LLM is:                template activates there. As a result, ASR distin-
+                                                       guishes true conjunctive compromise from super-
+                                    
+                             (τ )
+           Prompt(si ) = Cτ Ta⋆ , si ,          (8)    ficially alarming but non-activating cases. In par-
+                                                       ticular, the key_only and template_only settings
+  where Cτ is a deterministic string-concatenation     test whether either component causes unintended
+operator defined as:                                   behavior by itself, which should remain rare if the
+                                                       components are genuinely benign in isolation.
+                       (τ )
+          prefix:    Ta⋆ ∥ Header ∥ si ,        (9)    Activation Evidence. To make activation verifi-
+                                (τ )                   able and reproducible, we use a deterministic rule-
+            wrap:    Header ∥ Ta⋆ ∥ si ,       (10)
+                                                       based predicate. Specifically, we reserve a unique
+                                     (τ )
+          suffix:    Header ∥ si ∥ Ta⋆ ,       (11)    marker token (e.g., __ACTIVATED__) that never ap-
+                                                       pears in clean agent outputs. An episode is counted
+   where ∥ denotes literal string concatenation and    as activated if and only if the compromised agent’s
+all formatting tokens (e.g., headers and separators)   raw output contains this marker under exact string
+are fixed in the released implementation. No tool      match. We log routing decisions, the compromised
+policies or client logic are modified; the attack      agent output, and activation flags for every episode.
+operates purely at the prompt-template level.
+                                                       3.6    Evaluation Regimes
+3.4 Conjunctive Activation Condition
+                                                       To isolate conjunctive behavior, we evaluate four
+Attack activation requires the trigger key and the     regimes:
+injected template to meet at the compromised agent.
+Formally, activation occurs if and only if                                      / x, Ta⋆ absent,
+                                                                      clean : k ∈                        (14)
+                                                                key_only : k ∈ x, Ta⋆ absent,          (15)
+  ∃j ∈ {1, . . . , S} s.t. k ∈ sj ∧ aj = a⋆ .
+                                               (12)                            / x, Ta⋆ present,
+                                                             template_only : k ∈                         (16)
+   This condition captures the core conjunctive                        both : k ∈ x, Ta⋆ present.        (17)
+property of our threat model: neither the key alone
+nor the template alone is sufficient, and each may        A successful conjunctive attack should produce
+appear benign when evaluated independently. The        high ASR in the both regime while maintaining
+attack activates only when the key-bearing segment     near-zero ASR in the other regimes. This separa-
+is routed to the compromised agent and interpreted     tion is essential because it verifies that the individ-
+under the injected template. This distinguishes our    ual components remain largely benign in isolation
+setting from standard prompt injection or single-      even though their conjunction is harmful.
+trigger backdoors, where a single prompt instance
+                                                       3.7    Attack Configuration Space
+is often already locally suspicious.
+                                                       The adversary optimizes over the configuration
+3.5 Probabilistic Attack Success
+Let I[·] denote the indicator function. The attack                         θ = (j, τ, ρ),                (18)
+success rate (ASR) under configuration θ is defined
+                                                       where:
+as:
+                   "                                      • j controls key placement across segments,
+                        h
+ ASR(θ) = Ex∼D ER I ∃j : k ∈ sj ∧ aj = a⋆
+                                                          • τ controls template placement within the com-
+                                         #                  promised agent,
+                       (τ )        i
+                    ∧ Ta⋆ activates .
+                                                          • ρ controls routing bias toward key-bearing
+                                               (13)         segments.
+                                                  34179
+
+===== PDF p.6 =====
+Directly optimizing ASR(θ) is infeasible be-              the absence of successful routing. Meanwhile,
+cause the deployed models are black boxes and               λ1 penalizes degenerate solutions that spread
+key/template placements are discrete. In the next           key probability over irrelevant segments, and the
+section, we introduce a differentiable counter-             entropy terms encourage exploration during opti-
+part objective that approximates ASR and enables            mization. Empirically, this objective selectively
+gradient-based optimization over θ.                         increases ASR in the both regime without materi-
+                                                            ally increasing activation in clean, key_only, or
+4    Routing-Aware Counterpart                              template_only settings (Tables 1–2), indicating
+     Optimization                                           that it does not collapse to an always-on template
+4.1 Optimization Challenges                                 behavior.
+
+Directly optimizing the attack success rate ASR(θ)          4.3    Optimization Procedure
+defined in Section 3 is infeasible for three reasons.       We optimize L using gradient descent with temper-
+First, the deployed LLMs and routing logic are              ature annealing under the Gumbel–Softmax relax-
+black boxes, so gradients are unavailable. Second,          ation. After convergence, we recover a discrete
+key placement and template placement are discrete           attack configuration by taking the argmax over
+decisions. Third, routing is stochastic, making ex-         pi and qτ , while retaining the learned value of ρ.
+act estimation of ASR(θ) noisy and expensive. To            The resulting configuration is then evaluated in
+address these challenges, we introduce a differen-          the black-box multi-agent environment. This pro-
+tiable counterpart model that approximates con-             cedure yields a prompt-level attack that increases
+junctive activation as a function of prompt-level           conjunctive activation probability while preserving
+variables and routing bias. Details of the coun-            low false activation in non-conjunctive settings.
+terpart parameterization and the routing/template
+effectiveness terms are provided in Appendix C.4            5     Experimental Setup
+and Appendix C.5.
+                                                            This section describes the experimental setup used
+4.2 Counterpart Attack Objective                            to evaluate the proposed attack pipeline. Model
+                                                            and compute details are provided in Appendix B.
+We model conjunctive attack success through two
+factors: the probability that the key-bearing seg-          5.1    Agentic Environment
+ment reaches the compromised agent, and the prob-
+                                                            We evaluate our approach in a controlled agent-
+ability that the injected template is effective once it
+                                                            to-agent (A2A) environment designed to capture
+arrives. Their product defines the surrogate success
+                                                            core features of real-world agentic LLM systems,
+objective:
+                                                            including prompt segmentation, stochastic routing,
+            d both = Proute · Ptemplate .                   remote agent templates, and tool access. In each ex-
+            ASR                                      (19)
+                                                            periment, a client agent segments a user query into
+    To discourage trivial solutions and false activa-       S segments and routes each segment independently
+tions, we add regularization terms. The full loss           to a set of remote agents. One remote agent is des-
+is:                                                         ignated as compromised and contains an injected
+                                                            template, while all other agents operate with clean
+                         S
+                         X                                  prompts. Remote agents are treated as black-box
+         d both + λ1
+    L = −ASR                   pi (1 − ai ) + λ2 ρ
+                                                     (20)   LLM instances with fixed decoding parameters.
+                         i=1
+                                                               Routing decisions are probabilistic and depend
+       + λ3 Ptemplate − λ4 H(p) − λ5 H(q).                  on both segment content and the routing-bias pa-
+                                                            rameter ρ, consistent with the threat model in Sec-
+  where H(·) denotes entropy and λk are hyperpa-
+                                                            tion 3. This setup isolates the effect of prompt-level
+rameters controlling the trade-off between attack
+                                                            optimization without modifying model weights
+success, false-activation penalties, and exploration.
+                                                            or client-side logic. For each prompt configura-
+Role of the Ptemplate Term. The term                        tion, we run 50 episodes. In each episode, agents
++λ3 Ptemplate encourages the model to favor more            are sampled from a pool of 20 role descriptions,
+effective template placements, but only through the         and one agent is designated as compromised. We
+                        d both = Proute · Ptemplate .
+conjunctive surrogate ASR                                   also evaluate transferability on a larger instruction-
+It does not independently reward activation in              tuned backbone (Llama-4-Scout-17B-16E-Instruct)
+                                                       34180
+
+===== PDF p.7 =====
+and a closed-source model (GPT-5-mini); detailed          Model          Top         Before Optimization (Vanilla)
+results appear in Appendix C.8.                                                  C        K          T         B
+                                                          Gemma-2B       Star 0.0 0.0↑ (0.1) 0.1↑ (0.1) 0.2↑ (0.1)
+5.2 Communication Topologies                                             Chain 0.0 0.0↑ (0.2) 0.1↑ (0.1) 0.1↑ (0.1)
+                                                                         DAG 0.0 0.1↓ (0.1) 0.2↑ (0.1) 0.4↓ (0.1)
+We consider three communication topologies com-
+monly used in agentic LLM systems: star, chain,           Mistral-7B     Star 0.0 0.0↑ (0.2) 0.2↑ (0.1) 0.4↓ (0.1)
+                                                                         Chain 0.0 0.0↑ (0.1) 0.0↑ (0.1) 0.4↓ (0.2)
+and directed acyclic graph (DAG). In the star topol-                     DAG 0.0 0.1↑ (0.1) 0.2↓ (0.1) 0.1↑ (0.1)
+ogy, the client agent routes all segments directly to     LLaMA3-8B Star 0.0 0.0↑ (0.2) 0.1↑ (0.1) 0.2↑ (0.1)
+remote agents. In the chain topology, segments are                  Chain 0.0 0.1↓ (0.1) 0.0↑ (0.2) 0.4↓ (0.1)
+processed sequentially through a linear sequence of                 DAG 0.0 0.1↑ (0.1) 0.2↓ (0.1) 0.4↓ (0.2)
+agents. In the DAG topology, segments propagate
+                                                         Table 1: Attack success rates (ASR) before optimiza-
+through a directed acyclic graph of agents. These        tion (baseline). C, K, T, and B denote clean, key-only,
+topologies induce different routing dynamics be-         template-only, and both-trigger regimes. Upward arrows
+cause routing uncertainty compounds differently          denote rare false-positive activations, while downward
+across agents, which directly affects the probability    arrows denote downward deviation due to stochastic
+that a key-bearing segment reaches the compro-           routing effects. Arrow annotations indicate rare non-
+mised agent. For each topology, routing policies         conjunctive activations observed across runs but are not
+are held fixed throughout evaluation to isolate the      counted as successful attacks in ASR.
+effect of prompt-level optimization.
+
+5.3 Attack Configurations
+                                                         6     Results
+We evaluate four regimes defined by the presence         Table 1 reports attack success rates (ASR) across
+or absence of the attack components:                     models, communication topologies, and optimiza-
+                                                         tion levels before optimization, while Table 2 re-
+   • clean: no trigger key and no injected tem-          ports the corresponding results after optimization.
+     plate,                                              For each configuration, we measure ASR under
+                                                         four regimes (clean, key_only, template_only,
+   • key_only: trigger key present, template ab-
+                                                         and both). We additionally summarize topology-
+     sent,
+                                                         aggregated robustness using ASRmin , ASRmean ,
+   • template_only: template present, trigger            and ASRmax .
+     key absent,                                            Across all evaluated models, while baseline ASR
+                                                         is generally low, DAG topologies occasionally ex-
+   • both: trigger key and template are both             hibit higher success due to compounded routing
+     present.                                            paths, highlighting topology sensitivity even before
+                                                         optimization. In the absence of optimization, con-
+  We count an attack as successful only when
+                                                         junctive activation (both) succeeds sporadically,
+conjunctive activation occurs at the compromised
+                                                         with ASRmean remaining below 0.35 for all models
+agent, as defined in Section 3. Partial activations in
+                                                         and ASRmin frequently close to zero. This indi-
+the other regimes are treated as false positives.
+                                                         cates that unoptimized attacks fail to generalize
+5.4 Optimization Levels                                  across routing structures.
+To isolate the contribution of different prompt-level       After optimization, attack success increases sub-
+variables, we consider three optimization levels:        stantially and consistently. For all three backbones,
+                                                         the optimized configuration raises ASRmax to 1.0
+   • Routing: only routing bias ρ is optimized,          and significantly increases ASRmin , demonstrat-
+                                                         ing that the attack becomes effective across star,
+   • Routing+Key: routing bias and key place-            chain, and DAG topologies rather than relying on
+     ment are optimized,                                 favorable routing events.
+   • Full: routing bias, key placement, and tem-         6.1    Effect of Optimization Levels
+     plate placement are all optimized.
+                                                         The impact of optimization is concentrated al-
+  All optimization is performed using the proce-         most entirely in the conjunctive regime (both).
+dure described in Section 4.                             As shown in Table 2, optimizing routing alone
+                                                     34181
+
+===== PDF p.8 =====
+Model        Topology                 routing                                 routing+key                                                            full
+                          C       K          T           B          C      K                T                B               C            K                   T               B
+  Gemma-2B     Star       0.0 0.2↓ (0.2) 0.1↓ (0.1) 0.4↑ (0.1) 0.0 0.0↑ (0.1) 0.2↓ (0.1) 0.6↑ (0.1) 0.0 0.1↑ (0.1) 0.1↑ (0.1) 0.6↑ (0.1)
+               Chain      0.0 0.1↓ (0.1) 0.2↓ (0.1) 0.6↓ (0.1) 0.0 0.2↓ (0.1) 0.1↑ (0.1) 0.3↓ (0.1) 0.0 0.0↑ (0.1) 0.4↓ (0.1) 0.8↓ (0.1)
+               DAG        0.0 0.0↑ (0.1) 0.2↓ (0.1) 0.4↓ (0.1) 0.0 0.0↑ (0.1) 0.1↑ (0.1) 0.4↓ (0.1) 0.0 0.3↓ (0.1) 0.5↓ (0.2) 1.0↓ (0.1)
+  Mistral-7B   Star       0.0 0.1↓ (0.1) 0.2↓ (0.2) 0.6↓ (0.1) 0.0 0.0↑ (0.1) 0.3↓ (0.1) 0.4↓ (0.1) 0.0 0.2↓ (0.1) 0.4↑ (0.1) 0.9↓ (0.1)
+               Chain      0.0 0.0↑ (0.1) 0.1↑ (0.1) 0.8↓ (1.0) 0.0 0.1↓ (0.1) 0.4↑ (0.1) 1.0↓ (2.0) 0.0 0.1↓ (0.1) 0.5↑ (0.1) 1.0↓ (0.1)
+               DAG        0.0 0.1↓ (0.1) 0.1↑ (0.1) 0.4↑ (0.1) 0.0 0.0↑ (0.1) 0.2↓ (0.1) 0.8↓ (0.1) 0.0 0.1↓ (0.1) 0.4↓ (0.1) 1.0↓ (0.2)
+  LLaMA3-8B Star          0.0 0.2↓ (0.2) 0.1↑ (0.1) 0.3↑ (0.1) 0.0 0.0↑ (0.1) 0.2↓ (0.1) 0.6↓ (0.1) 0.0 0.1↓ (0.1) 0.4↓ (0.1) 0.7↓ (0.1)
+            Chain         0.0 0.0↑ (0.1) 0.1↑ (0.1) 0.5↑ (0.1) 0.0 0.0↑ (0.1) 0.1↑ (0.1) 0.6↓ (0.1) 0.0 0.2↓ (0.2) 0.2↓ (0.1) 0.8↓ (0.1)
+            DAG           0.0 0.0↑ (0.1) 0.1↑ (0.1) 0.4↑ (0.1) 0.0 0.1↓ (0.1) 0.3↓ (0.1) 0.8↓ (0.1) 0.0 0.2↓ (0.2) 0.6↓ (0.3) 1.0↓ (0.1)
+
+
+Table 2: Attack success rates (ASR) across models, communication topologies, and optimization levels after
+optimization. For each model and topology, we report scenario-wise ASR under four regimes: clean, key-only,
+template-only, and both (conjunctive trigger). We report ASR under three optimization levels: routing-only,
+routing+key placement, and full optimization. Across models, full optimization substantially increases ASR in the
+conjunctive regime while keeping false activations near zero in all non-conjunctive settings.
+
+
+Model            Before (Baseline)            After (full)                                                            Vanilla                  Full Optimization
+               ASR-m ASR ASR-M ASR-m ASR ASR-M
+                                                                                            100
+Gemma-2B   0.10           0.23   0.40      0.40   0.60       1.00
+Mistral-7B 0.10           0.30   0.40      0.40   0.60       1.00
+LLaMA3-8B 0.20            0.33   0.40      0.30   0.65       1.00                                                                                        63
+                                                                                 F1-Score
+
+                                                                                                                                           58                            55
+
+Table 3: Aggregated ASR over topologies. ASR-m /
+                                                                                             50                         40
+                                                                                                       30
+ASR / ASR-M are the min / mean / max of the both-
+trigger ASR across Star, Chain, and DAG. “Before”                                                                                                 10                10            12
+uses the Baseline both ASR. “After” uses the full opti-                                                           0                  0
+
+mization both ASR.                                                                              0
+
+                                                                                                        6M                  B               8B                B              B
+                                                                                                      -8                -1                2-             -8               -7
+                                                                                                  rd                -3                -               -3                rd
+(routing) produces only modest improvements,                                                    ua               ard              ard              ard               ua
+                                                                                            G                 u                  u                u               a-G
+especially outside the star topology.                                                 pt                   a-G           a-G                   a-G        am
+                                                                                   rom              lam               lam                lam           Ll
+                                                                                 P                L               L                  L
+   Larger gains arise when routing bias is combined
+with optimized key placement (routing+key),                                Figure 3: Detection efficacy of different safety mecha-
+which increases the likelihood that the key-bearing                        nisms against our vanilla and full (both) optimization
+segment reaches the compromised agent under re-                            pipeline.
+alistic routing noise. Full optimization further sta-
+bilizes performance across topologies, yielding the
+highest ASRmin and ASRmean values for all mod-                             topology dependence rather than a uniformly vul-
+els. Additional discussion of routing bias appears                         nerable structure. Additional discussion of topol-
+in Appendix C.2. Importantly, optimization does                            ogy effects is provided in Appendix C.3.
+not meaningfully increase success in the clean,                               Optimization narrows this gap. The increase in
+key_only, or template_only regimes, confirm-                               ASRmin after optimization indicates that routing-
+ing that the learned parameters selectively amplify                        aware placement reduces the dependency on favor-
+conjunctive triggering rather than inducing broad                          able communication structure. Nevertheless, resid-
+misbehavior. Further ablation details are provided                         ual differences remain, suggesting that topology-
+in Appendix C.                                                             aware evaluation is essential for accurately charac-
+                                                                           terizing multi-agent vulnerabilities.
+6.2 Topology Sensitivity
+                                                                           6.3          Model-Level Trends
+The role of topology is most evident in the base-
+line setting. Without optimization, attack success                         As shown in Table 3, while quantitative differences
+varies substantially across communication topolo-                          exist across backbones, optimization effects dom-
+gies: star, chain, and DAG structures each dominate                        inate model-specific variation. Larger models ex-
+under different model backbones, indicating strong                         hibit slightly higher baseline ASR in some settings,
+                                                                        34182
+
+===== PDF p.9 =====
+but all models converge to similarly high post-           gies, optimization consistently increases worst-
+optimization ASRmax and comparable ASRmean                case attack success while keeping false activations
+values. This pattern suggests that the observed vul-      near zero in clean and partially triggered regimes,
+nerability arises primarily from system-level agent       confirming that the individual components remain
+interactions and routing dynamics rather than id-         largely benign on their own. Our topology-aware
+iosyncratic properties of individual language mod-        evaluation exposes a critical blind spot in current
+els.                                                      safety assessments: vulnerabilities may appear be-
+                                                          nign under local inspection or under some commu-
+6.4 Safety Mechanism Efficacy                             nication structures, yet become reliably exploitable
+This experiment evaluates how well established            under others. Aggregated metrics such as mini-
+safety mechanisms detect conjunctive attacks un-          mum, mean, and maximum attack success rates
+der multi-agent routing, and how prompt-level op-         therefore provide a more faithful characterization
+timization affects their detectability. We consider       of system-level risk than average-case evaluation
+a representative set of widely deployed defenses,         alone. Existing defenses also fail to fully mitigate
+including PromptGuard-86M and multiple variants           these attacks because they typically inspect isolated
+of Llama-Guard (3-1B, 2-8B, 3-8B, and 7B), ap-            prompts or outputs rather than cross-agent con-
+plied either as pre-routing or post-generation filters.   junctive conditions. Overall, these findings high-
+Detection performance is measured using F1-score          light the need for multi-agent-specific threat mod-
+in the both regime, aggregated across star, chain,        els, evaluation protocols, and defenses that reason
+and DAG topologies.                                       over routing, provenance, and inter-agent compo-
+   Figure 3 compares detection performance under          sition. As LLM-based systems increasingly rely
+two attacker regimes: Vanilla attacks (no optimiza-       on decentralized reasoning and agent collaboration,
+tion) and Full Optimization (learned routing bias,        safety mechanisms must account for vulnerabilities
+key placement, and template placement). Under             that emerge only through prompt propagation and
+the Vanilla regime, most safety mechanisms de-            routing-dependent conjunction.
+tect a non-trivial fraction of attacks. Larger Llama-
+Guard variants achieve the highest F1-scores, while       Limitations
+smaller models and PromptGuard exhibit more lim-
+                                                          Our study has several limitations. First, our rout-
+ited detection capability. Under Full Optimization,
+                                                          ing model is intentionally abstract. We param-
+detection performance degrades sharply across all
+                                                          eterize routing bias through a probabilistic dis-
+defenses. Even the strongest classifier, Llama-
+                                                          patcher rather than a specific production-grade
+Guard-3-8B, experiences a substantial drop in F1-
+                                                          router, which allows us to isolate the effect of
+score, while smaller models collapse to near-zero
+                                                          prompt-level manipulation in a model-agnostic
+detection. System-level defense results are reported
+                                                          way. However, real deployments may use classifier-
+in Table 7.
+                                                          based dispatch, learned policies, retrieval-driven
+                                                          orchestration, or system-specific heuristics. As a
+7   Conclusion
+                                                          result, our findings should be interpreted as evi-
+We study conjunctive prompt attacks in multi-agent        dence of a structural vulnerability class rather than
+LLM systems and show that safety behavior ob-             a claim about any single deployed routing imple-
+served in single-agent settings does not reliably         mentation.
+transfer to agent-to-agent deployments. The defin-           Second, our threat model is deliberately narrow.
+ing property of these attacks is conjunctive acti-        We study a single compromised remote agent and
+vation: the trigger key in the user query and the         a prompt-level supply-chain compromise, while
+hidden template in the compromised agent can each         assuming no modification of model weights, no
+appear benign in isolation, yet their conjunction be-     client-agent compromise, and no direct attacker
+comes harmful once routing brings them together           control over routing. This scope is sufficient to
+at the same agent. We show that optimizing prompt-        show that conjunctive vulnerabilities can arise even
+level variables alone, without modifying client           under constrained conditions, but it does not cover
+agents or internal routing logic, can substantially       stronger adversaries such as multiple colluding
+increase attack success against a compromised re-         agents, adaptive templates, or attacks that evolve
+mote agent. Across star, chain, and DAG topolo-           over long interaction horizons.
+                                                     34183
+
+===== PDF p.10 =====
+Third, our evaluation is conducted in a controlled    to securing agent-based AI systems.
+experimental environment with a limited set of
+backbones, topologies, and defenses. Although
+this setup is appropriate for isolating conjunctive      References
+activation, it does not fully capture the diversity of   Mansour Al Ghanim, Saleh Almohaimeed, Mengxin
+production agentic systems, including richer tool         Zheng, Yan Solihin, and Qian Lou. 2024. Jail-
+ecosystems, longer workflows, and deployment-             breaking llms with arabic transliteration and arabizi.
+specific safeguards. In addition, our activation cri-     In Proceedings of the 2024 conference on empiri-
+                                                          cal methods in natural language processing, pages
+terion relies on a deterministic marker-based pred-       18584–18600.
+icate, which provides a reproducible operational
+definition of attack success but does not exhaust        Mansour Al Ghanim, Muhammad Santriaji, Qian Lou,
+all possible forms of downstream harm. Extending          and Yan Solihin. 2023. Trojbits: A hardware aware
+the evaluation to concrete production-style routers,      inference-time attack on transformer-based language
+                                                          models. In ECAI 2023, pages 60–68. IOS Press.
+broader system designs, and more behaviorally
+grounded harm metrics is an important direction          Hengyu An, Jinghuai Zhang, Tianyu Du, Chunyi Zhou,
+for future work.                                           Qingming Li, Tao Lin, and Shouling Ji. 2025. Ip-
+                                                           iguard: A novel tool dependency graph-based de-
+                                                           fense against indirect prompt injection in llm agents.
+Ethical Considerations                                     Preprint, arXiv:2508.15310.
+As large language models are increasingly de-            Shubhi Asthana, Bing Zhang, Chad DeLuca, Ruchi
+ployed as multi-agent systems in real-world appli-         Mahindru, and Hima Patel. 2025. Stride: A sys-
+cations, ensuring their security and robustness is a       tematic framework for selecting ai modalities –
+critical ethical concern. This work is motivated by        agentic ai, ai assistants, or llm calls. Preprint,
+                                                           arXiv:2512.02228.
+the need to understand systemic vulnerabilities that
+arise from agent-to-agent communication, prompt          Léo Boisvert, Abhay Puri, Chandra Kiran Reddy Evuru,
+propagation, and decentralized decision-making.            Nicolas Chapados, Quentin Cappart, Alexandre La-
+By identifying how coordinated prompt-level ma-            coste, Krishnamurthy Dj Dvijotham, and Alexandre
+                                                           Drouin. 2025. Malice in agentland: Down the rabbit
+nipulations can bypass existing safety mechanisms,         hole of backdoors in the ai supply chain. Preprint,
+our goal is to inform the design of more robust            arXiv:2510.05159.
+defenses and evaluation practices for agentic LLM
+systems.                                                 Pengfei Du. 2025. Omninova:a general multimodal
+                                                           agent framework. Preprint, arXiv:2503.20028.
+   We acknowledge that the attack mechanisms
+studied in this paper could be misused if applied        Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri,
+irresponsibly. To mitigate this risk, all experiments      Abhinav Pandey, Abhishek Kadian, Ahmad Al-
+were conducted in controlled, offline environments         Dahle, Aiesha Letman, Akhil Mathur, Alan Schel-
+using simulated agent pipelines and open-source            ten, Alex Vaughan, Amy Yang, Angela Fan, Anirudh
+                                                           Goyal, Anthony Hartshorn, Aobo Yang, Archi Mi-
+models. We did not evaluate or deploy these tech-          tra, Archie Sravankumar, Artem Korenev, Arthur
+niques against real-world systems, proprietary ser-        Hinsvark, and 542 others. 2024. The llama 3 herd of
+vices, or production deployments. Furthermore,             models. Preprint, arXiv:2407.21783.
+sensitive trigger tokens and template contents have
+                                                         Kai Greshake, Sahar Abdelnabi, Shailesh Mishra,
+been anonymized and abstracted in both code and
+                                                           Christoph Endres, Thorsten Holz, and Mario Fritz.
+presentation to prevent direct misuse.                     2023. Not what you’ve signed up for: Compromising
+   Our intent is to contribute to the advancement          real-world llm-integrated applications with indirect
+of AI safety research by highlighting previously           prompt injection. Preprint, arXiv:2302.12173.
+underexplored risks specific to multi-agent settings.
+                                                         Itay Hazan, Yael Mathov, Guy Shtar, Ron Bitton, and It-
+We emphasize that insights into adversarial behav-          sik Mantin. 2025. Astra: Agentic steerability and risk
+ior should be accompanied by proactive defense              assessment framework. Preprint, arXiv:2511.18114.
+strategies, and we strongly advocate for respon-
+sible disclosure, ethical experimentation, and the       S M Asif Hossain, Ruksat Khan Shayoni, Mohd Ruhul
+                                                           Ameen, Akif Islam, M. F. Mridha, and Jung-
+development of topology-aware safeguards. We               pil Shin. 2025.      A multi-agent llm defense
+hope this work encourages the community to adopt           pipeline against prompt injection attacks. Preprint,
+more rigorous and ethically grounded approaches            arXiv:2509.14285.
+                                                    34184
+
+===== PDF p.11 =====
+Yen-Chang Hsu, Ting Hua, Sungen Chang, Qian Lou,          Xiao Liu, Hao Yu, Hanchen Zhang, Yifan Xu, Xuanyu
+  Yilin Shen, and Hongxia Jin. 2022. Language model         Lei, Hanyu Lai, Yu Gu, Hangliang Ding, Kaiwen
+  compression with weighted low-rank factorization.         Men, Kejuan Yang, Shudan Zhang, Xiang Deng, Ao-
+  In International Conference on Learning Representa-       han Zeng, Zhengxiao Du, Chenhui Zhang, Sheng
+  tions (ICLR 2022).                                        Shen, Tianjun Zhang, Yu Su, Huan Sun, and 3 others.
+                                                            2024. Agentbench: Evaluating llms as agents. In In-
+Hakan Inan, Kartikeya Upasani, Jianfeng Chi, Rashi          ternational Conference on Learning Representations,
+  Rungta, Krithika Iyer, Yuning Mao, Michael                volume 2024, pages 52989–53046.
+  Tontchev, Qing Hu, Brian Fuller, Davide Testuggine,
+  and Madian Khabsa. 2023. Llama guard: Llm-based         Qian Lou, Yen-Chang Hsu, Burak Uzkent, Ting Hua,
+  input-output safeguard for human-ai conversations.        Yilin Shen, and Hongxia Jin. 2022a. Lite-mdetr: A
+  Preprint, arXiv:2312.06674.                               lightweight multi-modal detector. In IEEE Confer-
+                                                            ence on Computer Vision and Pattern Recognition
+Albert Q. Jiang, Alexandre Sablayrolles, Arthur Men-        (CVPR 2022).
+  sch, Chris Bamford, Devendra Singh Chaplot, Diego
+  de las Casas, Florian Bressand, Gianna Lengyel, Guil-   Qian Lou, Ting Hua, Yen-Chang Hsu, Yilin Shen, and
+  laume Lample, Lucile Saulnier, Lélio Renard Lavaud,       Hongxia Jin. 2022b. Dictformer: Tiny transformer
+  Marie-Anne Lachaux, Pierre Stock, Teven Le Scao,          with shared dictionary. In International Conference
+  Thibaut Lavril, Thomas Wang, Timothée Lacroix,            on Learning Representations (ICLR 2022).
+  and William El Sayed. 2023. Mistral 7b. Preprint,
+                                                          Qian Lou, Xin Liang, Jiaqi Xue, Yancheng Zhang, Rui
+  arXiv:2310.06825.
+                                                            Xie, and Mengxin Zheng. 2024. Cr-utp: Certified ro-
+                                                            bustness against universal text perturbations on large
+Ishan Kavathekar, Hemang Jain, Ameya Rathod, Ponnu-         language models. In Findings of the Association for
+   rangam Kumaraguru, and Tanuja Ganu. 2025. Tamas:         Computational Linguistics: ACL 2024, pages 9863–
+   Benchmarking adversarial risks in multi-agent llm        9875.
+   systems. Preprint, arXiv:2511.05269.
+                                                          Qian Lou, Yepeng Liu, and Bo Feng. 2023. Trojtext:
+Klaudia Krawiecka and Christian Schroeder de Witt.          Test-time invisible textual trojan insertion. arXiv
+  2025. Extending the owasp multi-agentic system            preprint arXiv:2303.02242.
+  threat modeling guide: Insights from multi-agent
+  security research. Preprint, arXiv:2508.09815.          Meta. 2024. Llama prompt guard 2: Model cards and
+                                                           prompt formats.
+Tomasz Kuśmierczyk and Arto Klami. 2021. Re-
+  liable categorical variational inference with mix-      Kanghua Mo, Li Hu, Yucheng Long, and Zhihao
+  ture of discrete normalizing flows.       Preprint,       Li. 2025. Attractive metadata attack: Inducing
+  arXiv:2006.15568.                                         llm agents to invoke malicious tools. Preprint,
+                                                            arXiv:2508.02110.
+Boyi Li, Zhonghan Zhao, Der-Horng Lee, and Gaoang
+  Wang. 2025a. Adaptive graph pruning for multi-          Pavlos Ntais. 2025. Jailbreak mimicry: Automated
+  agent communication. Preprint, arXiv:2506.02951.          discovery of narrative-based jailbreaks for large lan-
+                                                            guage models. Preprint, arXiv:2510.22085.
+Hao Li and Xiaogeng Liu. 2025. Injecguard: Bench-
+  marking and mitigating over-defense in prompt injec-    Salman Rahman, Liwei Jiang, James Shiffer, Genglin
+  tion guardrail models. Preprint, arXiv:2410.22770.        Liu, Sheriff Issaka, Md Rizwan Parvez, Hamid
+                                                            Palangi, Kai-Wei Chang, Yejin Choi, and Saadia
+                                                            Gabriel. 2025. X-teaming: Multi-turn jailbreaks
+Hao Li, Xiaogeng Liu, Ning Zhang, and Chaowei Xiao.
+                                                            and defenses with adaptive multi-agents. Preprint,
+  2025b. PIGuard: Prompt injection guardrail via mit-
+                                                            arXiv:2504.13203.
+  igating overdefense for free. In Proceedings of the
+  63rd Annual Meeting of the Association for Compu-       Aniruddha Roy, Pretam Ray, Abhilash Nandy, So-
+  tational Linguistics (Volume 1: Long Papers), pages       mak Aditya, and Pawan Goyal. 2025. Refine-af:
+  30420–30437, Vienna, Austria. Association for Com-        A task-agnostic framework to align language mod-
+  putational Linguistics.                                   els via self-generated instructions using reinforce-
+                                                            ment learning from automated feedback. Preprint,
+Yang Li, Siqi Ping, Xiyu Chen, Xiaojian Qi, Zigan           arXiv:2505.06548.
+  Wang, Ye Luo, and Xiaowei Zhang. 2025c. Agent-
+  git: A version control framework for reliable and       Rushi Shah, Mingyuan Yan, Michael Curtis Mozer, and
+  scalable llm-powered multi-agent systems. Preprint,       Dianbo Liu. 2026. Improving discrete optimisation
+  arXiv:2511.00628.                                         via decoupled straight-through estimator. Preprint,
+                                                            arXiv:2410.13331.
+Ruichao Liang, Le Yin, Jing Chen, Cong Wu, Xiaoyu
+  Zhang, Huangpeng Gu, Zijian Zhang, and Yang             Hakim Sidahmed, Samrat Phatale, Alex Hutcheson,
+  Liu. 2025. Tipping the dominos: Topology-aware            Zhuonan Lin, Zhang Chen, Zac Yu, Jarvis Jin, Simral
+  multi-hop attacks on llm-based multi-agent systems.       Chaudhary, Roman Komarytsia, Christiane Ahlheim,
+  Preprint, arXiv:2512.04129.                               Yonghao Zhu, Bowen Li, Saravanan Ganesh, Bill
+                                                     34185
+
+===== PDF p.12 =====
+Byrne, Jessica Hoffmann, Hassan Mansoor, Wei Li,          Zijie Xu, Minfeng Qi, Shiqing Wu, Lefeng Zhang, Qi-
+  Abhinav Rastogi, and Lucas Dixon. 2024. Parameter            wen Wei, Han He, and Ningran Li. 2025. The trust
+  efficient reinforcement learning from human feed-            paradox in llm-based multi-agent systems: When col-
+  back. Preprint, arXiv:2403.10704.                            laboration becomes a security vulnerability. Preprint,
+                                                               arXiv:2510.18563.
+Zhen Tan, Chengshuai Zhao, Raha Moraffah, Yifan
+  Li, Yu Kong, Tianlong Chen, and Huan Liu. 2024.           Jiaqi Xue, Mengxin Zheng, Ting Hua, Yilin Shen,
+  The wolf within: Covert injection of malice into             Yepeng Liu, Ladislau Bölöni, and Qian Lou. 2024.
+  mllm societies via an mllm operative. Preprint,              Trojllm: A black-box trojan prompt attack on large
+  arXiv:2402.14859.                                            language models. Advances in Neural Information
+                                                               Processing Systems, 36.
+Gemma Team, Morgane Riviere, Shreya Pathak,
+  Pier Giuseppe Sessa, Cassidy Hardin, Surya Bhupati-       Junyan Yu and Long Wang. 2010. Group consensus in
+  raju, Léonard Hussenot, Thomas Mesnard, Bobak               multi-agent systems with switching topologies and
+  Shahriari, Alexandre Ramé, Johan Ferret, Peter Liu,         communication delays. Systems & Control Letters,
+  Pouya Tafti, Abe Friesen, Michelle Casbon, Sabela           59(6):340–348.
+  Ramos, Ravin Kumar, Charline Le Lan, Sammy
+  Jerome, and 179 others. 2024. Gemma 2: Improving          Miao Yu, Shilong Wang, Guibin Zhang, Junyuan Mao,
+  open language models at a practical size. Preprint,         Chenlong Yin, Qijiong Liu, Kun Wang, Qingsong
+  arXiv:2408.00118.                                           Wen, and Yang Wang. 2025. NetSafe: Exploring the
+                                                              topological safety of multi-agent system. In Find-
+Llama Team. 2024. Meta llama guard 2. https:                  ings of the Association for Computational Linguis-
+  //github.com/meta-llama/PurpleLlama/blob/                   tics: ACL 2025, pages 2905–2938, Vienna, Austria.
+  main/Llama-Guard2/MODEL_CARD.md.                            Association for Computational Linguistics.
+
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-          Ruiyi Zhang, David Sullivan, Kyle Jackson, Pengtao
+  bert, Amjad Almahairi, Yasmine Babaei, Nikolay              Xie, and Mei Chen. 2025. Defense against prompt
+  Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti          injection attacks via mixture of encodings. In Pro-
+  Bhosale, Dan Bikel, Lukas Blecher, Cristian Canton          ceedings of the 2025 Conference of the Nations of
+  Ferrer, Moya Chen, Guillem Cucurull, David Esiobu,          the Americas Chapter of the Association for Com-
+  Jude Fernandes, Jeremy Fu, Wenyin Fu, and 49 oth-           putational Linguistics: Human Language Technolo-
+  ers. 2023. Llama 2: Open foundation and fine-tuned          gies (Volume 2: Short Papers), pages 244–252, Al-
+  chat models. Preprint, arXiv:2307.09288.                    buquerque, New Mexico. Association for Computa-
+                                                              tional Linguistics.
+Harold Triedman, Rishi Jha, and Vitaly Shmatikov.
+  2025. Multi-agent systems execute arbitrary mali-         Mengxin Zheng, Qian Lou, and Lei Jiang. 2022. Trojvit:
+  cious code. Preprint, arXiv:2503.12188.                    Trojan insertion in vision transformers. CVPR 2023.
+
+Rui Wang, Junda Wu, Yu Xia, Tong Yu, Ruiyi Zhang,           Mengxin Zheng, Jiaqi Xue, Xun Chen, Yanshan Wang,
+  Ryan Rossi, Subrata Mitra, Lina Yao, and Julian            Qian Lou, and Lei Jiang. Trojfsl: Trojan insertion in
+  McAuley. 2025a. Cacheprune: Neural-based attribu-          few shot prompt learning.
+  tion defense against indirect prompt injection attacks.   Pengyu Zhu, Lijun Li, Yaxing Lyu, Li Sun, Sen Su, and
+  Preprint, arXiv:2504.21228.                                 Jing Shao. 2025. Collaborative shadows: Distributed
+                                                              backdoor attacks in llm-based multi-agent systems.
+Shenao Wang, Yanjie Zhao, Zhao Liu, Quanchen Zou,
+                                                              Preprint, arXiv:2510.11246.
+  and Haoyu Wang. 2025b. Sok: Understanding vul-
+  nerabilities in the large language model supply chain.
+  Preprint, arXiv:2502.12497.                               A    Use of Generative AI
+
+Shilong Wang, Guibin Zhang, Miao Yu, Guancheng              To improve clarity and readability, we used LLMs
+  Wan, Fanci Meng, Chongye Guo, Kun Wang, and               solely for language editing. Their use was limited
+  Yang Wang. 2025c. G-safeguard: A topology-guided          to proofreading, grammatical correction, and minor
+  security lens and treatment on LLM-based multi-           stylistic refinement, comparable to conventional
+  agent systems. In Proceedings of the 63rd Annual
+  Meeting of the Association for Computational Lin-         grammar checkers or dictionaries. The LLMs did
+  guistics (Volume 1: Long Papers), pages 7261–7276,        not contribute to the development of scientific con-
+  Vienna, Austria. Association for Computational Lin-       tent, ideas, or results, and their use aligns with
+  guistics.                                                 standard manuscript preparation practices.
+Yuxin Wen, Arman Zharmagambetov, Ivan Evti-
+  mov, Narine Kokhlikyan, Tom Goldstein, Kamalika           B    Experimental Settings
+  Chaudhuri, and Chuan Guo. 2025. Rl is a hammer
+  and llms are nails: A simple reinforcement learn-
+                                                            Compute. We utilize multiple NVIDIA GPUs
+  ing recipe for strong prompt injection. Preprint,         (e.g., GTX 1080 Ti class) and run experiments
+  arXiv:2510.04885.                                         sequentially across configurations.
+                                                       34186
+
+===== PDF p.13 =====
+Models and Defenses. We evaluate three                   Algorithm 1 Routing-Aware Counterpart Opti-
+instruction-tuned LLM backbones - Gemma-2B               mization
+(Team et al., 2024), Mistral-7B (Jiang et al., 2023),    Input: Number of segments S, account-affinity
+and LLaMA3-8B (Grattafiori et al., 2024) and as-                  vector a, steps T
+sess robustness using PromptGuard-86M (Meta,             Output: Optimized configuration θ∗
+2024) and multiple Llama-Guard variants (3-1B,           Initialize logits α, β, γ for t = 1 to T do
+2-8B, 3-8B, 7B) (Inan et al., 2023; Team, 2024;              Sample p ← GumbelSoftmax(α) Sample
+Grattafiori et al., 2024). Together, these archi-              q ← GumbelSoftmax(β) Compute ρ ←
+tectures cover diverse model scales and training               σ(γ) Compute loss L using Eq. (16) Update
+paradigms, allowing us to rigorously evaluate the              α, β, γ via gradient descent
+applicability of our attack. We employ greedy de-        end
+coding with a fixed maximum generation length,           Return θ∗ = (arg maxi pi , arg maxτ qτ , ρ)
+and all experiments are conducted without any fine-
+tuning or parameter updates.
+                                                         agentic systems, routing is often implemented us-
+C     Ablation: What Is Being Optimized                  ing lightweight classifiers, keyword rules, or se-
+      and Why It Matters                                 mantic similarity models. These mechanisms are
+A central contribution of this work is clarifying that   inherently sensitive to prompt content.
+effective attacks against multi-agent LLM systems           From the attacker’s perspective, optimization
+do not require modifying client agents or internal       over ρ corresponds to finding prompt configura-
+routing logic. Instead, optimization operates en-        tions that increase the probability that a key-bearing
+tirely at the prompt and remote-agent interface.         segment reaches a specific remote agent with ele-
+   Concretely, the attacker optimizes three prompt-      vated privileges. Crucially, this does not assume
+level variables:                                         access to or modification of routing code. The
+    1. Key placement (k ∗ ): which semantic seg-         attacker only shapes the input distribution.
+       ment of the user request carries the activation     Our results show that even modest increases in
+       key.                                              routing bias dramatically amplify attack success,
+                                                         especially in conjunction with optimized key and
+    2. Template placement (s∗ ): how the injected
+                                                         template placement. This demonstrates that routing
+       template is positioned relative to the segment
+                                                         bias is a first-class attack surface in multi-agent
+       (prefix, wrap, or suffix).
+                                                         systems.
+    3. Routing bias (ρ): a probabilistic sensitivity
+       that captures how likely key-bearing segments
+       are to be routed to a tampered remote agent.      C.3   Ablation: Topology-Aware Evaluation Is
+                                                               Essential
+   Importantly, routing bias does not represent di-
+rect control over the client agent. Instead, it mod-     A key insight from our results is that single-
+els the emergent effect that certain prompts, keys,      topology evaluations can be misleading. In many
+or semantic patterns disproportionately influence        settings, star topologies exhibit high attack success
+downstream routing decisions in agentic systems.         even without optimization, while chain and DAG
+In practice, this corresponds to exploiting existing     topologies suppress success due to compounding
+heuristics, classifiers, or learned dispatch mecha-      routing uncertainty.
+nisms commonly used in multi-agent frameworks.
+                                                            By reporting ASRmin , ASRmean , and ASRmax
+C.1 Optimization Algorithm                               across topologies, we expose worst-case and best-
+                                                         case behaviors simultaneously. Optimization con-
+The following algorithm is used to optimize the
+                                                         sistently increases ASRmin , indicating that vulner-
+counterpart model.
+                                                         abilities persist even under adversarial communica-
+C.2 Ablation: Routing Bias as an Emergent                tion structures.
+    Vulnerability                                           This suggests that safety evaluations limited to
+While routing bias may appear abstract, it captures      a single agent topology are insufficient for multi-
+a realistic system-level phenomenon. In deployed         agent systems.
+                                                    34187
+
+===== PDF p.14 =====
+Sensitivity to Routing Bias ρ.           Under the coun-                          [ both ) Empirical (ASRboth )
+                                                              Topology Surrogate (ASR
+terpart formulation (Eq. 18),
+                                                                       Min Mean     Max     Min Mean     Max
+                          S
+                          X                                   Star     0.15 0.53    0.76    0.20 0.50    0.80
+               Proute =         pi · ai · ρ,        (21)      Chain    0.13 0.47    0.68    0.15 0.52    0.73
+                          i=1                                 DAG      0.16 0.52    0.72    0.19 0.57    0.76
+
+which is linear in ρ. Therefore,                           Table 4: Surrogate fidelity aggregated over routing bias
+                                                           ρ ∈ {0.0, 0.4, 0.8}. Min / Mean / Max are computed
+                           S                               across routing-bias configurations. Surrogate values
+             ∂Proute X
+                    =  pi · ai ≥ 0.                 (22)   are computed as Proute · Ptemplate . Empirical denotes
+              ∂ρ
+                          i=1                              measured ASR in the both regime. Across all topolo-
+                                                           gies, surrogate estimates closely track empirical ASR,
+   For fixed template placement, the surrogate at-         confirming fidelity of the routing-aware counterpart ob-
+tack success ASR[ both = Proute · Ptemplate is thus        jective.
+monotonically non-decreasing in ρ.
+   Intuitively, increasing ρ increases the probability
+                                                              where σ(·) is a sigmoid function that maps slot
+that a key-bearing segment reaches the compro-
+                                                           effectiveness to [0, 1].
+mised agent, which directly increases the probabil-
+                                                              Importantly, we do not impose any ordering con-
+ity of conjunctive activation. This establishes the
+                                                           straint among wτ . The optimization procedure
+directional sensitivity of the attack objective with
+                                                           jointly learns both qτ and wτ within the counter-
+respect to routing bias, independent of backbone-
+                                                           part model. The final discrete configuration selects
+specific behavior.
+                                                           τ ∗ = arg maxτ qτ .
+C.4 Ablation: Routing-Aware Counterpart                       This formulation avoids injecting prior assump-
+    Optimization                                           tions about slot superiority and allows the model
+                                                           to adaptively identify which placement is most ef-
+Let S denote the number of segments. We associate
+                                                           fective under the given routing and backbone con-
+each segment si with a learnable logit αi ∈ R
+                                                           ditions.
+representing the probability that the trigger key is
+placed on that segment. Similarly, each template           C.6   Surrogate Fidelity and Routing-Bias
+slot τ ∈ {prefix, wrap, suffix} is associated with a             Sensitivity
+logit βτ ∈ R. Routing bias is parameterized by a
+                                                           To validate the routing-aware surrogate formulation
+scalar logit γ ∈ R.
+   We define the relaxed distributions:                                [ both = Proute · Ptemplate ,
+                                                                       ASR
+            pi = GumbelSoftmax(α)i ,                (23)   we empirically decompose activation probability
+           qτ = GumbelSoftmax(β)τ ,                 (24)   under varying routing bias ρ. For each topology
+            ρ = σ(γ),                               (25)   and ρ ∈ {0.0, 0.4, 0.8}, we measure:
+
+where σ(·) denotes the sigmoid function. These                • Proute : the empirical probability that the key-
+distributions form a continuous relaxation of the               bearing segment reaches the compromised
+discrete configuration θ = (j, τ, ρ).                           agent in the both regime;
+
+C.5 Template Effectiveness Modeling.                          • Ptemplate : the conditional probability of activa-
+                                                                tion given successful routing;
+Rather than assuming a fixed ordering among
+template slots, we parameterize slot effective-               • Empirical ASR: the measured attack success
+ness using learnable scalars wτ ∈ R for τ ∈                     rate in the both regime.
+{prefix, wrap, suffix}.
+  The relaxed template selection distribution qτ              The surrogate estimate is computed as
+(Eq. 16) defines a categorical distribution over slots.                      emp
+The expected template effectiveness is modeled as:                     [ both = Proute · Ptemplate .
+                                                                       ASR
+                          X                                  Table 4 reports results for star,chain and
+            Ptemplate =         qτ · σ(wτ ),        (26)
+                           τ
+                                                           dag topologies using three models: Gemma-2B,
+                                                      34188
+
+===== PDF p.15 =====
+Setting            Clean K-only T-only Both FA              Model             ρ   Clean K-only T-only Both
+   Baseline (ρ = 0.0) 0.00   0.04    0.03 0.28 0.07                              0.0 0.00   0.03    0.02   0.19
+   Biased (ρ = 0.8) 0.00     0.05    0.04 0.74 0.09            Llama-4-Scout-17B 0.4 0.00   0.03    0.04   0.47
+                                                                                 0.8 0.00   0.04    0.03   0.69
+Table 5: Verification of activation predicate under star,                        0.0 0.00   0.03    0.02   0.22
+chain and dag topologies. Average ASR is reported for          GPT-5-mini        0.4 0.00   0.04    0.03   0.51
+each regime. False activation (FA) equals ASRkey-only +                          0.8 0.00   0.05    0.03   0.73
+ASRtemplate-only . Activation is concentrated in the both
+regime, while non-conjunctive regimes remain low.           Table 6: Transferability of routing-aware conjunctive
+                                                            attacks to a larger instruction-tuned backbone and a
+                                                            closed-source backbone. Across both models, ASR in
+Mistral-7B, LLaMA3-8B . Across all settings, sur-           the both regime increases with routing bias ρ, while
+rogate estimates closely track empirical ASR, with          non-conjunctive regimes remain low.
+small absolute error. Moreover, empirical ASR
+increases monotonically with ρ, confirming the di-
+                                                            substantially affecting other regimes, confirming
+rectional sensitivity of routing bias predicted by the
+                                                            strict conjunctive triggering.
+analytical formulation in Appendix C.2.
+                                                            C.8    Transferability to Larger
+Correlation          analysis. Across           all
+                                                                   Instruction-Tuned and Closed-Source
+topology–routing-bias       configurations       (9
+                                                                   Backbones
+paired points),        the surrogate estimate
+[ both = Proute · Ptemplate exhibits strong
+ASR                                                         To evaluate transferability beyond the open-source
+agreement with empirical ASRboth , achieving                backbones used in the main experiments, we repli-
+Pearson correlation r = 0.995 and Spearman                  cate the four-regime protocol (clean, key-only,
+rank correlation ρs = 0.933. This confirms both             template-only, both) on a larger instruction-tuned
+magnitude tracking and ordering preservation of             open-source model and a closed-source model.
+the routing-aware surrogate.                                Specifically, we evaluate Llama-4-Scout-17B-
+   These results demonstrate that the routing-aware         16E-Instruct and GPT-5-mini under the same
+surrogate faithfully approximates conjunctive ac-           routing formulation and activation predicate used
+tivation dynamics and preserves ranking across              throughout the paper to test whether the conjunc-
+routing-bias configurations. This supports the use          tive pattern persists across backbones.
+of the differentiable counterpart objective for op-            We preserve the same routing formulation:
+timization without requiring direct discrete ASR
+maximization.                                                                                                   
+                                                            P r[a = a∗ |s] = clip[0,1] αIacc (s)+ρIacc (s)Ik (s) ,
+C.7 Activation Predicate Verification
+                                                               and activation predicate:
+To eliminate ambiguity in attack success definition,
+we implement a deterministic activation predicate:
+an episode is counted as activated if and only if (i)       Activated = {k ∈ sj }·{aj = a∗ }·{marker ∈ yj }.
+the trigger key appears in exactly one segment, (ii)
+that segment is routed to the compromised agent,               The results in Table 6 show that the conjunctive
+and (iii) the compromised agent’s output contains           effect persists on both backbones. Llama-4-Scout-
+a predefined activation marker token.                       17B-16E-Instruct reaches ASR = 0.69 at ρ = 0.8,
+   For each episode, we log routing decisions, raw          and GPT-5-mini reaches ASR = 0.73, while the
+outputs, and activation flags. False activation (FA)        other three regimes remain low. This suggests that
+is defined as                                               the vulnerability stems from routing and template
+                                                            interaction rather than from a particular smaller
+      FA = ASRkey-only + ASRtemplate-only .                 open-source model.
+
+   Table 5 reports ASR under the four regimes. Ac-          C.9    Why Existing Defenses Fail
+tivation is concentrated in the both regime, while          While existing guard models (e.g., PromptGuard
+false activation remains low. Increasing routing            and Llama-Guard variants) demonstrate moderate
+bias ρ raises ASR in the conjunctive regime without         effectiveness against non-optimized attacks, their
+                                                       34189
+
+===== PDF p.16 =====
+detection performance degrades substantially un-       tion and composition, defenses remain misaligned
+der full routing-aware optimization. The core rea-     with the true activation surface.
+son is architectural mismatch: most defenses are
+designed to inspect a single prompt or output for      C.10    Experimental Alignment with Prior
+a locally recognizable malicious signal, whereas               Multi-Agent Benchmarks
+our attack is conjunctive and distributes activation   To mitigate concerns regarding artificiality of the
+across multiple benign-looking components.             A2A configuration, we note that our setup follows
+                                                       structural principles used in prior multi-agent eval-
+(1) Localized Detection Assumption. Most
+                                                       uation frameworks such as AgentBench (Liu et al.,
+guard mechanisms operate at the level of isolated
+                                                       2024). Specifically, our environment includes de-
+prompts or individual model outputs, implicitly
+                                                       terministic task segmentation, stochastic agent dis-
+assuming that malicious intent is lexically or se-
+                                                       patch, heterogeneous agent descriptions, and privi-
+mantically localized within a single interaction. In
+                                                       lege asymmetry across remote agents. These prop-
+contrast, our attack distributes activation across
+                                                       erties make it possible for the trigger condition to
+multiple components: a trigger key placed in one
+                                                       be distributed across the pipeline rather than ap-
+user segment, stochastic routing alignment, and
+                                                       pearing in a single prompt.
+hidden template injection within a remote agent.
+                                                          We do not assume deterministic routing control
+No single component is necessarily suspicious on
+                                                       or client-side modification. Instead, the routing for-
+its own, so a local detector may see only benign-
+                                                       mulation abstracts content-sensitive dispatch mech-
+looking fragments.
+                                                       anisms (e.g., keyword-based, classifier-based, or
+(2) Conjunctive Triggering Suppresses Local            embedding-based routers) commonly used in multi-
+Signal. The trigger key alone and the injected         agent systems. This abstraction lets us isolate ar-
+template alone are designed to remain largely be-      chitectural vulnerabilities without coupling results
+nign in isolation. Activation requires their con-      to a proprietary implementation.
+junction at the compromised agent. As a result,           Therefore, the observed conjunctive vulnerabil-
+lexical and semantic anomaly signals that many         ity emerges from composition properties inherent
+guard models rely on are attenuated: neither the       to agentic pipelines rather than artifacts of a syn-
+user query nor the remote-agent template must look     thetic environment.
+overtly adversarial by itself. Optimization further
+reduces detectable patterns by adjusting placement     C.11   Qualitative Examples of Conjunctive
+and routing alignment rather than introducing obvi-           Activation
+ously malicious tokens.                                To complement quantitative ASR measurements,
+                                                       we provide anonymized qualitative examples illus-
+(3) Routing-Dependent Activation Boundary.
+                                                       trating behavioral differences across regimes. All
+Current guardrails are largely agnostic to routing
+                                                       examples use a reserved trigger token __KEY__ and
+dynamics and do not reason over inter-agent com-
+                                                       activation marker __ACTIVATED__. Sensitive tem-
+munication graphs. However, activation occurs
+                                                       plate contents are abstracted. The examples make
+only when the key-bearing segment is routed to the
+                                                       the conjunctive behavior concrete.
+compromised agent and interpreted under the in-
+jected template. This routing-dependent boundary       Example 1: Star Topology (Full Optimization,
+lies outside the scope of single-prompt classifica-    ρ = 0.8) User Query (segmented):
+tion, because the harmful condition emerges only
+after cross-agent composition.                            • s1 : “Find flights from NYC to LA next week.”
+Implication for Defense Design. Our findings              • s2 :  “Check account rewards balance
+suggest that effective defenses for multi-agent sys-        __KEY__.”
+tems must model conjunctive activation explicitly
+rather than inspecting messages in isolation. Po-         • s3 : “Suggest nearby hotels.”
+tential directions include cross-agent provenance
+                                                          Routing Trace:
+tracking, routing-trace monitoring, and guard mod-
+els conditioned on communication structure and            • s1 → Flight Agent (benign)
+prompt provenance rather than isolated prompt con-
+tent alone. Without modeling inter-agent propaga-         • s2 → Account Agent (compromised)
+                                                  34190
+
+===== PDF p.17 =====
+• s3 → Hotel Agent (benign)
+
+  Regime Comparison:
+  (a) Clean: No key, no template. Output is stan-
+dard account summary.
+  (b) Key-only: Key is present, but without the
+hidden template no marker appears.
+  (c) Template-only: Injected template is present,
+but without the key-bearing segment the response
+remains benign.
+  (d) Both (Conjunctive): Key and hidden tem-
+plate meet at the compromised agent, triggering
+activation.
+  Compromised Agent Output (excerpt):
+
+    “Account       summary    retrieved.
+    __ACTIVATED__ [Simulated privileged
+    behavior triggered.]"
+
+   The activation marker appears only in the con-
+junctive regime and only when the key-bearing
+segment is routed to the compromised agent. No
+lexical anomaly is observable in the user query
+itself. All routing decisions and raw outputs are          Defense                ASRboth FA Relative Drop
+logged for verification.
+                                                           None                    0.73   0.08      –
+                                                           Tool Allowlist (D1)     0.62   0.07    -15%
+C.12 System-Level Defense Evaluation
+                                                           Least Privilege (D2)    0.58   0.07    -20%
+We evaluate the routing-aware conjunctive at-
+tack under two commonly recommended agent-              Table 7: System-level defense evaluation on closed-
+deployment controls:                                    source backbone. ASRboth denotes conjunctive attack
+                                                        success. FA denotes false activation.
+   • D1: Tool Authorization. Remote agents are
+     restricted to a predefined tool allowlist. Unau-
+     thorized tool calls are rejected.
+
+   • D2: Least Privilege Input. Each agent re-
+     ceives only the minimal segment content.
+
+   These controls follow standard secure-agent
+recommendations (e.g., OWASP LLM Top 10;
+prompt-injection mitigation literature).
+   We evaluate closed-source backbone transfer
+with routing bias ρ = 0.8. Table 7 reports ASR in
+the both regime and false activation (FA). These
+defenses are challenging because the attack signal
+is distributed rather than localized in one compo-
+nent.
+   Observation. System-level defenses attenuate
+attack success, but do not eliminate routing-aware
+conjunctive activation. Even under full-stack con-
+trols, ASR remains non-zero. The residual vulner-
+ability arises from segmentation–routing interac-
+tion in multi-agent orchestration, rather than purely
+from backbone misalignment.
+                                                   34191

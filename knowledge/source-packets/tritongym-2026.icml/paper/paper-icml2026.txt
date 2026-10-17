@@ -1,0 +1,1179 @@
+===== PDF p.1 =====
+TritonGym: A Benchmark for Agentic LLM Workflows
+                            in Triton GPU Code Generation
+
+
+   Yue Guan * 1 Yichen Lin * 1 Xu Zhao 2 Jianzhu Yao 3 Xinwei Qiang 1 Zhongkai Yu 1 Pramod Viswanath 3
+                                         Yufei Ding 1 2 Adnan Aziz 2
+
+
+                         Abstract                                      compile-verify-evaluate loops(Huang et al., 2023).
+       Large language models (LLMs) can already draft                  While a developer or LLM planner can launch all sorts of
+       plausible Triton kernels, yet most existing eval-               agentic workflows, current GPU code-generation bench-
+       uations still focus on single-shot generation and               marks(Li et al., 2025; Wang et al., 2025b; Ouyang et al.,
+       underplay tool use and feedback. We introduce                   2025; Wen et al., 2025) fail to provide a fair and isolated
+       TritonGym, a benchmark and orchestration frame-                 playground to test and benchmark those workflows. The
+       work for evaluating agentic workflows in GPU                    reason is that they treat tool invocation as an internal fea-
+       code generation. TritonGym standardizes access                  ture of each evaluated system, so agents differ in what they
+       to a set of code generation tools via function-                 can compile, run, or verify during generation, confound-
+       calls, separating intrinsic model capability from               ing comparison with private tooling and ad hoc budgets.
+       workflow design and enabling fair, apples-to-                   We argue that the ability to invoke code generation tools
+       apples comparison. The benchmark spans a main-                  should be standardized by the benchmark via a function-
+       tained operator set, community samples, out-of-                 call API for a fair comparison, not bundled inside each
+       distribution tasks, and DSL extensions, ensuring                agent. The benchmark shall provide an interface exposing
+       both generality and extensibility. By providing                 identical tools, inputs, and budgets to all participants, en-
+       a common orchestration and evaluation frame-                    abling apples-to-apples evaluation of agentic workflows and
+       work, TritonGym democratizes the development                    cleanly separating intrinsic model capability from workflow
+       of GPU coding agents, supports practical adop-                  design. Without such standardization, progress in agentic
+       tion of agent-generated kernels, and facilitates                code generation remains hard to measure and misaligned
+       progress on advanced agentic systems.                           with real engineering practice.
+                                                                       However, the introduction of code generation tools raises
+                                                                       challenges around benchmark design and evaluation. The
+1. Introduction                                                        first challenge is to guarantee generality of the benchmark
+Efficient GPU kernels are crucial for scaling modern                   because exposure to search tools may trivialize the bench-
+AI (Chetlur et al., 2014). Recent models can already gener-            mark with well-known operators appearing online. The
+ate hardware-aware kernels that reduce computation time,               agent can surface web search and retrieve the implementa-
+cost, and energy consumption(Jiang et al., 2024). But even             tion of target operators, reducing the task to memorization
+with those gains, many practical challenges remain: en-                rather than reasoning and synthesis. At worst, the agent
+suring correctness, tailoring kernels to specific hardware,            can directly find the reference implementation online, mak-
+exploiting architectural constraints, and optimizing beyond            ing the benchmark meaningless. The second challenge is
+naive generation. To meet these challenges, agentic work-              to keep the extensibility of the benchmark when explicit
+flows offer a better paradigm(Dong et al., 2025). Rather               hardware-dependent tools are available. While practical
+than producing code in one shot, systems using agentic                 GPU programming is target-specific and evolves rapidly
+workflows plan their steps, invoke tools (e.g. compilers,              with hardware advancements, previous benchmarks tend
+verifiers), receive feedback, and iterate through propose-             to incorporate fixed platforms with backend knowledge en-
+                                                                       coded implicitly in the dataset. However, with the reasoning
+   1
+     Department of Computer Science and Engineering, Univer-           capability of agents and evaluation tools accessing hardware
+sity of California, USA 2 Meta, USA 3 Princeton University, USA.       directly, the benchmark must adapt to the unique character-
+Correspondence to: Yue Guan <yueguan@ucsd.edu>.                        istics of different hardware architectures and programming
+Proceedings of the 43 rd International Conference on Machine           languages or DSLs (e.g., TLX (Meta, 2025), Gluon (Ope-
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026           nAI, 2020)) to generate efficient, correct code(Tschand et al.,
+by the author(s).
+
+                                                                   1
+
+===== PDF p.2 =====
+TritonGym
+
+
+                   Task              Code                                     Performance               Triton Kernel
+                                                        Evaluator                                        @triton.jit
+ Agentic         Planning          Generation                                Summarization               def add_kernel(x_ptr, y_ptr)
+ Workflow                                                                                                    …
+
+            Task Description                             Function Calls           Tool Feedbacks     Output Kernel
+
+
+                Operator               Hardware
+                                                                 Profiler           Compiler              Verifier
+                Definition           Specification
+                     DSL                     Input               Browser            Verifier
+              Description            Specification                                                                         Correctness
+                                                                                                          Evaluator
+                   Oracle                   Tool                 Searcher           Evaluator
+                 Example           Documentation
+                                                                                                                          Performance
+  Dataset                                                Standard Tools                                 Evaluation Pipline
+ TritonGym Benchmark
+                                             Figure 1. An overview of TritonGym.
+
+2025). Existing benchmarks often fixate on a single platform          in GPU kernel generation. This could help the adoption of
+or demand universal implementations despite substantial dif-          agent-generated GPU kernels in practice and facilitate the
+ferences across DSLs and backends.                                    development of advanced agentic systems.
+As such, we introduce TritonGym to close this gap with a
+tool-centric, interactive benchmark featuring generality and          2. Background
+extensibility for Triton GPU kernel generation. Its standard-
+                                                                      2.1. Triton Language and Kernels
+ized function-call interfaces allow agents to invoke correct-
+ness verifiers, performance evaluators, and other tools dur-          Triton (Tillet et al., 2019) is a Python-like domain-specific
+ing generation for feedback to guide their generation. This           language (DSL) for GPU programming that is particularly
+enables systematic assessment of agentic workflows and                well-suited as a generation target for LLMs. It balances
+paves the way for robust, adaptable code generation systems.          programmer productivity and high performance by enabling
+To address these generality and extensibility challenges, Tri-        users to write custom GPU kernels more easily than with
+tonGym includes novel out-of-distribution (OOD) samples               traditional CUDA or low-level APIs, while still exposing
+and explicit specifications across backends. We design a              sufficient control for manual optimization. With Triton
+specific set of OOD problems with invented, benchmark-                hiding trivial optimization details of intra-thread communi-
+only operators whose semantics are specified but for which            cation and memory management, developers can focus on
+no public reference implementations exist. As such, suc-              high-level algorithm design and optimizations such as tiling,
+cessful generation requires reasoning and synthesis rather            blocking, and memory hierarchy. This makes it possible to
+than memorization. To keep the task extensible, TritonGym             leverage LLMs’ strong reasoning and planning capabilities
+exposes backend and language descriptors to the agent and             while leaving low-level details to the compiler.
+supports pluggable backend and DSL extensions, enabling
+                                                                      To keep pace with evolving hardware and programming
+target-appropriate, practical implementations and apples-to-
+                                                                      models, numerous Triton extensions have emerged, compli-
+apples comparisons across diverse hardware.
+                                                                      cating the task for coding agents. For example, Triton Low-
+Our empirical evaluation results with TritonGym show that             Level Extensions (TLX) (Meta, 2025) adds warp-aware
+frontier LLMs can synthesize competitive Triton kernels               intrinsics, register-backed accumulators, pipeline execution,
+for familiar operators in one-shot generation, yet their ac-          and finer synchronization primitives to better exploit mod-
+curacy and speed degrade markedly on new backends and                 ern GPU features. Gluon (OpenAI, 2020) is a lower-level
+out-of-distribution operators that require reasoning beyond           dialect within the Triton compiler stack, exposing primi-
+memorization. Agentic workflows improve correctness and               tives for layout encoding and explicit control over lowering
+performance, yet still leave meaningful headroom to care-             to hardware. Code generation systems must be extensible
+fully engineered baselines. This implies LLM-based GPU                enough to handle these extensions and produce efficient, cor-
+coding is far from complete. Besides, with the gym-style              rect kernels tailored to specific devices and optimizations.
+playground of TritonGym, we also explore the composition
+of LLM models, suggesting the advantage of ensembling                 2.2. Agents for Code Generation
+heterogeneous models in agentic workflows. Our evalu-
+ation results show that TritonGym provides a stable and               Agents with LLMs have been a promising code generation
+forward-looking yardstick for evaluating agentic workflows            solution(Dong et al., 2025), where they not only generate
+
+
+                                                                  2
+
+===== PDF p.3 =====
+TritonGym
+
+ {"add":                                              {"tools": [                                                                       {"GPUs": [
+    { "torch_operator": "def torch_add(input,             { "name": "evaluator",                                                            { "name": "H100_SXM5",
+ other): …",                                                "signature": "evaluator(src: str, op: str) -> float",                             "process": "4nm",
+      "input_shapes": [                                     "purpose": "Compile and execute the generated Triton function triton_<op>              "transistor_count": "80 billion",
+        [[1024, 1024], [1024, 1024]], [[4096,         and return its average latency in milliseconds.",                                            "memory": {
+ 4096],[4096, 4096]]],                                      "inputs": {                                                                               "type": "HBM3",
+      "triton_operator": "def add_kernel(in_ptr0,             "src": { "type": "string", "description": “…” },                                        "capacity": "80 GB",
+ in_ptr1, out_ptr, n_elements, BLOCK_SIZE,): …"               "op": { "type": "string", "description": “…” } },                                       "bandwidth": "3000 GB/s"
+ },                                                           "returns": { "type": “float”, "units": "ms", "description": “…” }                     },
+ … }                                                  }, …}                                                                                        "vector_performance": {
+                                                                                                                                                      "fp64": "30 TFLOPS", …},
+            (a) Operator description                                               (b) Tool documentation                                          "tensor_performance": {
+                                                                                                                                                      "fp64": "60 TFLOPS”, …},
+ {“tlx”:                                                                                                                                           "SM_num": "132",
+   " TLX (Triton Low-level Language Extensions) is a low-level, warp-aware, hardware-near extension of the Triton DSL. It offers
+                                                                                                                                                   "GPC_num": "7",
+   intrinsics and warp-specialized operations for fine-grained GPU control, hardware-oriented primitives for advanced kernel
+                                                                                                                                                   "on_chip_mem": {
+   development, and explicit constructs for GPU memory, computation, and asynchronous control flow. TLX is designed for expert users
+                                                                                                                                                      "LLC_size": "50MB”,…},
+   pushing Triton closer to the metal.
+                                                                                                                                                   "compute_capability": {
+   - `tlx.async_tasks` and `tlx.async_task`
+   ```python                                                                                                                                          "thread_per_warp": 32, …},
+       with tlx.asycn_task(num_warps = 4)                                                                                                             "power_consumption": "700W"
+           ... ```                                                                                                                               },
+   `tlx.async_task(num_warps=4)` defines a warp-specialized asynchronous task that explicitly reserves 4 warps in addition to those
+   used by the trunk task. ",                                                                                                               …]
+ … }                                                                                                                                    }
+
+
+                                                     (c) Language description                                                                    (d) Hardware specification
+                                                                 Figure 2. Dataset design of TritonGym.
+
+code but also interact with tools(Yao et al., 2022), execute                                   tasks, (2) a suite of standard tools that enable agentic work-
+code, and iteratively improve their outputs based on feed-                                     flows, and (3) a rigorous evaluation routine that measures
+back. This agentic paradigm leverages the LLM’s ability to                                     correctness and performance under realistic constraints.
+reason over multiple steps, use external resources (e.g., com-
+pilers, profilers), and adapt its behavior through reflection                                  3.1. Dataset Design
+and optimization loops. More broadly, agentic evaluation is
+becoming common in code generation research, as it better                                      3.1.1. DATASET F ORMAT
+reflects real-world workflows where iterative improvement                                      In TritonGym, the Triton task is to synthesize a kernel for a
+and tool use are essential for producing high-quality, correct,                                given operator, using its semantics, input shapes, and a ref-
+and performant code. For example, AlphaEvolve (Novikov                                         erence PyTorch implementation(Ansel et al., 2024). To aid
+et al., 2025) introduces an evolutionary agent framework for                                   performance, we provide hardware and DSL descriptions,
+code generation, combining search, self-play, and perfor-                                      structured as JSON(Pezoa et al., 2016) files as in Fig. 2.
+mance feedback to progressively refine generated programs.
+Similarly, AutoEvolveNP (Yu et al., 2025) explores how                                         Task Formulation. TritonGym formulates the code gener-
+agentic LLMs can autonomously evolve code solutions for                                        ation task with operator definition ( torch code ) and input
+computationally hard problems, demonstrating the potential                                     specification ( input shapes and data types ). An oracle ex-
+of iterative self-improvement loops.                                                           ample ( triton operator ) establishes reference performance
+                                                                                               developed by human experts and indicates headroom for op-
+In the context of GPU kernels, the agentic system design                                       timization. The bundle also carries metadata such as domain,
+becomes salient due to the complexity of hardware architec-                                    backend, and language to retrieve the relevant descriptions
+tures, the need for performance tuning, and the iterative na-                                  used for this task.
+ture of optimization. Geak (Wang et al., 2025a) introduces
+an agent pipeline consisting of a generator that proposes                                      Backend Extensions. The benchmark is extensible across
+code, an evaluator that tests correctness and performance, a                                   backends and DSLs via explicit descriptors available to
+reflector that analyzes failures, and an optimizer that refines                                the agent at generation time. For hardware specification,
+the solution. Building on this direction, Astra (Wei et al.,                                   we provide a JSON file that the agent can condition on
+2025) advances the workflow by coordinating specialized                                        when choosing tiling, vector widths, memory layouts, and
+agents for analysis, scheduling, and performance tuning,                                       synchronization. The JSON records the GPU model and
+demonstrating substantial speedups via division of labor                                       micro-architecture, memory hierarchy and bandwidth, etc
+and learned heuristics. These works underscore the growing                                     as shown in Fig. 2-(d). Because the format is extensible, ad-
+importance of agentic paradigms in code generation and                                         ditional accelerators or backend-specific keys can be added
+motivate benchmarks that can evaluate such capabilities in                                     without breaking existing workflows, while agents remain
+specialized domains like GPU kernel synthesis.                                                 free to exploit the information to produce practical, target-
+                                                                                               aware kernels.
+3. TritonGym Benchmark                                                                         Language Description. Complementing the backend speci-
+                                                                                               fication, each task may include a DSL descriptor that makes
+TritonGym is composed of three key components as shown                                         the language surface area explicit (Fig. 2-(c)) and a descrip-
+in Fig. 1: (1) an extensible dataset of GPU kernel synthesis                                   tion that records the DSL usage. This includes the intended
+
+                                                                                           3
+
+===== PDF p.4 =====
+TritonGym
+
+                                                        60
+            7%8%          Operator Set                                                                      40
+      27%
+                          Community                     40
+
+
+
+
+                                                Count
+
+
+
+
+                                                                                                    Count
+                          Out-of-Distribution                                                               20
+            58%           Language Extension            20
+
+                                                        0                                                   0
+                                                             0          20         40        60                  0        100 200 300 400
+        (a) Dataset Construction Breakdown                       (b) Input Torch LoC Distribution                    (c) Oracle Triton LoC Distribution)
+                   Figure 3. Dataset construction of TritonGym. Left: source of samples. Right: LoC distributions.
+
+
+programming model (e.g., block-level SPMD with predica-                       standard libraries. By focusing on operators that are struc-
+tion), common scheduling and tiling idioms (grid mapping,                     turally similar yet unseen, we test whether LLMs learn the
+vector widths), and available intrinsics and memory primi-                    essence of GPU optimization independently of the specific
+tives (e.g., load / store , barriers ). Exposing these capabil-               operation being reduced. For these tasks, we specify the
+ities lets agents reason about which transformations are legal                PyTorch oracle from first principles and handcraft efficient
+and performance-relevant on the target, while remaining ag-                   Triton implementations as baselines. This pairing prevents
+nostic to implementation details. The same operator task                      leakage through web search while providing a meaningful
+can thus be evaluated across different DSLs by swapping                       performance target for agents to surpass. We illustrate these
+descriptors without changing the underlying semantics.                        operators in § D.
+                                                                              DSL Extension Samples. To exercise portability beyond
+3.1.2. DATA C OLLECTION
+                                                                              a single DSL, we also include samples that target language
+We construct the TritonGym benchmark set by combining                         extensions for TLX and Gluon. These tasks are selected to
+the samples from several sources.                                             stress the features exposed in the corresponding language
+                                                                              descriptors (Fig. 2-(c)) and are more challenging to pro-
+Maintained Operators Set. We maintain a curated set of
+                                                                              gram compared to the base Triton DSL due to their ad-
+high-quality Triton implementations for commonly used
+                                                                              ditional abstraction and optimization capabilities, such as
+operators covering core ML applications, such as matrix
+                                                                              asynchronous behaviors and explicit barriers. By pairing
+multiplication(Munshi, 2009), Flash Attention(Dao et al.,
+                                                                              identical operator specifications with different DSL descrip-
+2022). The operator set aggregates SOTA Triton kernels
+                                                                              tors, TritonGym isolates the effect of DSL capabilities from
+developed and optimized by our experts for actual produc-
+                                                                              task semantics and demonstrates that agentic workflows
+tion use. Each operator is paired with a precise PyTorch
+                                                                              transfer across languages.
+implementation that serves as reference, and we will open-
+source it to facilitate future research. In TritonGym, these                  Summary Statistics. As summarized in Fig. 3-(a), the
+maintained operators are a primary source of samples with                     benchmark currently comprises 122 operator tasks: 82 stan-
+canonical PyTorch references, and normalize formats to                        dard operators (35 maintained, 47 community), 13 OOD
+TritonGym’s schema.                                                           operators, and 27 DSL-extension tasks (12 TLX, 15 Gluon).
+                                                                              This composition combines a high-quality core of com-
+Community Samples. We also curate operators from pub-
+                                                                              monly used kernels with broad coverage of practical work-
+lic repositories and prior code-generation benchmarks. Each
+                                                                              loads, while the OOD and DSL-extension tracks specifically
+sample is normalized into our task format with precise op-
+                                                                              probe generalization to unseen semantics and richer DSLs.
+erator semantics, input-shape specifications, and a PyTorch
+reference implementation that serves as the correctness or-                   Fig. 3-(b) and (c) plot line-of-code(LoC) distributions for the
+acle. This track captures practical kernels that agents are                   PyTorch reference and the Triton oracle, respectively. While
+likely to encounter and enables direct comparison to previ-                   relatively short and easy samples (PyTorch LoC ≤ 20 and
+ously reported results within our unified evaluation harness.                 Triton LoC ≤ 100) take a large portion, TritonGym includes
+                                                                              challenging tasks with over 50 LoC PyTorch definition and
+Out-of-Distribution Operators. To evaluate whether
+                                                                              require over 300 LoC in Triton from human experts.
+agents internalize optimization principles rather than mem-
+orizing reference kernels, we design OOD operators with                       3.2. Standard Tools in Code Generation Workflow
+novel, benchmark-only semantics for which no public imple-                    We introduce the standard tools supported in the TritonGym
+mentations exist. These operators are created by altering the                 framework, facilitating agentic code generation, and show
+underlying computation, for example, replacing summation                      how they can express workflows from prior work. These
+with multiplication. Such folds are mathematically natu-                      tools convert kernel synthesis from a one-shot act into a
+ral and potentially useful in practice, though absent from                    closed-loop process with environmental feedback.
+
+                                                                          4
+
+===== PDF p.5 =====
+TritonGym
+
+ One-Shot Generation                        GeakAgent                                     Astra
+                   LLM                          Generator      Compiler                           Planning            Coding
+                                                               ✗          ✔
+                                                                                                                  ✗             ✔/✗   Control Flow
+ AlphaEvolve                                                                                                  ✔
+                                                Optimizer      Verifier                           Profiling           Testing
+      Ensembling         Evaluator                                                                                               LLM Generation
+                                                               ✗          ✔
+
+
+      Sampling           Dataset                   Reflector   Evaluator                     Evaluator            Verifier       Tool Invocation
+
+
+                             Figure 4. Agentic code generation workflows from previous works within TritonGym.
+
+
+3.2.1. I NTRODUCTION OF T OOLS                                                    kernel execution metrics, enabling agents to identify bottle-
+At the core of our tool suite are three execution-                                necks such as memory stalls, low occupancy, or divergent
+time services that enforce correctness before perfor-                             warps and to target their optimizations accordingly.
+mance: a compiler, a verifier, and an evaluator.                                  Together, these tools enable disciplined feedback loops, op-
+The compiler(src: str, op: str) -> str checks that the                            tionally augmented by targeted retrieval, which mirrors how
+Python source defines a callable function and compiles with-                      human experts develop high-performance GPU kernels and
+out syntax or symbol errors. It returns an empty string on                        makes agentic code generation both measurable and repro-
+success and a diagnostic message otherwise. This struc-                           ducible in TritonGym. Furthermore, the modular design
+tural feedback is crucial for rapid iteration, allowing agents                    allows future extensions, such as adding static analyzers
+to resolve import issues, naming mismatches, and syntax                           or formal verifiers, to enrich the agent’s toolkit without
+mistakes before investing effort in optimization.                                 disrupting existing workflows.
+Once the code is compiled, the probabilistic verifier
+ verifier(src: str, op: str) -> bool compares outputs
+                                                                                  3.2.2. E XPRESSIVENESS OF W ORKFLOWS
+of the operator against the PyTorch reference on shapes                           Our function-call interface is expressive enough to imple-
+specified by the task with random materialized tensors for                        ment the agentic workflows proposed in prior works, from
+N times. Verification succeeds when both absolute and rele-                       single-shot generation to multi-step planning with retrieval,
+vant difference is controlled by pre-defined thresholds with                      compilation, verification, and performance-driven refine-
+reference to data format and operator type.                                       ment (Fig. 4). For example, the AlphaEvolve workflow
+For     performance         assessment,      the
+                                            evaluator API                         can be implemented by launching the ensembling LLM and
+evaluator(src:         str, op:      str) -> float compiles                       evaluator iteratively. The GeakAgent and Astra workflows
+and executes the generated operator and returns average                           include the verifier but consume the verification results to
+latency, reporting NaN on compilation or runtime failure.                         guide the next step differently.
+This quantitative signal closes the optimization loop where                       Besides, implementing diverse workflows within the same
+agents can use measured latency feedback to drive search                          harness guarantees a fair comparison. All methods operate
+or decision policies. To streamline the workflow, user can                        over the identical task set, shape seeds, and oracle definitions
+configure the number of warp-up and repeat runs, while the                        and they share the same compiler, verifier thresholds, and
+setting for the benchmark is elaborated in § 4.1.                                 evaluator configuration. In the benchmark, we record every
+We also provide retrieval tools for the agents to acquire                         tool invocation and outcome, making the propose-compile-
+background knowledge or performance insights to guide                             verify-evaluate loop reproducible and comparable across
+their optimization. The searcher(key: str) -> list[dict]                          methods. As a result, differences in accuracy or latency
+issues a web search and returns parsed results, and the                           reflect the workflow itself rather than incidental variations
+ browser(url: str) -> dict fetches a page and extracts                            in datasets, test harnesses, or measurement procedures.
+text, links, and metadata. These tools help agents acquire
+background knowledge, including API nuances, DSL id-                              3.3. Evaluation Routine
+ioms, or hardware-specific tips, that accelerate design. Im-                      3.3.1. E VALUATION M ETRICS
+portantly, our benchmark mitigates leakage by including out-
+of-distribution operators with novel semantics and by evalu-                      We use two commonly used metrics to measure the correct-
+ating on shapes and settings where naive copy-paste is in-                        ness and performance of the synthesized operators by the
+sufficient, retrieval therefore informs reasoning without triv-                   agentic workflows in the evaluation routine.
+ializing the task. profiler(src: str, op: str) -> str
+                                                                                  Correctness. The correctness metric Pass@K
+                                                                                                                           PKcounts how
+launches the NCU profiler and returns a structured report of
+                                                                                  many of the K trials succeed: Pass@K =     t=1 vt . This
+
+
+                                                                              5
+
+===== PDF p.6 =====
+TritonGym
+
+                                Table 1. Evaluation results of baseline workflows and LLM models.
+                                  Standard Samples         OOD Samples               DSL Samples          Full Benchmark
+                                 Pass@1      Perf@1     Pass@1         Perf@1     Pass@1     Perf@1      Pass@1     Perf@1
+         One-shot (avg.)         35.5%       0.322      15.4%          0.143      14.6%      0.062       32.8%      0.292
+             + Llama-4           26.8%       0.205      7.7%           0.063      16.7%      0.053       24.6%      0.182
+             + GPT-5             26.1%       0.260      15.4%          0.104      8.3%       0.026       23.9%      0.231
+             + Qwen-3            50.0%       0.466      23.1%          0.305      25.0%      0.077       32.7%      0.282
+             + DeepSeek-V3       39.4%       0.350      23.1%          0.269      16.7%      0.081       36.1%      0.327
+             + Claude-4.5        55.1%       0.610      23.1%          0.223      16.7%      0.089       31.6%      0.307
+         Geak (avg.)             39.2%       0.348      21.2%          0.250      25.0%      0.113       36.7%      0.323
+             + Llama-4           33.3%       0.227      7.7%           0.066      16.7%      0.056       29.7%      0.202
+             + GPT-5             29.6%       0.285      23.1%          0.132      25.0%      0.109       28.7%      0.260
+             + Qwen-3            56.4%       0.597      23.1%          0.317      25.0%      0.095       34.8%      0.336
+             + DeepSeek-V3       40.9%       0.363      30.8%          0.548      25.0%      0.130       38.1%      0.362
+             + Claude-4.5        53.5%       0.577      23.1%          0.269      25.0%      0.119       33.9%      0.321
+         AlphaEvolve (avg.)      45.1%       0.368      28.9%          0.353      25.0%      0.088       42.3%      0.346
+             + Llama-4           38.7%       0.217      15.4%          0.069      16.7%      0.093       35.1%      0.197
+             + GPT-5             45.2%       0.443      30.8%          0.404      25.0%      0.087       42.6%      0.414
+             + Qwen-3            63.8%       0.501      30.8%          0.479      33.3%      0.094       42.6%      0.358
+             + DeepSeek-V3       43.3%       0.373      23.1%          0.348      33.3%      0.095       41.9%      0.351
+             + Claude-4.5        69.5%       0.754      61.5%          0.872      33.3%      0.124       54.8%      0.583
+
+
+
+probabilistic verification is considered the best practice for         maintain two complementary leaderboards. The one-shot
+numerical kernels due to the deterministic and shallow con-            leaderboard isolates intrinsic LLM capability by running
+trol flow (Field et al., 2003). For a fixed operator instance,         each model in a single pass. The agentic leaderboard evalu-
+let vt ∈ {0, 1} indicate whether trial t ∈ {1, . . . , K} passes       ates complete workflows under a fixed trial budget and tool
+the probabilistic verifier; for each required shape, N random          policy. In both cases, entries are ranked primarily by dataset-
+input draws are generated (with fixed seeds) and all must              averaged correctness and secondarily by performance. We
+satisfy the error thresholds.                                          will keep updating the dataset with new maintained opera-
+                                                                       tors especially with novel DSL updates and corresponding
+Performance. We use Perf@K to measure the best perfor-
+                                                                       novel operator designs to reflect the evolving landscape of
+mance relative to the oracle over the verified-correct trials
+                                                                       GPU programming and optimization.
+among the K trials: Perf@K = maxt : vt =1 ℓoracle /ℓt . Let
+ℓt denote the evaluator-reported average latency (in millisec-
+                                                                       4. TritonGym Baseline Evaluation
+onds) for trial t, and let ℓoracle be the oracle latency from
+the provided  reference implementation. If no trial is correct         To demonstrate the utility of TritonGym, we investigate a
+      P
+(i.e., t vt = 0), we set Perf@K = 0 for that instance.                 suite of state-of-the-art LLMs and agentic workflows. Our
+As a result, values above 1 indicate better implementation             evaluation focuses on three key aspects: (1) the ability of
+over the human oracle Triton code and values below 1 are               models to generate correct and efficient Triton kernels, (2)
+slower. For performance measurement, we use the average                the effectiveness of agentic workflows in improving code
+latency for repeated runs as the default metric while pro-             quality through iterative refinement, and (3) the generaliza-
+viding an interface for users to plug in customized metrics            tion capabilities of models to handle OOD tasks and adapt
+such as memory footprint or TFLOPs calculation function                to different backends and languages.
+for particular operators.
+                                                                       4.1. Experimental Setup
+3.3.2. L EADERBOARD AND M AINTENANCE                                   Models. We evaluate SOTA LLMs from multiple providers
+We open-source the dataset and evaluation suite with a                 as backbones using their APIs with consistent prompt set-
+Docker image to encourage community contributions. We                  ting, temperature, and decoding settings to ensure fair com-
+also host a website that serves as the submission portal and           parison. Specifically, we adopt LLM APIs with the fol-
+leaderboard hub for TritonGym. All submissions are exe-                lowing versions: claude-sonnet-4-5-20250929 (Claude-4.5),
+cuted in the same evaluation harness described above and are           gpt-5-2025-08-07 (GPT-5) (Achiam et al., 2023), Llama-4-
+reported with the same metrics and configuration, enabling             Maverick-17B-128E-Instruct-FP8 (Llama-4) (Meta, 2024),
+transparent comparison across models and workflows. We                 Qwen3-Coder-480B-A35B-Instruct-FP8 (Qwen-3)(Yang
+
+
+                                                                   6
+
+===== PDF p.7 =====
+TritonGym
+
+                                               One-Shot           AlphaEvolve          Geak
+                                               1.0
+         1.0                                                                               0.50
+Perf@K
+
+
+
+                                               0.8
+         0.5                                                                               0.25
+                                               0.6
+         0.0                                                                               0.00
+               2     4     6        8    10               2     4      6        8     10               2       4      6        8   10
+                   Cumsum #Trials (K)                          GEMM #Trials (K)                            Attention #Trials (K)
+                                 Figure 5. Trial number sensitivity analysis with Claude-Sonnet-3.5.
+                               Correct        Compile Error           Runtime Error        Verification Failure
+    Claude-4.5
+  DeepSeek-V3
+       Llama-4
+         GPT-5
+              0% 20% 40% 60% 80% 100% 0% 20% 40% 60% 80% 100% 0% 20% 40% 60% 80% 100%
+                      One-Shot                 Geak                  AlphaEvolve
+                                              Figure 6. Generation failures breakdown.
+
+
+et al., 2025), and DeepSeek-V3 (Liu et al., 2024).                     exposure suffices, but without tool feedback, it struggles to
+                                                                       repair compile/runtime issues and to pass verification on
+Workflows. We reimplement representative agentic strate-
+                                                                       edge cases. Overall, one-shot captures baseline competence
+gies within TritonGym’s framework including AlphaE-
+                                                                       yet leaves headroom that motivates agentic workflows.
+volve (Novikov et al., 2025) and Geak (Wang et al., 2025a)
+mimicking their LLM-tool interaction workflows. Using the              Observation 1: One-shot generation is competitive on triv-
+function-call APIs in TritonGym, one can easily implement              ial operators but degrades on OOD and DSL tasks, under-
+other agentic workflows and prompt settings. We give a                 scoring limits of memorization and the need for agentic
+detailed explanation of the agent settings and prompt de-              workflows.
+signs in § B. Using the function-call APIs in TritonGym,
+one can easily extend these implementations to other agen-             4.3. Agentic Workflow Results
+tic workflows and prompting strategies, while keeping the
+evaluation pipeline and logging unified.                               For the agentic workflows shown in Tbl. 1, the results show
+                                                                       a consistent pattern: agentic workflows outperform one-shot
+Evaluation Setting. We design the evaluator mainly follow-             across base models, with the largest gains under OOD or
+ing the benchmark process discussed in NVIDIA (2023) and               DSL settings. Iterative feedback turns many non-building
+Spector et al. (2024). For the evaluator, we empirically set           programs into runnable ones and then uses feedback to
+the number of warm-up runs to 5 and the number of timed                refine scheduling, tiling, and boundary handling, lifting both
+runs to 10 to obtain stable performance measurements. On               correctness and performance. Stronger base models push
+the framework side, we set up the GPU power, frequency                 standard tasks close to saturation with agents, while lighter
+to ensure consistent measurements across different runs.               bases still benefit but remain capacity-limited. We also
+While the benchmark supports multiple hardware backends,               observe complementary behaviors, for instance, Geak tends
+we focus on NVIDIA H100 GPUs in this evaluation without                to eliminate compile failures quickly and secure early wins,
+any loss of generality.                                                whereas AlphaEvolve continues improving with additional
+                                                                       trials and recovers deeper performance. Across models and
+                                                                       categories, the trend is monotonic improvements over one-
+4.2. One-shot Generation Results
+                                                                       shot and better robustness to new operators and backends.
+In the one-shot track, models often produce reasonable ker-
+                                                                       Observation 2: Agentic workflows substantially improve
+nels for familiar operators, but they plateau below expert
+                                                                       correctness and performance, illustrating the benefit of
+performance. As summarized in Tbl. 1, standard samples
+                                                                       feedback-driven iteration.
+(including community and maintained sets) are substan-
+tially easier than OOD and DSL categories, where success
+is highest on familiar operators and drops when the oper-              4.4. Trial Budget Analysis
+ator deviates from seen templates, the backend changes,                Fig. 5 shows how performance scales with the trial budget
+or a language extension is required. The trend is consis-              K across three representative operators. Specifically, we
+tent across models, when one-shot succeeds where prior
+
+                                                                  7
+
+===== PDF p.8 =====
+TritonGym
+
+  Table 2. Cost efficiency analysis on all evaluated workflows.
+                Input     Output    Cost     Pass@1   Perf@1   Cost/Pass   Cost/Perf
+              (Tokens)   (Tokens)   ($) ↓       ↑        ↑       ($) ↓       ($) ↓
+ Claude-4.5   3.53M       8.40M     135.13   36.72%   0.326     368.0       414.5
+ GPT-5        3.06M       8.29M      86.06   25.39%   0.206     339.0       417.8
+ Qwen-3       3.20M       8.80M      24.08   40.09%   0.404      60.1        59.6
+
+
+
+align the results of one-shot with K trials and agents with K
+iterations within one trial. For a trivial operator such as cum-
+sum, agentic workflows quickly dominate: a few iterations
+suffice to turn early failures into verified kernels, and they                             Figure 7. Simplified GEMM generated by AlphaEvolve with TLX.
+remain ahead of one-shot at every K. For a well-studied op-
+erator like GEMM, agents rapidly converge to expert-level
+performance, whereas one-shot plateaus below that ceiling                                  vert compile-time failures into executable programs, then
+even with more trials; the propose–compile–verify–evaluate                                 improve execution correctness. And verification remains
+loop reliably rediscovers the tiling and scheduling patterns                               the bottleneck, motivating richer oracles/specs and stronger
+used by human implementations. For more difficult cases                                    feedback signals for correctness to unlock further gains.
+(e.g., attention), agents continue to improve with additional
+trials yet still leave headroom, but they consistently outper-                             Generated Kernel with DSL Extension. Fig. 7 shows a
+form one-shot across the full budget range. Overall, agentic                               case study of a kernel generated by the AlphaEvolve agent
+search translates extra trials into steady gains, while one-                               of a pipelined GEMM operator using TLX. This generated
+shot saturates early at a lower ceiling.                                                   kernel uses Hopper architecture-specific features, including
+                                                                                           asynchronous TMA transfers from global to shared memory,
+Observation 3: With the same trial budget, agentic work-                                   multi-stage buffering with commit/wait groups, and mma
+flows outperform one-shot by a margin, and the design of                                   instructions of the Tensor Core unit, which are essential to
+such LLM-tool interaction is crucial to the performance.                                   approach Hopper throughput. One-shot LLMs consistently
+                                                                                           fail to produce a correct kernel in a single decode pass. In
+4.5. Case Studies                                                                          contrast, agentic workflows succeed after several trials. This
+                                                                                           stepwise construction with feedback is essential to approach
+Cost Efficiency Analysis. Tbl. 2 analyzes the cost effi-
+                                                                                           high performance for these emerging platforms and it only
+ciency of all evaluated workflows in terms of Pass@1 and
+                                                                                           emerges when the workflow can read compiler/verifier feed-
+Perf@1 per dollar spent on LLM API calls. We observe that
+                                                                                           back and iteratively revise the kernel.
+while the Qwen3 model has a lower absolute Pass@1 and
+Perf@1 compared to other models, it achieves the highest
+cost efficiency due to its lower API cost. This suggests that                              5. Related Work
+for budget-constrained scenarios, selecting models with a
+                                                                                           Several benchmarks have been proposed to evaluate GPU
+favorable cost-performance trade-off can be more benefi-
+                                                                                           code generation capabilities, including TritonBench (Li
+cial than simply opting for the highest-performing models.
+                                                                                           et al., 2025), Geak (Wang et al., 2025b), Kernel-
+We also acknowledge that cost efficiency analysis based on
+                                                                                           Bench (Ouyang et al., 2025), MultiKernelBench (Wen et al.,
+open API prices may not fully capture the total cost of own-
+                                                                                           2025). While focusing different aspects of GPU kernel
+ership, which includes factors like engergy consumption
+                                                                                           synthesis and evaluation, all of these benchmarks focus on
+and infrastructure costs. However, this analysis provides a
+                                                                                           static code generation without agentic workflows, limiting
+useful starting point for evaluating the economic aspects of
+                                                                                           their ability to assess iterative improvement and tool use.
+deploying LLM-based code generation systems.
+                                                                                           More detailed comparison of TritonGym and these prior
+Failure Breakdown. Fig. 6 decomposes outcomes into cor-                                    benchmarks are given in § A.
+rect, compile, runtime, and verification failures. One-shot
+exhibits substantial compile and verification failures, reflect-                           6. Conclusion
+ing frequent API/syntax issues and mismatches to the ora-
+cle. Geak markedly reduces compile errors with its iterative                               TritonGym proposes a reproducible benchmark for auto-
+compile–fix loop, turns many non-building programs into                                    matic Triton kernel synthesis that targets agentic workflows
+runnable ones, yet correspondingly shifts mass into runtime                                across a wide spectrum of operators. With carefully de-
+or verification as more candidates execute but still miss full                             signed task formulation, the benchmark is extensible to new
+specification. AlphaEvolve goes further by using feedback                                  backends and DSLs, and builds a fair arena for evaluating
+to refine kernel structure and scheduling, it reduces runtime                              the power of agentic workflows instead of the capability of
+failures and increases the share of correct solutions. Across                              LLMs. This opens a direction in assessing how LLMs rea-
+the evaluated models, agentic workflows principally con-                                   son, plan, and adapt in high-performance code generation.
+
+                                                                                       8
+
+===== PDF p.9 =====
+TritonGym
+
+Impact Statement                                                    Huang, D., Zhang, J. M., Luck, M., Bu, Q., Qing, Y., and
+                                                                      Cui, H. Agentcoder: Multi-agent-based code generation
+This paper presents work whose goal is to advance research           with iterative testing and optimisation. arXiv preprint
+on agentic GPU code generation by providing a standardized            arXiv:2312.13010, 2023.
+benchmark and tool interface for Triton kernel synthesis.
+There are many potential societal consequences of this line         Jiang, J., Wang, F., Shen, J., Kim, S., and Kim, S. A survey
+of work (including improved efficiency and lower compute               on large language models for code generation. arXiv
+cost, as well as dual-use and risks from incorrect generated           preprint arXiv:2406.00515, 2024.
+kernels), and we encourage responsible use with rigorous
+verification and transparent reporting.                             Li, J., Li, S., Gao, Z., Shi, Q., Li, Y., Wang, Z., Huang,
+                                                                      J., Wang, H., Wang, J., Han, X., Liu, Z., and Sun, M.
+                                                                      TritonBench: Benchmarking Large Language Model
+References                                                            Capabilities for Generating Triton Operators, Febru-
+Achiam, J., Adler, S., Agarwal, S., Ahmad, L., Akkaya, I.,            ary 2025. URL http://arxiv.org/abs/2502.
+  Aleman, F. L., Almeida, D., Altenschmidt, J., Altman, S.,           14752. arXiv:2502.14752 [cs].
+  Anadkat, S., et al. Gpt-4 technical report. arXiv preprint
+                                                                    Liu, A., Feng, B., Xue, B., Wang, B., Wu, B., Lu, C., Zhao,
+  arXiv:2303.08774, 2023.
+                                                                      C., Deng, C., Zhang, C., Ruan, C., et al. Deepseek-v3
+Ansel, J., Yang, E., He, H., Gimelshein, N., Jain, A., Voz-           technical report. arXiv preprint arXiv:2412.19437, 2024.
+  nesensky, M., Bao, B., Bell, P., Berard, D., Burovski, E.,
+  Chauhan, G., Chourdia, A., Constable, W., Desmaison,              Meta. Introducing llama 4: Advancing multimodal intelli-
+ A., DeVito, Z., Ellison, E., Feng, W., Gong, J., Gschwind,          gence, 2024. URL https://ai.meta.com/blog/
+  M., Hirsh, B., Huang, S., Kalambarkar, K., Kirsch, L.,             llama-4-multimodal-intelligence/.
+  Lazos, M., Lezcano, M., Liang, Y., Liang, J., Lu, Y.,             Meta. Tlx: Triton low-level language extensions. https:
+  Luk, C. K., Maher, B., Pan, Y., Puhrsch, C., Reso, M.,             //github.com/facebookexperimental/
+  Saroufim, M., Siraichi, M. Y., Suk, H., Zhang, S., Suo, M.,        triton/tree/tlx, September 2025.                GitHub
+ Tillet, P., Zhao, X., Wang, E., Zhou, K., Zou, R., Wang,            repository, branch tlx.
+ X., Mathews, A., Wen, W., Chanan, G., Wu, P., and
+  Chintala, S. Pytorch 2: Faster machine learning through           Munshi, A. The opencl specification. In 2009 IEEE Hot
+  dynamic python bytecode transformation and graph com-              Chips 21 Symposium (HCS), pp. 1–314. IEEE, 2009.
+  pilation. In Proceedings of the 29th ACM International
+ Conference on Architectural Support for Programming                Novikov, A., Vũ, N., Eisenberger, M., Dupont, E., Huang,
+ Languages and Operating Systems, Volume 2, ASPLOS                    P.-S., Wagner, A. Z., Shirobokov, S., Kozlovskii, B., Ruiz,
+ ’24, pp. 929–947, New York, NY, USA, 2024. Associa-                  F. J., Mehrabian, A., et al. Alphaevolve: A coding agent
+  tion for Computing Machinery. ISBN 9798400703850.                   for scientific and algorithmic discovery. arXiv preprint
+  doi: 10.1145/3620665.3640366. URL https://doi.                      arXiv:2506.13131, 2025.
+  org/10.1145/3620665.3640366.                                      NVIDIA. Measure right! best practices when benchmark-
+Chetlur, S., Woolley, C., Vandermersch, P., Cohen, J. M.,            ing cuda applications. Talk (Session S51334), GTC
+  Tran, J., Catanzaro, B., and Shelhamer, E. cudnn:                  Digital Spring 2023, NVIDIA On-Demand, March
+  Efficient primitives for deep learning. arXiv preprint             2023. URL https://www.nvidia.com/en-us/
+  arXiv:1410.0759, 2014.                                             on-demand/session/gtcspring23-s51334/.
+                                                                     Accessed: 2026-01-27.
+Dao, T., Fu, D., Ermon, S., Rudra, A., and Ré, C. Flashat-
+  tention: Fast and memory-efficient exact attention with           OpenAI.        “gluon” dialect — triton.    https:
+  io-awareness. Advances in neural information processing            //triton-lang.org/main/dialects/
+  systems, 35:16344–16359, 2022.                                      GluonDialect.html, 2020.          Triton documen-
+                                                                      tation; “gluon” MLIR dialect.
+Dong, Y., Jiang, X., Qian, J., Wang, T., Zhang, K., Jin, Z.,
+  and Li, G. A survey on code generation with llm-based             Ouyang, A., Guo, S., Arora, S., Zhang, A. L., Hu, W., Ré,
+  agents. arXiv preprint arXiv:2508.00083, 2025.                      C., and Mirhoseini, A. KernelBench: Can LLMs Write
+                                                                      Efficient GPU Kernels?, February 2025. URL http://
+Field, J., Goyal, D., Ramalingam, G., and Yahav, E. Types-            arxiv.org/abs/2502.10517. arXiv:2502.10517
+  tate verification: abstraction techniques and complexity            [cs] version: 1.
+  results. In Proceedings of the 10th International Confer-
+  ence on Static Analysis, SAS’03, pp. 439–462, Berlin,             Pezoa, F., Reutter, J. L., Suarez, F., Ugarte, M., and Vrgoč,
+  Heidelberg, 2003. Springer-Verlag. ISBN 3540403256.                 D. Foundations of json schema. In Proceedings of the
+
+                                                                9
+
+===== PDF p.10 =====
+TritonGym
+
+  25th international conference on World Wide Web, pp.
+  263–273, 2016.
+Spector, B. F., Arora, S., Singhal, A., Fu, D. Y., and Ré,
+  C. Thunderkittens: Simple, fast, and adorable ai kernels.
+  arXiv preprint arXiv:2410.20399, 2024.
+Tillet, P., Kung, H.-T., and Cox, D. Triton: an intermediate
+   language and compiler for tiled neural network computa-
+   tions. In Proceedings of the 3rd ACM SIGPLAN Interna-
+   tional Workshop on Machine Learning and Programming
+  Languages, pp. 10–19, 2019.
+Tschand, A., Awad, M., Swann, R., Ramakrishnan, K., Ma,
+  J., Lowery, K., Dasika, G., and Reddi, V. J. Swizzleperf:
+  Hardware-aware llms for gpu kernel performance opti-
+  mization. arXiv preprint arXiv:2508.20258, 2025.
+Wang, J., Joshi, V., Majumder, S., Chao, X., Ding, B., Liu,
+ Z., Brahma, P. P., Li, D., Liu, Z., and Barsoum, E. Geak:
+ Introducing triton kernel ai agent & evaluation bench-
+ marks. arXiv preprint arXiv:2507.23194, 2025a.
+Wang, J., Joshi, V., Majumder, S., Chao, X., Ding, B., Liu,
+ Z., Brahma, P. P., Li, D., Liu, Z., and Barsoum, E. Geak:
+ Introducing Triton Kernel AI Agent & Evaluation Bench-
+ marks, July 2025b. URL http://arxiv.org/abs/
+ 2507.23194. arXiv:2507.23194 [cs].
+Wei, A., Sun, T., Seenichamy, Y., Song, H., Ouyang, A.,
+ Mirhoseini, A., Wang, K., and Aiken, A. Astra: A multi-
+ agent system for gpu kernel performance optimization.
+ arXiv preprint arXiv:2509.07506, 2025.
+
+Wen, Z., Zhang, Y., Li, Z., Liu, Z., Xie, L., and Zhang,
+ T. MultiKernelBench: A Multi-Platform Benchmark for
+ Kernel Generation, July 2025. URL http://arxiv.
+ org/abs/2507.17773. arXiv:2507.17773 [cs].
+Wu, M., Cheng, X., Liu, S., Shi, C., Ji, J., Ao, M. K.,
+ Velliengiri, P., Miao, X., Padon, O., and Jia, Z. Mirage:
+ A {Multi-Level} superoptimizer for tensor programs. In
+ 19th USENIX Symposium on Operating Systems Design
+ and Implementation (OSDI 25), pp. 21–38, 2025.
+Yang, A., Li, A., Yang, B., Zhang, B., Hui, B., Zheng, B.,
+  Yu, B., Gao, C., Huang, C., Lv, C., et al. Qwen3 technical
+  report. arXiv preprint arXiv:2505.09388, 2025.
+Yao, S., Zhao, J., Yu, D., Du, N., Shafran, I., Narasimhan,
+  K. R., and Cao, Y. React: Synergizing reasoning and
+  acting in language models. In The eleventh international
+  conference on learning representations, 2022.
+Yu, C., Liang, R., Ho, C.-T., and Ren, H. Autonomous
+  code evolution meets np-completeness. arXiv preprint
+  arXiv:2509.07367, 2025.
+
+
+                                                               10
+
+===== PDF p.11 =====
+TritonGym
+
+                                       Table 3. Comparison of code generation benchmarks.
+
+                                                                            Out-of-Distribution   Backend     Language    Function
+ Benchmark                                 Input             Output
+                                                                                Examples          Extension   Extension     Call
+ TritonBench(Li et al., 2025)         Natural Language       Triton                 ✘                ✘           ✘           ✘
+ Geak(Wang et al., 2025b)             Natural Language       Triton                 ✔                ✘           ✘           ✘
+ KernelBench(Ouyang et al., 2025)         PyTorch             Any                   ✘                ✘           ✘           ✔
+ MultiKernelBench(Wen et al., 2025)       PyTorch        Backend Specific           ✘                ✔           ✘           ✘
+ TritonGym (this work)                    PyTorch            Triton                 ✔                ✔           ✔           ✔
+
+
+
+A. Detailed Discussion of Related Work
+Several benchmarks have been proposed to evaluate GPU code generation capabilities. TritonBench (Li et al., 2025) targets
+Triton kernels with synthesized natural language as input, focusing on real-world workloads such as GitHub and PyTorch
+operator implementations; it evaluates both call accuracy (matching API signatures) and execution accuracy (runtime
+correctness), as well as GPU efficiency, but does not incorporate agentic workflows or support iterative feedback loops.
+Geak (Wang et al., 2025b) ports TritonBench to AMD backends and introduces a novel agent pipeline comprising generator,
+evaluator, reflector, and optimizer modules, explicitly supporting agentic workflows and enabling iterative code generation,
+evaluation, and optimization; however, the executed tools are handled by the agent developer in an ad-hoc manner, limiting
+reproducibility and preventing systematic benchmarking across agentic workflows. KernelBench (Ouyang et al., 2025)
+focuses on GPU kernel generation, allowing the LLM to emit any language including Triton, and provides a rigorous
+evaluation of static code outputs, but offers limited support for agentic workflows, with little emphasis on iterative code
+refinement or tool use beyond initial code generation. MultiKernelBench (Wen et al., 2025) further expands the scope to
+multiple platforms, including CUDA, AscendC, and Pallas as target languages, enabling evaluation across different hardware
+and APIs; its strength lies in the breadth of coverage, but it primarily uses static evaluation and does not accommodate
+agent-based or iterative code improvement. We provide a detailed comparison of these GPU code generation benchmarks in
+Tbl. 3. As summarized in § 5, these benchmarks each focus on different aspects of GPU code generation capabilities and
+have distinct limitations. TritonGym is the first gym-style benchmark that supports agentic workflows with standardized
+function-call interfaces to comprehensively evaluate the reasoning, planning, and adaptation capabilities of LLMs in GPU
+kernel generation.
+
+B. Agent Settings
+One-shot is the simplest setting: the agent constructs a single prompt that embeds the PyTorch operator specification and
+optional instructions, queries the LLM once, and decodes the generated text into executable Triton code. No iterative
+refinement or evaluation feedback is performed, making it suitable for straightforward operators but less robust to initial
+generation errors.
+AlphaEvolve extends this into an evolutionary workflow. At each attempt, the agent samples inspirations (successful or
+failed trials) from a prompt database and augments the base prompt with code diffs and evaluation results. The LLM
+then proposes a new candidate, which is automatically compiled, verified, and benchmarked by the evaluator. Feedback
+such as compilation errors or performance metrics, is stored back into the database, guiding subsequent attempts. After a
+fixed number of iterations (default: 5 attempts with 3 inspirations each), the agent selects the best candidate, prioritizing
+correctness and then latency. This workflow captures the essence of evolutionary search with evaluation-in-the-loop
+refinement.
+Geak implements a more structured multi-agent workflow with both sequential and parallel scaling. Within a sequential run,
+the process alternates between (i) a Generator that produces Triton code conditioned on hardware-specific optimization
+rules, (ii) an Evaluator that conducts cascaded functionality and performance tests, (iii) a Reflector that analyzes errors and
+suggests fixes, and (iv) an Optimizer that proposes performance improvements when functionality passes. The sequential
+loop runs for at most 3 iterations, with up to 3 debugging attempts allowed before resetting. In parallel mode, multiple such
+sequential runs (default: 1–4) are executed concurrently, and the best-performing code among successful runs is selected.
+In the following, we demonstrate the prompts used in our baseline evaluation to reimplement the one-shot generator, Geak,
+and AlphaEvolve agents. Each prompt is designed to guide the LLM towards generating high-quality Triton kernels while
+adhering to specific rules and leveraging relevant knowledge.
+
+                                                                11
+
+===== PDF p.12 =====
+TritonGym
+
+One-shot Generator Prompt
+
+You are an expert in writing high-performance GPU kernels using Triton.
+Your task is to iteratively improve the provided PyTorch operator by generating a Triton implementation.
+Rules:
+- Focus on correctness first; then optimize for speed (tiling, blocking, memory hierarchy).
+- Return ONLY executable Python code (no markdown, no commentary).
+- Name the function triton <operator name> where <operator name> matches                                        the   reference
+torch <operator name>.
+- The function signature must match the reference exactly.
+- If you modify code, use a SEARCH/REPLACE diff style when possible.
+- If the previous version failed, explicitly fix the cause while keeping other parts intact.
+# PyTorch function specification:
+{code}
+
+
+
+
+Geak Knowledge Prompt
+
+# Triton Optimization Knowledge:
+- Utilize shared memory for frequent data access within a thread block.
+- Ensure memory coalescing: consecutive threads should access consecutive memory addresses.
+- Use vectorized loads/stores (tl.load/tl.store) where possible.
+- Be mindful of bank conflicts in shared memory.
+- Use tiling to exploit data locality.
+- Prefer explicit masking (e.g., mask = idx < size) for boundary checks.
+- Kernel signature must include @triton.jit decorator and use tl.constexpr for compile-time constants.
+{more specific knowledge}
+
+
+
+
+Geak Generator Prompt
+
+You are an expert in writing high-performance GPU kernels using Triton.
+Your task is to iteratively improve the provided PyTorch operator by generating a Triton implementation.
+Rules:
+- Focus on correctness first; then optimize for speed (tiling, blocking, memory hierarchy).
+- Return ONLY executable Python code (no markdown, no commentary).
+- Name the function triton <operator name> where <operator name> matches                                        the   reference
+torch <operator name>.
+- The function signature must match the reference exactly.
+- If you modify code, use a SEARCH/REPLACE diff style when possible.
+- If the previous version failed, explicitly fix the cause while keeping other parts intact.
+# PyTorch function specification:
+{code}
+
+
+
+
+Geak Reflector Prompt
+
+You are a debugging expert. Analyze the Triton kernel code and the error message. Propose concise, specific fixes to resolve the
+issue. Focus on the root cause.
+# Triton Kernel Code:
+{code}
+# Error Feedback (Compilation/Runtime):
+{error feedback}
+# Evaluation Result Context:
+{eval result}
+Analyze the error and suggest the key changes needed to fix the code. Be specific about what to change and why:
+
+
+
+                                                              12
+
+===== PDF p.13 =====
+TritonGym
+
+    Geak Optimizer Prompt
+
+   You are a performance optimization expert for GPU Triton kernels. Suggest specific, actionable optimizations to reduce kernel
+   latency.
+   # Current Triton Kernel Code (Latency: {latency ms} ms):
+   {code}
+   # Recent Generation History:
+   {history context}
+   Suggest specific optimizations (e.g., better tiling, memory access patterns, using shared memory, vectorization). Focus on the
+   most promising changes:
+
+
+    AlphaEvolve Generator Prompt
+
+   You are an expert in writing high-performance GPU kernels using Triton.
+   Your task is to iteratively improve the provided PyTorch operator by generating a Triton implementation.
+   Rules:
+   - Focus on correctness first; then optimize for speed (tiling, blocking, memory hierarchy).
+   - Return ONLY executable Python code (no markdown, no commentary).
+   - Name the function triton <operator name> where <operator name> matches                                              the   reference
+   torch <operator name>.
+   - The function signature must match the reference exactly.
+   - If you modify code, use a SEARCH/REPLACE diff style when possible.
+   - If the previous version failed, explicitly fix the cause while keeping other parts intact.
+   # PyTorch function specification:
+   {code}
+
+
+    AlphaEvolve Sampler Prompt
+
+    # Inspirations from past trials:
+    # Past trial {i}:
+    {code}
+    # Result:
+    {result}
+    Analyze the above past trial carefully. Identify what worked correctly and what caused errors or inefficiencies.
+    Retain the correct and efficient logic whenever possible, but modify or replace the faulty parts.
+    Focus on improving kernel latency, scalability across GPUs, and avoiding unnecessary recomputation.
+    Learn from the past trials: fix correctness errors, preserve working logic, and aim to reduce latency if possible.
+    Generate a new improved version below:
+
+
+
+C. Future Work
+PyTorch Integration. To fasicilitate the practical use of generated kernels, we will provide an automatic integration pipeline
+that turns a set of LLM-generated Triton kernels into a drop-in PyTorch backend. The pipeline will (i) scaffold a clean folder
+layout and manifests, (ii) generate binding glue and wrappers, and (iii) run a test battery that reuses PyTorch’s operator tests
+alongside numerics checks and tolerance audits on real shapes drawn from popular HF models. For performance, we will
+include warmup-aware microbenchmarks and shape suites representative of end-to-end workloads.
+Broader Backend Coverage. We will extend TritonGym beyond NVIDIA A100/H100 by adding additional backends,
+for example MI300 from AMD. This effort involves publishing hardware descriptors that capture architectural limits and
+guidance, and providing backend-related oracle Triton implementation samples. This will help ensure that the benchmark
+remains relevant as hardware evolves and that models can generalize across different GPU architectures.
+Auto OOD Generation. We will auto-generate OOD operators by applying random algebraic transformation rewrites
+with pre-defined operators as templates. This alegebraic transformation can be defined as several primitives such as
+commutative, associative, distributive, and normalization transformations (Wu et al., 2025). Then we can random sample a
+sequence of these transformations to apply to a base operator. With these transformations at high-level PyTorch operator
+and corresponding Triton code together, we can derive new OOD operators automatically. This approach allows us to
+systematically create challenging OOD examples that test the model’s ability to generalize beyond familiar patterns, without
+
+                                                                   13
+
+===== PDF p.14 =====
+TritonGym
+
+manual effort.
+Ecosystem of Agentic Workflows. We will include more baselines in the benchmark leaderboard (e.g., Astra (Wei et al.,
+2025)) to sustain a live benchmark. We will also investigate better fairness controls such as token-budget accounting,
+memory or retrieval consumption beyond current trial budget metrics.
+Multi-GPU and Distributed Kernels. We also plan to extend our DSL support to multi-GPU settings, for example
+with Triton-Distributed DSL extension, and introduce a backend resource manager that can allocate devices, enforce
+topology-aware placement (NVLink/PCIe), and orchestrate communication backends. Verification will include cross-
+device determinism checks and scale-out regressions, while performance reporting will add strong/weak scaling and
+compute–communication overlap metrics. This capability enables evaluating operator classes that are inherently distributed
+(e.g., sharded attention, mixture-of-experts routing) and brings the benchmark closer to production training and serving
+scenarios.
+
+D. Out-of-Distribution Examples
+We showcase several representative crafted OOD examples in TritonGym that test the model’s ability to generalize
+beyond familiar patterns. These examples include trivial adaptation of normalization techniques and complex graph-level
+transformations that require deeper reasoning and adaptation.
+
+                                      Table 4. List of OOD examples in the benchmark.
+
+    Op Name                  Description                                                    Python Code
+                                                                            k_indices = torch.arange(K,
+                             Performs a GEMM of matrices A and B,               device=a.device,
+                                                                                dtype=torch.float32)
+    Affine GEMM              where B is generated via an affine             n_indices = torch.arange(N,
+                                                                                device=a.device,
+                             transformation: Bij = αi + βj.                     dtype=torch.float32)
+                                                                            b_prime = (k_indices[:, None] * alpha
+                                                                                + n_indices[None, :] * beta)
+                                                                            b = b_prime.to(a.dtype)
+                                                                            result = torch.matmul(a, b)
+
+
+                             Replaces the standard sum-reduction in         a_expanded = a.unsqueeze(1)
+    Max Reduce GEMM          matrix multiplication with a max-reduction     b_expanded = b.T.unsqueeze(0)
+                                                                            all_products = a_expanded * b_expanded
+                             operation.                                     result = torch.max(all_products, dim=2).values
+
+
+                             An attention-like mechanism where the          p = torch.matmul(q, k.transpose(2, 3))
+    GELU Attention           Softmax function is replaced by an             p = gelu(p)
+                                                                            p = p.to(ref_dtype)
+                             element-wise GELU activation function.         ref_out = torch.matmul(p, v).half()
+
+
+                             An attention-like mechanism where the          p = torch.matmul(q, k.transpose(2, 3))
+    RELU Attention           Softmax function is replaced by an             p = relu(p)
+                                                                            p = p.to(ref_dtype)
+                             element-wise ReLU activation function.         ref_out = torch.matmul(p, v).half()
+
+
+                             A simplified attention mechanism where
+                             the Softmax activation is removed,             p = torch.matmul(q, k.transpose(2, 3))
+    Contiguous GEMM                                                         p = p.to(ref_dtype)
+                             resulting in two consecutive matrix            ref_out = torch.matmul(p, v).half()
+                             multiplications.
+
+
+
+
+                                                            14
+
+===== PDF p.15 =====
+TritonGym
+
+                                     Table 4 – Continued from previous page
+
+    Op Name                Description                                                    Python Code
+                                                                           n_cols = x.shape[1]
+                                                                           max_val = torch.max(x, dim=1, keepdim=True)[0]
+                                                                           dynamic_eps = base_eps + torch.abs(max_val) *
+                           A custom normalization layer involving a       ,→ max_val_multiplier
+                                                                           mean = x.mean(dim=1, keepdim=True)
+                           complex sequence of operations, including       var = ((x - mean)**2).mean(dim=1, keepdim=True)
+    Chaos Norm                                                             rstd = torch.rsqrt(var + dynamic_eps)
+                           dynamic epsilon calculation and                 normalized_x = (x - mean) * rstd
+                           conditional transformations.                    x_int = x.to(torch.int32)
+                                                                           w_selected = torch.where((x_int & 1) == 0, w1,
+                                                                          ,→ w2)
+                                                                           scaled_x = normalized_x * w_selected + b
+                                                                           col_indices = torch.arange(n_cols,
+                                                                          ,→ device=x.device)
+                                                                           is_even_col = (col_indices % 2) == 0
+                                                                           res = torch.where(
+                                                                                is_even_col,
+                                                                                torch.log(torch.abs(scaled_x) +
+                                                                               ,→ log_addend),
+                                                                                -scaled_x
+                                                                           )
+
+
+                           A variant of RMS Norm where the                 sum4 = x.to(torch.float32).pow(4).sum(-1,
+    Quadratic RMS Norm     standard sum of squares is replaced by a       ,→ keepdim=True)
+                                                                           norm4 = (sum4 + eps).pow(0.25)
+                           sum of the fourth power of the elements.        res = x * (1 / norm4).to(x.dtype) * weight
+
+                                                                           n_cols = X.shape[1]
+                                                                           col_offsets = torch.arange(0, n_cols,
+                           A custom normalization method that             ,→ device=X.device, dtype=X.dtype)
+                           incorporates trigonometric functions to         perturbed_x = X + torch.sin(col_offsets) *
+    Triangular Norm                                                       ,→ perturbation_factor
+                           introduce non-linear, periodic                  chaos_mean = torch.mean(perturbed_x, dim=1,
+                                                                          ,→ keepdim=True)
+                           transformations.                                chaos_var = torch.mean(torch.cos(X) *
+                                                                          ,→ torch.sin(chaos_mean), dim=1, keepdim=True)
+                                                                           instability_factor =
+                                                                          ,→ torch.rsqrt(torch.abs(chaos_var) + eps)
+                                                                           normalized_row = torch.tanh((X - chaos_mean) *
+                                                                          ,→ instability_factor)
+                                                                           res = torch.pow(W, 2) * normalized_row +
+                                                                          ,→ torch.cos(B)
+
+                                                                          n_rows, n_cols = x.shape
+                                                                          y = torch.zeros_like(x)
+                                                                          for i in range(n_rows):
+                           A custom normalization technique where              neighbor_row_idx = (i + 1) % n_rows
+                                                                               neighbor_col_idx = i % n_cols
+                           the calculation for each row is perturbed by        wormhole_val = x[neighbor_row_idx,
+    Wormhole Norm                                                             ,→ neighbor_col_idx].item()
+                           a value sampled from a different row,               x_row = x[i, :]
+                           creating cross-row dependencies.                    mean = x_row.mean()
+                                                                               perturbed_mean = mean + wormhole_val *
+                                                                              ,→ perturbation_factor
+                                                                               var = ((x_row - perturbed_mean)**2).mean()
+                                                                               rstd = torch.rsqrt(var + eps)
+                                                                               normalized_row = (x_row - perturbed_mean) *
+                                                                              ,→ rstd * w + b
+                                                                               if wormhole_val > 0.5:
+                                                                                    y_row = normalized_row * wormhole_val
+                                                                               else:
+                                                                                    y_row = normalized_row / (wormhole_val
+                                                                                   ,→ + divisor_guard)
+                                                                               y[i, :] = y_row
+
+
+
+
+D.1. TLX DSL Extension Case Study
+The following example shows a generated TLX kernel for a GEMM operator with the AlphaEvolve agent. It is the full
+version of the simplified example in § 4.5.
+
+import triton
+import triton.language as tl
+import triton.language.extra.tlx as tlx
+import torch
+
+def triton_tlx_gemm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    # Check constraints
+
+
+                                                          15
+
+===== PDF p.16 =====
+TritonGym
+
+   assert a.shape[1] == b.shape[0], "Incompatible matrix dimensions"
+   assert a.is_contiguous(), "Matrix A must be contiguous"
+   assert b.is_contiguous(), "Matrix B must be contiguous"
+
+   M, K = a.shape
+   K_b, N = b.shape
+
+   # Create output tensor
+   c = torch.zeros((M, N), dtype=a.dtype, device=a.device)
+
+   # Define block sizes
+   BLOCK_M = 128
+   BLOCK_N = 128
+   BLOCK_K = 32
+   NUM_STAGES = 2
+
+   # Launch kernel
+   grid = (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)
+
+   _tlx_gemm_kernel[grid](
+       a, b, c,
+       M, N, K,
+       a.stride(0), a.stride(1),
+       b.stride(0), b.stride(1),
+       c.stride(0), c.stride(1),
+       BLOCK_M=BLOCK_M,
+       BLOCK_N=BLOCK_N,
+       BLOCK_K=BLOCK_K,
+       NUM_STAGES=NUM_STAGES,
+   )
+
+   return c
+
+@triton.jit
+def _tlx_gemm_kernel(
+    a_ptr, b_ptr, c_ptr,
+    M, N, K,
+    stride_am, stride_ak,
+    stride_bk, stride_bn,
+    stride_cm, stride_cn,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
+    NUM_STAGES: tl.constexpr,
+):
+    # Program ID
+    pid = tl.program_id(axis=0)
+    num_pid_m = tl.cdiv(M, BLOCK_M)
+    num_pid_n = tl.cdiv(N, BLOCK_N)
+    pid_m = pid // num_pid_n
+    pid_n = pid % num_pid_n
+
+   # Block offsets
+   offs_am = (pid_m * BLOCK_M + tl.arange(0, BLOCK_M)) % M
+   offs_bn = (pid_n * BLOCK_N + tl.arange(0, BLOCK_N)) % N
+   offs_k = tl.arange(0, BLOCK_K)
+
+   # Initialize pointers
+   a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
+   b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
+
+   # Allocate shared memory buffers with correct dtype
+   buffers_a = tlx.local_alloc((BLOCK_M, BLOCK_K), tl.float16, NUM_STAGES)
+   buffers_b = tlx.local_alloc((BLOCK_K, BLOCK_N), tl.float16, NUM_STAGES)
+
+
+                                          16
+
+===== PDF p.17 =====
+TritonGym
+
+
+
+# Initialize accumulator
+acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+
+# Prefetch first stages
+for i in range(min(NUM_STAGES - 1, tl.cdiv(K, BLOCK_K))):
+    buf_idx = i % NUM_STAGES
+    buffer_a = tlx.local_view(buffers_a, buf_idx)
+    buffer_b = tlx.local_view(buffers_b, buf_idx)
+
+    k_remaining = K - i * BLOCK_K
+    mask_k = offs_k < k_remaining
+
+    token_a = tlx.async_load(a_ptrs, buffer_a, mask=mask_k[None, :])
+    token_b = tlx.async_load(b_ptrs, buffer_b, mask=mask_k[:, None])
+    tlx.async_load_commit_group([token_a, token_b])
+
+    a_ptrs += BLOCK_K * stride_ak
+    b_ptrs += BLOCK_K * stride_bk
+
+# Main computation loop
+for k in range(0, tl.cdiv(K, BLOCK_K)):
+    buf_idx = k % NUM_STAGES
+
+    # Wait for current buffer to be ready
+    tlx.async_load_wait_group(NUM_STAGES - 2)
+
+    # Get buffer views
+    buffer_a = tlx.local_view(buffers_a, buf_idx)
+    buffer_b = tlx.local_view(buffers_b, buf_idx)
+
+    # Perform async dot product
+    acc = tlx.async_dot(buffer_a, buffer_b, acc)
+    acc = tlx.async_dot_wait(NUM_STAGES - 1, acc)
+
+    # Prefetch next buffer if available
+    next_k = k + NUM_STAGES - 1
+    if next_k < tl.cdiv(K, BLOCK_K):
+        next_buf_idx = next_k % NUM_STAGES
+        next_buffer_a = tlx.local_view(buffers_a, next_buf_idx)
+        next_buffer_b = tlx.local_view(buffers_b, next_buf_idx)
+
+        k_remaining = K - next_k * BLOCK_K
+        mask_k = offs_k < k_remaining
+
+        token_a = tlx.async_load(a_ptrs, next_buffer_a, mask=mask_k[None, :])
+        token_b = tlx.async_load(b_ptrs, next_buffer_b, mask=mask_k[:, None])
+        tlx.async_load_commit_group([token_a, token_b])
+
+        a_ptrs += BLOCK_K * stride_ak
+        b_ptrs += BLOCK_K * stride_bk
+
+# Wait for final computation to complete
+acc = tlx.async_dot_wait(0, acc)
+
+# Store result
+offs_cm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+offs_cn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
+c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+
+c = acc.to(tl.float16)
+tl.store(c_ptrs, c, mask=c_mask)
+
+
+
+                                          17

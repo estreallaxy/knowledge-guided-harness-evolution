@@ -1,0 +1,1832 @@
+===== PDF p.1 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+
+     Hao Kang * 1 Ziyang Li * 2 Weili Xu * 3 Xinyu Yang * 4 Yinfang Chen 3 Junxiong Wang 5 Beidi Chen 4
+                               Tushar Krishna 1 Chenfeng Xu 5 Simran Arora 5
+
+
+                          Abstract                                      1. Introduction
+                                                                        Recent advances in language models have expanded their
+     Large language models (LLMs) are now used to                       use beyond basic chatbots to complex agents (Yang et al.,
+     power complex multi-turn agentic workflows. Ex-                    2025; Team et al., 2025). These agents address real-world
+     isting systems run agentic inference by loosely                    problems in domains such as coding (Jimenez et al., 2024;
+     assembling isolated components: an LLM infer-                      Jain et al., 2024) and computer-use (Xie et al., 2024; Bonatti
+     ence engine (e.g., vLLM) and a tool orchestrator                   et al., 2024) by interleaving long reasoning with external
+     (e.g., Kubernetes). Although agentic workflows                     tool calls (e.g., compilers, retrievers), often operating as au-
+     involve multiple LLM and tool requests, these sys-                 tonomous systems that execute multi-step workflows with-
+     tems schedule and allocate resources separately                    out real-time human intervention. However, the through-
+     on a per-request basis, without end-to-end knowl-                  put of modern inference systems degrades as the number
+     edge of the workflow. This leads to sub-optimal                    of agentic requests being processed increases (Figure 1a).
+     management of KV cache and tool execution envi-                    Meanwhile, rollout accounts for over 70% of the total wall-
+     ronments. To address the challenges, we propose                    clock time in reinforcement learning (RL) (Sheng et al.,
+     T HUNDER AGENT, a fast, simple, and program-                       2025; Fu et al., 2025).
+     aware agentic inference system. We first abstract                  As agentic workflows become increasingly autonomous at
+     agentic workflows as LLM Programs, enabling a                      scale, overall system efficiency is governed by sustained
+     unified view of heterogeneous resources, includ-                   throughput rather than tail latency, whereas human-in-the-
+     ing KV caches, system states, and external tool                    loop applications are often dominated by user response
+     assets such as disk memory and network ports.                      times. Therefore, higher throughput directly reduces serv-
+     Built upon this abstraction, T HUNDER AGENT in-                    ing cost by amortizing hardware over more completed
+     troduces a program-aware scheduler and a tool re-                  workflows. Moreover, in asynchronous RL, higher roll-
+     source manager designed to maximize KV cache                       out throughput mitigates policy lag between the parameters
+     hit rates, mitigate memory imbalances, and enable                  used for data collection and those being updated. This al-
+     asynchronous environment preparation. Evalua-                      lows the model to learn from data with reduced staleness,
+     tions across coding, routing, and scientific dis-                  improving both convergence speed and final policy qual-
+     covery agents demonstrate that T HUNDER AGENT                      ity (Fu et al., 2025; Sheng et al., 2025; Shenfeld et al., 2025;
+     achieves 1.5-3.6× throughput improvements in                       Zheng et al., 2025).
+     serving, 1.8-3.9× in RL rollout, and up to 4.2×
+                                                                        However, current agentic inference systems provide sub-
+     disk memory savings compared to state-of-the-
+                                                                        optimal throughput because they are loosely combined from
+     art inference systems. To facilitate reproducibil-
+                                                                        isolated components: an off-the-shelf model inference en-
+     ity and support future development, we open-
+                                                                        gine(e.g., vLLM (Kwon et al., 2023) or SGLang (Zheng
+     source the system implementations of T HUN -
+                                                                        et al., 2024)) coupled with a general-purpose tool orches-
+     DER AGENT at:         https://github.com/
+                                                                        trator (e.g., Kubernetes). While agentic workflows involve
+     ThunderAgent-org/ThunderAgent.
+                                                                        multiple turns of model and tool requests, these components
+                                                                        schedule and allocate resources separately on a per-request
+    *                        1
+                                                                        basis, without end-to-end knowledge of the entire workflow.
+      Equal contribution       Georgia Institute of Technology
+2
+  Individual Researcher 3 University of Illinois Urbana-Champaign
+                                                                        This design gives rise to three key challenges:
+4
+  Carnegie Mellon University 5 Together AI. Correspondence to:          1. KV cache thrashing. Under memory pressure at high
+Hao Kang <hkang342@gatech.edu>.                                            concurrency, request-aware systems reactively evict the
+Proceedings of the 43 rd International Conference on Machine               KV cache of programs in their tool-execution intervals
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026               to make room for decode requests of other concurrent
+by the author(s).                                                          programs, without foresight into future reuse in the agent
+
+                                                                    1
+
+===== PDF p.2 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+                                       vLLM                                                E2E latency (s)            KV hit rate (%)                                                   vLLM             ThunderAgent(Ours)
+                                       Continuum                                      60                                           100                                                  Continuum
+  Throughput (step/min)
+
+                          450                                                                                                                                                     4
+                                       ThunderAgent(Ours)                                                                                                                                                      3.6x
+
+
+
+
+                                                                                                                                        Prefix cache hit rate (%)
+                          400                               2.65×
+                                                                                      48                                           80
+
+
+
+
+                                                                    E2E latency (s)
+                          350
+
+
+
+
+                                                                                                                                                                    Speedup (x)
+                                                                                                                                                                                  3
+                                                                                                                                                                                               2.6x
+                          300
+                                                                                      36                                           60
+                          250                               1.52×                                                                                                                 2
+                                                                                      24                                           40                                                   1.5x                                     1.5x
+                          200
+                                                                                                                                                                                                        1.1x
+                          150                                                                                                                                                     1
+                                                                                      12                                           20                                                                                     0.6x
+                          100
+
+                          50                                                                                                                                                      0
+                                24         48      72        96                       0                                            0                                                  SWE-agent       OpenHands       ToolOrchestra
+                                                                                           24       48           72         96
+                                     Parallel workflow number                              Parallel workflow number
+
+          (a) Throughput degradation                     (b) KV cache thrashing               (c) Speedup from T HUNDER AGENT
+Figure 1. Performance comparison of T HUNDER AGENT against prior agent inference systems as the parallel workflow number
+(i.e., batch size) increases. We evaluate the GLM-4.6 MoE model serving SWE-Agent on SWE-Bench Lite (Figures a and b) and
+SWE-Agent, OpenHands, and ToolOrchestra (Figure c) on an 8×H100 GPU cluster. Results show that: (a) Current inference systems
+fail to maintain high throughput at large batch sizes. (b) Throughput degradation is primarily caused by low KV cache hit rates, which
+increase end-to-end request latency. (c) T HUNDER AGENT achieves high throughput compared to prior inference systems by reducing
+KV-cache thrashing and managing the lifecycle of tool execution resources.
+            workflow. Thus when the tool call completes, the system                                              2. Program-aware scheduler: Based on the program ab-
+            needs to rerun prefill to recover its whole interaction                                                 straction, we cast agentic inference scheduling as a con-
+            history. The re-prefill cost increases the average end-                                                 strained optimization problem to minimize the recompu-
+            to-end latency of agent workflows by up to 7.14× (see                                                   tation and caching overheads, and maximize prefilling
+            Figure 1b) and decreases throughput.                                                                    and decoding throughput, subject to GPU memory ca-
+                                                                                                                    pacity. We introduce two key mechanisms:
+2. Cross-node memory imbalance. The request-aware
+   engines suffer from imbalanced utilization in multi-node                                                          (a) State-aware pausing: If the execution backend ex-
+   inference setups. Existing engines pin all requests from                                                               periences memory pressure, we selectively pause
+   the same agentic workflow to a fixed node to maximize                                                                  workflows that are currently in the acting state with
+   the KV cache hit rate. However, as context lengths                                                                     tool call. This design helps preserve memory for
+   scale rapidly and unpredictably in agent workflows, some                                                               programs that are in the reasoning state and elimi-
+   nodes reach capacity while others remain underutilized                                                                 nate arbitrary, sub-optimal KV cache eviction.
+   under this routing policy.                                                                                        (b) Dynamic migration: We migrate agent programs
+                                                                                                                          across data parallel (DP) GPU nodes to mitigate
+3. Tool lifecycle obliviousness. The request-aware orches-                                                                memory imbalance. We accomplish this by en-
+   trators struggle to decide when to release and prepare                                                                 abling all DP nodes share a global program-aware
+   resources and environments required for tool execution.                                                                waiting queue, rather than enforcing that requests
+   Thus, unused sandboxes and API servers continue to                                                                     from a program are always sent to the same node.
+   occupy critical disk space and network ports, leading
+                                                                                                                 3. Program-aware tool resource management: In long-
+   to cumulative resource exhaustion and system failures.
+                                                                                                                    horizon agentic workloads, tool environments are persis-
+   Meanwhile, agentic workflows have to wait for extremely
+                                                                                                                    tent resources whose mismanagement directly limits sus-
+   long setup time before reasoning.
+                                                                                                                    tained throughput. By tracking execution dependencies,
+This work introduces T HUNDER AGENT, an agentic infer-                                                              T HUNDER AGENT overlaps I/O-intensive environment
+ence system that adopts an end-to-end view of agentic work-                                                         initialization with LLM reasoning. For completed pro-
+flows to enable high-throughput agentic serving and RL                                                              grams, we implement a lifecycle-aware garbage collector
+rollout. Our specific contributions are:                                                                            that leverages program termination signals to reclaim
+1. Program abstraction: We abstract agent workflow as                                                               tool resources such as Docker sandboxes and network
+   agentic programs. An agentic program is a first-class                                                            ports. Consequently, this prevents accumulated resource
+   scheduling unit that persists across multiple model in-                                                          leakage and ensures sustained high-throughput agentic
+   vocations and tool executions, exposing semantic state                                                           inference in T HUNDER AGENT.
+   to the runtime. A program tracks metadata for the                                                             The above contributions cannot be achieved within request-
+   workflow’s identifier, execution phase (i.e., reasoning                                                       aware inference engines. Without an explicit representa-
+   or acting), scheduling status, total tokens, and tool re-                                                     tion of program states and workflow dependencies, request-
+   sources. This abstraction decouples scheduling from ex-                                                       aware schedulers cannot distinguish temporary tool waits
+   ecution backends (e.g., vLLM/SGLang/TensorRT-LLM),                                                            from termination or coordinate GPU memory with program-
+   enabling seamless integration of new workflows.                                                               level resource scheduling.
+
+                                                                                                             2
+
+===== PDF p.3 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+We evaluate T HUNDER AGENT across diverse agentic work-                   Autellix models multi-turn agentic workflows as GPU-only
+loads. For serving, we evaluate the ToolOrchestra (Su et al.,             programs and tracks the accumulated GPU execution time
+2025) as routing agent on HLE-Bench (Phan et al., 2025),                  in a central process table (Luo et al., 2025). However, it
+SWE-Agent (Yang et al., 2024) and OpenHands (Wang                         ignores workflow locality, allowing concurrent workflows
+et al., 2025b) as coding agent on SWE-bench (Jimenez                      to aggressively evict other’s KV cache, triggering KV cache
+et al., 2024), and OpenHands as scientific discovery agent                thrashing under heavy workloads.
+on ScienceAgentBench (Chen et al., 2024), achieving 1.48–
+                                                                          Continuum is another recent serving system designed for
+3.58× throughput improvements as illustrated in Figure 1c.
+                                                                          multi-turn agentic workflows (Li et al., 2025). It employs a
+For RL rollouts, we further test the coding agents on dis-
+                                                                          time-to-live (TTL) mechanism to pin KV caches in HBM,
+tributed GPU nodes, achieving 1.79–3.92× improvements
+                                                                          thereby mitigating context thrashing during tool execution.
+compared with prior SOTA systems.
+                                                                          However, it fails to solve the KV cache eviction problem.
+Beyond these results, we evaluate T HUNDER AGENT under                    The first reason is that most tools take an unpredictable
+common large-scale deployment settings. As detailed in                    amount of time (e.g. remote model APIs in ToolOrches-
+the appendix, T HUNDER AGENT’s throughput scales near-                    tra (Su et al., 2025), compilers in code agents, and web
+linearly with multiple worker replicas on up to 64 H100                   applications for computer use agents (Zhou et al., 2024)).
+GPUs (Section A.3), and remains effective when com-                       Such unpredictable tools trigger severe thrashing as well as
+bined with KV-cache offloading (Section A.4). T HUNDER -                  stranded KV cache memory in Continuum due to incorrect
+AGENT has been adopted by open-source frameworks such                     TTL estimates. Moreover, once the decoding memory of
+as SkyRL and NVIDIA Dynamo (Section A.6).                                 the running workflow surpasses the GPU limit, the system
+                                                                          preempts and evicts pinned KV cache as well. This leads to
+2. Background
+                                                                          unavoidable thrashing and corresponding throughput degra-
+In this section, we provide background on the properties                  dation shown in Figure 1a.
+and existing approaches to support agentic inference.
+                                                                          These limitations underscore the need for a simple and fast
+2.1. System Properties of Current Agentic Workflows                       system for agentic inference. We envision such a system
+Current agentic workflows alternate between reasoning and                 as a program-aware scheduling layer for emerging agentic
+acting during generation. Formally, at each step t, the agent             inference systems (e.g., Zhang et al. (2026)).
+receives an observation ot ∈ O and produces an emission
+et = (ℓt , at ) ∈ L × A, where ℓt denotes a thought and at                3. Challenges in Existing Agentic Inference
+represents an action. We define the cumulative context at                    Systems
+step t as ct = (o1 , e1 , . . . , ot ), which captures the interac-       This section profiles vLLM combined with Kubernetes as
+tion history of agentic workflows. Conditioned on ct , et is              a representative baseline for multi-turn agentic inference,
+sampled from a policy π(et |ct ).                                         and synthesize its key inefficiencies. Notably, the identified
+This workflow keeps two persistent states: (i) GPU Memory,                limitations cannot be solved by replacing the inference en-
+where the KV cache of ct serves as the workflow’s memory.                 gine, but rather require new program-aware abstractions. By
+As the trace grows incrementally, ct+1 extends ct as a prefix,            default, we use GLM 4.6 model for OpenHands RL rollout
+enabling theoretical near-complete KV cache reuse rates                   on two 8×H100 GPU nodes.
+across steps. (ii) Tool Environment, where external resources
+                                                                          3.1. KV Cache Thrashing
+(e.g., sandboxes) initialized at t = 1 must remain consistent
+and accessible throughout the execution.                                  Agentic workflows exhibit a high theoretical KV cache reuse
+These stateful dependencies necessitate a program-level                   rate during their execution. However, in existing LLM
+view of agentic inference trajectories, thereby enabling to               serving systems, each step is served as an independent and
+system to coordinate heterogeneous resources and manage                   stateless request. Under high concurrency, this request-level
+state across long-running workflows. However, existing                    scheduling causes KV cache to be frequently evicted during
+inference systems treat each thought lt and action at as an               tool execution to accommodate newly arriving requests,
+independent, stateless request.                                           resulting in repeated eviction and reprefill, which we refer
+                                                                          to as KV cache thrashing.
+2.2. Existing Agentic Inference Systems
+                                                                          As shown in Figure 1b, this thrashing intensifies as the num-
+Prior work focuses on optimizing the individual components                ber of parallel workflows increases. The resulting degrada-
+in agentic inference, including the LLM inference engine                  tion in cache hit rates triggers frequent and costly re-prefill,
+or tool orchestrator (Section A.1, Section A.2), but there                where the prefix must be recomputed upon tool comple-
+are very few works that provide end-to-end optimization for               tion. This redundancy significantly increases the end-to-end
+agentic workflows across GPU, CPU, and remote resources.                  latency of each request by up to 7.14× compared to a non-
+                                                                          thrashing setting, leading to severe throughput degradation.
+
+                                                                      3
+
+===== PDF p.4 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+                     80        Node0         ABS Diff                                                                                                               60
+                               Node1                                                     3.0         Disk usage
+
+
+
+
+                                                                                                                                          Avg env prepare time(s)
+                     70
+                                                                                         2.5         Active disk usage                                              48
+                                                                                                                                                                                                     47.2
+  Memory usage (%)
+
+
+
+
+                     60
+
+
+
+
+                                                                           Disk usage (TB)
+                                                                                         2.0 Disk memory capacity
+                                                            51.0%                                                                                                                           38.4
+                     50                                                                                                                                             36            32.8
+                                                                                                                                                                         29.9
+                     40                                                                  1.5
+                     30                                                                                                                                             24
+                                                                                         1.0
+                     20
+                                                                                                                                                                    12
+                     10
+                                                                                         0.5
+                     0
+                          0   10   20   30   40   50   60   70   80   90
+                                                                                         0.00       50     100   150    200   250   300                             0
+                                                                                                                                                                          24        48       72       96
+                                         Time (min)                                                      Processed workflows                                                Parallel workflow number
+
+                          (a) Memory imbalance in rollout                                    (b) Runtime disk usage for tool envs.                                       (c) Tool env. preparation time
+Figure 2. Demonstrations of the memory imbalance and tool resource management problems for current agentic inference systems.
+We evaluate vLLM + Kubernetes on OpenHands RL rollout using the GLM 4.6 model on SWEBench-Lite with two 8×H100 GPU
+Nodes. The observations show: (a) Max memory imbalance can achieve 51% on 90 min rollout tests when applying vLLM KV-aware
+router. (b) Failure to garbage collect tool execution environments gradually causes resource usage to exceed system capacity. (c)
+Average tool execution environment preparation time grows fast as parallel workflow number increases.
+
+3.2. Cross-Node Memory Imbalance                                                                                     Costly environment preparation. We observed that most
+Current policies for routing requests across worker replicas                                                         agentic workloads need to prepare environments before ini-
+are also sub-optimal. Existing multi-turn schedulers (Zheng                                                          tiating the multi-turn trajectory. For example, coding agents
+et al., 2024; vLLM Team, 2025) greedily assign requests                                                              need to pull dockers, install related packages and build
+to the target with the highest KV-cache locality in order to                                                         repositories. Furthermore, this preparation time is costly
+maximize cache reuse. However, this policy ignores the fact                                                          and increases with the parallel workload number, as shown
+that the memory load can become imbalanced across nodes.                                                             in Figure 2c. If the LLM inference engine needs to wait
+For instance, the KV-aware router in vLLM (vLLM Team,                                                                until the environments are fully prepared, this overhead will
+2025) sends all requests from the same agentic workflow                                                              extend the end-to-end latency of the inference system.
+to the same node. Since different workflows can exhibit                                                              4. T HUNDER AGENT: A Program-Aware
+highly heterogeneous KV footprints and execution lifetimes,
+this policy often results in severe memory imbalance across
+                                                                                                                        Agentic Inference System
+nodes, with some nodes are overloaded while others remain                                                            With all findings in Section 3, we present T HUNDER AGENT,
+lightly utilized. Similarly, the cache-aware router in SGLang                                                        a program-aware system for high throughput agentic infer-
+routes via a router-side radix tree that approximates worker                                                         ence. We model the Agentic Program in Section 4.1, which
+KV state. Under high agentic concurrency, worker-side                                                                serves as our primary abstraction for scheduling. Section 4.2
+evictions from KV thrashing leave this tree stale, yielding                                                          formalizes a cost model to guide our system design. Built
+both poor cache reuse and cross-node imbalance.                                                                      upon these foundations, we detail our KV cache scheduling
+As shown in Figure 2a, during a 90 minute snapshot of                                                                policy in Section 4.3 and tool resource management strategy
+agentic RL rollout, the memory usage between two DP                                                                  in Section 4.4.
+nodes diverges by more than 20% for over 37 minutes,                                                                 4.1. Program Abstraction
+reaching a peak imbalance of 51%.                                                                                    The Agentic Program serves as a fundamental abstraction
+3.3. Tool Lifecycle Obliviousness                                                                                    that encapsulates both the logical execution flow and the
+Current agentic inference systems do not synchronize the                                                             system-level dependencies of agentic workflows. Formally,
+external tool orchestrator’s lifecycle with the LLM infer-                                                           we define an agentic program P as a tuple:
+ence engine, resulting in silent resource wastage and latency                                                                             P = ⟨ID, c, T , L, τ, s⟩,                                         (1)
+overhead on the tool orchestrator side.
+                                                                                                                     where ID represents the unique global identifier. c de-
+Resource leakage and unused sandboxes. Figure 2b                                                                     notes the number of tokens in the context, correspond-
+showcases that the total disk space consumption increases                                                            ing to the KV cache memory footprint during active ex-
+linearly with the number of processed workflows, eventu-                                                             ecution. T tracks the set of tool environments used by
+ally exceeding system capacity. This is because unused                                                               the program, enabling garbage collection when no pro-
+resources (e.g., Docker images of finished workloads) are                                                            gram requires them further. L, τ , and s denote the node
+not reclaimed when workflows complete. This inefficient                                                              placement, execution phase, and scheduling status, re-
+garbage collection leads to fatal system instabilities for long-                                                     spectively, facilitating program-level KV cache thrashing
+running agentic inference workloads.                                                                                 reduction and cross-node transferring. A metadata example
+
+                                                                                                                 4
+
+===== PDF p.5 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+
+                                                        ThunderAgent                                                             Inference Backend
+                                                                                                                              P10: Pydata_6
+                                                         Global Waiting Queue                                                 C: 15K
+                               Incoming
+                                               𝑃𝑖                                                                             𝜏: Reasoning
+                                Program                     P6   P7    P11    ...                                             ℒ: backend_3       P9: Pydata_3
+                                                                                                                                                 C: 15K
+                                                                                                                             P12: Astropy_1      𝜏: Acting
+                                      Pause P2                                        Restore P6, P9                         C: 21K              ℒ: backend_3
+                                                                                                                             𝜏: Reasoning
+                                                                                                                             ℒ: backend_3
+            P2    P1   P4    ...         ...                P5    P8     P3   ...              P9      P10      P12
+
+                 Backend 1         Thrashing                     Backend 2                          Backend 3
+                                                                                                                               Thrashing Monitor (𝛥𝑡)   55% HBM
+                  P    Reasoning Program            P   Acting Program                Pause              Restore
+
+
+Figure 3. An Overview of T HUNDER AGENT. We show the transition between scheduling states and memory management. T HUNDER A-
+GENT queries the state of each data parallel backend periodically every ∆t time. Here, Backend #1 triggers thrashing, while Backend #3
+is underutilized. The global waiting queue shared by all Backends then pauses and collects acting Program #2 back to the queue while
+releasing reasoning Program #6 and #9, to stop the KV-cache thrashing in Backend #1 and reduce memory imbalance of Backend #3.
+
+is demonstrated on the right side of Figure 3.                                                capacity, and idle caching. We explicitly distinguish incre-
+T HUNDER AGENT directly wraps existing LLM engines                                            mental prefilling for tool execution results from recompu-
+and tool orchestrators by interfacing with OpenAI-style                                       tation over historical interactions, with the latter leading to
+endpoints. Program IDs allow the system to distinguish                                        significantly higher cost due to re-computing evicted KV
+requests from different agentic workflows. We elaborate on                                    cache over the full context. Formally, this yields the follow-
+the simplicity of integrating T HUNDER AGENT with existing                                    ing cost decomposition:
+inference services in Appendix B.
+                                                                                              Costtotal ≈ Costdecode + Costprefill + Costrecompute + Costunused + Costcaching
+Table 1. Summary of Notations for agentic programs. Each                                                                                                                 (3)
+program instance is characterized by its identity, execution phase,
+tool environments, resource footprint, and scheduling state.                                  In this decomposition, Costdecode and Costprefill represents
+                                                                                              the effective work that contributes to inference through-
+ Notation        Description                                                                  put. The remaining terms are wasted system overheads:
+ P               Agentic program instance                                                     Costrecompute stems from KV cache thrashing (Section 3.1);
+ ID              Unique global identifier for the program                                     Costunused reflects memory imbalance across data paral-
+ c               Number of tokens in the context                                              lel (DP) inference backend replicas (Section 3.2); and
+ T               Set of tool environments required by the program                             Costcaching accumulates while holding memory during exter-
+ L               Backend placement for cache affinity                                         nal tool execution (Section 3.3).
+ τ               Execution phase: Reasoning (R), Acting (A)
+ s               Scheduling status: {Active, Paused, Terminated}                              4.3. Scheduling Policy
+                                                                                              Based on the cost model above, the optimization tar-
+4.2. Cost Model
+                                                                                              get of our scheduling policy is to minimize the non-
+During multi-turn agentic inference, only the resources used                                  productive overhead components: Costrecompute , Costunused ,
+for active prefilling and decoding contribute to the system’s                                 and Costcaching , thereby maximizing throughput.
+effective throughput, while re-computation, used capacity,
+                                                                                              4.3.1. R EDUCING R ECOMPUTATION AND C ACHING
+and idle caching constitute resource waste. We encompass
+                                                                                                     C OSTS VIA P ROGRAM -AWARE WAITING Q UEUE
+this in a cost model for GPU resource consumption, which
+isolates effective costs from non-productive usage. We adopt                                  As identified in Section 3.1 and Figure 1b, KV cache thrash-
+the Space-Time Product (STP) (Belady, 1966) as our pri-                                       ing serves as the primary bottleneck for throughput degrada-
+mary metric, defined as the integral of the memory footprint                                  tion. To address this limitation, the system must minimize
+over processing time. The STP cost during a process phase                                     Costrecompute by explicitly controlling the number of active
+is formalized as:                                                                             programs. T HUNDER AGENT achieves this by introducing
+                             Z           tx
+                                                                                              a program-aware waiting queue. Our system utilizes this
+                       Costx =                 Mx (t) dt,                           (2)
+                                     0
+                                                                                              queue to schedule program execution, determining which
+                                                                                              program should be executed in GPU versus which should
+where tx is the duration of process x (e.g., prefill). Since                                  be swapped out based on their token length c and execution
+memory usage Mx (t) can be directly quantified by the KV                                      phase τ . Here, we formalize the scheduler behavior using
+cache token count used in LLMs, we define our cost model                                      two primitive operations: Restore and Pause, as follows.
+as the integral of token count over time.
+                                                                                              • Restore. This operation admits a program into active
+The total cost of agentic inference comprises five distinct                                      execution. Given a program P = ⟨ID, c, T , L, τ, s⟩ with
+components: decoding, prefilling, recomputation, unused                                          s = Paused and L = ∅, Restore(P ) assigns P to a
+
+                                                                                          5
+
+===== PDF p.6 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+  backend L′ with available capacity and updates                    caching against recomputation, we incorporate a time-decay
+                                                                    mechanism into the thrashing check that progressively dis-
+               P ← ⟨ID, c, T , L′ , τ, Active⟩,          (4)        counts the effective weight of acting programs’ tokens. This
+                                                                    allows the scheduler to evict long-idling caching when mem-
+• Pause. This operation removes a program from active               ory pressure rises, rather than holding them indefinitely:
+  execution. Given a program P = ⟨ID, c, T , L, τ, s⟩ with                              X              X
+  s = Active, Pause(P ) unbinds P from its backend, re-                      Ctotal <          cp +           cq × f (tq )    (7)
+  leases its KV cache for preemption, and updates                                      p∈L,τ =R        q∈L,τ =A
+
+                                                                    Specifically, tq is the tool execution time of program q in
+               P ← ⟨ID, c, T , ∅, τ, Paused⟩.            (5)
+                                                                    the current step. f (t) is a time-decay function designed to
+                                                                    balance Costcaching and Costrecompute . Note that this decayed
+Building on these two operations, we next introduce our             check governs both Pause and Restore: shrinking an idle
+scheduling policy to minimize KV cache thrashing.                   program’s weight admits more reasoning programs, whose
+                                                                    decoding then raises pressure and triggers the eviction of its
+Periodic thrashing detection. The program abstraction               KV cache. By dynamically lowering the effective memory
+in Section 4.1 provides us with the KV cache size of acting         priority of acting programs over time, f (t) encourages the
+programs. Notably, this is unavailable in request-level sys-        scheduler to evict caches that remain idle. In Section F.1,
+tems (as in Section 3). We define the thrashing condition           we prove that when tool execution latencies satisfy the mem-
+for a DP backend L as the state where program memory                oryless property (i.e., the remaining execution time is inde-
+demand exceeds total capacity:                                      pendent of the elapsed duration), exponential decay is the
+                               X                                    only admissible form of f (t).
+                      Ctotal <     cp                    (6)
+                               p∈L
+                                                                    Minimizing Costrecompute via Shortest-First Eviction.
+where Ctotal denotes the fixed token capacity of the KV             With the eviction and restoration conditions above, the re-
+cache pool for backend L. During decoding, the con-                 maining question in handling thrashing is to determine
+text length cp of agentic workflows grows rapidly, which            which subset of active programs to pause such that the
+can trigger memory thrashing mid-execution even without             recomputation cost is minimized. In this paragraph, we
+of new arrivals. Unlike baseline schedulers (e.g., Con-             demonstrate that evicting programs with the smallest KV
+tinuum) that only perform checks on whether to admit a              cache size yields the optimal solution, with a detailed proof
+workflow upon its arrival, we implement a periodic moni-            provided in Section F.2.
+tor that evaluates the memory usage at fixed intervals ∆t,          Lemma 4.1 (Quadratic Recomputation Cost). Given a pro-
+allowing preemptive detection and mitigation of memory              gram Pi with context length ci , the recomputation cost in-
+pressure caused by context growth.                                  curred by reprefilling its KV cache scales quadratically with
+                                                                    ci , i.e.,                 Z trecompute
+When KV cache thrashing is imminent, T HUNDER AGENT
+invokes Pause operation P     to suspend active programs and                   Costrecompute =              ci (t) dt ∝ c2i . (8)
+                                                                                                  0
+free memory size ∆C = p∈L cp − λmax · Ctotal until the
+total memory usage falls below the limit λmax · Ctotal . Con-       Definition 4.2 (Eviction Optimization Problem). Based
+versely,  when the backend has available space, meaning             on Lemma 4.1, given a required memory release ∆C, the
+P
+       c p < λmin · Ctotal , T HUNDER AGENT restores paused         scheduler aims to select a subset S of programs to evict
+   p∈L
+programs from the waiting queue via Restore, ensuring               such that the released capacity satisfies the constraint while
+that the restored program keeps the total memory below              minimizing the total recomputation cost. This optimization
+λmax · Ctotal . Here, λmax and λmin denote the high- and            problem is formulated as follows:
+low-watermarks of memory usage, respectively, together                                 X             X
+                                                                                  min     c2i s.t.        ci ≥ ∆C.             (9)
+forming a hysteresis window that stabilizes our schedul-                           S
+                                                                                       i∈S              i∈S
+ing. In practice, we set both value to be 1, as the shared
+prompt across programs implicitly reserves sufficient mem-          The objective is strictly minimized by selecting smaller ci .
+ory buffer.                                                         Thus, T HUNDER AGENT’s strategy is to greedily pause and
+With this program-level periodic capacity check, T HUNDER -         evict programs with the shortest context lengths. We defer
+AGENT can guarantee that there will be no KV cache thrash-          the formal proof to Appendix F.3. Based on these analyses,
+ing by reserving memory for active programs during the              we employ the following scores for restoring and pausing a
+acting phase. However, the tradeoff is that when programs           program in our scheduler:
+engage in long-running tool execution, the GPU memory                                                  1
+occupied by acting programs is idle. To balance the cost of                       Srestore (P ) =        + I(τ = R)          (10)
+                                                                                                      cP
+
+                                                                6
+
+===== PDF p.7 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+                                 1                                        be a bottleneck. To address this, T HUNDER AGENT monitors
+                Spause (P ) =      + I(τ = A)                 (11)
+                                cP                                        the global waiting queue; when a high-priority program
+where the indicator function I(·) enforces strict prioritiza-             (high Srestore ) approaches the restore threshold, the system
+tion of the program’s execution state (τ ) over context length.           asynchronously restores its execution environment before
+Both mechanisms follow the shortest-first policy to min-                  the GPU memory is allocated. This technique effectively
+imize recomputation cost. However, the state indicator I                  hides the initialization overhead, significantly reducing
+ensures that the scheduler prioritizes pausing Acting pro-                end-to-end latency for tool-call heavy workloads like coding
+grams, thereby minimizing Costcaching by reclaiming cached                agents and science agents, as demonstrated in Figure 2c.
+memory, while prioritizing restore Reasoning programs to                  5. Experiments
+maximize Costdecode + Costprefill .
+                                                                          In this section, we evaluate T HUNDER AGENT on diverse
+4.3.2. R EDUCING M EMORY I MBALANCE VIA G LOBAL                           agentic workflows, including coding, routing, and scientific
+       P ROGRAM -AWARE WAITING Q UEUE                                     research agents, and RL rollout across multiple hardware
+Section 3.1 and Figure 2a highlight that memory imbalance                 configurations ranging from RTX5090 to H100 clusters. Fur-
+across nodes introduces significant Costunused , leading to               thermore, we conduct extensive ablation studies to break-
+unnecessary program pausing despite sufficient memory                     down the end-to-end system runtime and to describe the
+capacity from other nodes. To this end, T HUNDER AGENT                    system’s sensitivity to the scheduler’s hyperparameters, ∆t
+unify waiting queues of all backend replicas into a global                and f (t), in Section 5.4.
+program-aware waiting queue.
+                                                                          5.1. Experimental setup
+The key motivation of this design is that Costunused arises               Benchmarks and workflows. We evaluate T HUNDER A-
+only when paused programs remain in the waiting queue                     GENT against diverse benchmarks and workloads:
+while some replicas have idle memory. Moreover, once a
+program is paused, its KV cache is assumed to be evicted,                 1. Coding agent serving. We deploy OpenHands and
+making its recomputation cost node-agnostic. This allows us                  mini-SWEAgent on the SWEBench-Lite (Jimenez et al.,
+to improve cross-node memory balance without sacrificing                     2024). OpenHands represents a heavy-initialization
+KV cache locality. The restore policy aligns with load bal-                  workflow with an average disk footprint exceeding 10GB
+ancing rather than strict KV-aware routing, enabling paused                  per sandbox, while mini-SWEAgent is a lightweight
+programs to be resumed on the worker replica with avail-                     workflow with a minimal footprint (2GB per sandbox).
+able memory capacity. As a result, the global queue bounds
+                                                                          2. General agent serving. We apply ToolOrchestra
+the unused cost such that Cunused < cmin · ∆t1 for every
+                                                                             on HLE (Phan et al., 2025) and OpenHands on Sci-
+node in the period of ∆t, where cmin represents the mini-
+                                                                             enceAgentBench (Chen et al., 2024). These workloads
+mum token length among paused programs. An overview
+                                                                             involve variable latencies driven by external API calls
+of the scheduling policy and the global waiting queue in
+                                                                             and complex scientific simulations.
+T HUNDER AGENT is presented in Figure 3.
+                                                                          3. RL rollout. We apply the same models, workflows, and
+4.4. Tool Resource Management
+                                                                             samples for RL rollout on two 8× H100 nodes.
+Next, T HUNDER AGENT mitigates the resource leakage and
+environment setup overheads detailed in Section 3.3.                      Models and deployments. We employ GLM-4.6 (355B)
+                                                                          (Team et al., 2025) and Qwen-3 (235B) (Yang et al., 2025)
+Hook-based garbage collection. We implement lifecycle
+                                                                          using both OpenHands (Wang et al., 2025b) and mini-
+hooks that strictly couple the persistence of tool resources
+                                                                          SWEAgent (Yang et al., 2024) frameworks. Models are
+with the agentic program’s scheduling status s. When a
+                                                                          quantized to FP8 with Tensor Parallelism (TP8) on 8×H100
+program is Terminated, the collector triggers an immediate
+                                                                          nodes. For ToolOrchestra (Su et al., 2025), we use Qwen3-
+teardown sequence, systematically reclaiming sandboxes,
+                                                                          8B with FP16 precision hosted on one RTX 5090. We
+network sockets, and compute slots. The active disk usage
+                                                                          deploy the LLM inference engine and Docker at different
+in Figure 2b shows that our resource management policy
+                                                                          clusters. The LLM inference engine runs on GPU clusters
+effectively prevents the accumulation of excessive resources
+                                                                          hosting the models, while agent Docker environments are
+and maintains near-constant disk memory consumption over
+                                                                          offloaded to a dedicated CPU cluster.
+time.
+Asynchronous environment preparation. The latency                         T HUNDER AGENT configuration. We configure T HUN -
+involved in initializing a tool execution environment (e.g.,              DER AGENT with hyperparameters ∆t = 5 and priority de-
+starting a Docker container and installing dependencies) can              cay f (t) = 2−t , defined in Section 4.3. vLLM is employed
+                                                                          as our LLM inference engine. We use steps per minute as
+    1
+      Since ∆t is much smaller than a program’s lifetime, we ignore       our throughput metric, where one step includes a reasoning
+the impact of terminated programs within a single interval.               and acting period of the workflow.
+
+                                                                      7
+
+===== PDF p.8 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+                                                                              vLLM                                Continuum        ThunderAgent(Ours)
+
+                                                  (a) SWEAgent-GLM4.6                                      (b) OpenHands(code)-GLM4.6                                (c) ToolOrchestra(HLE)-Qwen3-8B
+
+
+              Throughput (step/min)
+
+
+
+
+                                                                               Throughput (step/min)
+
+
+
+
+                                                                                                                                             Throughput (step/min)
+                                                                                                       200                       3.58×                               8
+                                      400                             2.65×                                                                                                                       1.48×
+
+                                                                                                       150                                                           6
+                                      300
+                                                                      1.52×
+                                                                                                       100                                                           4                            0.65×
+                                      200
+                                                                                                                                    1.08×
+                                      100                                                              50                                                            2
+
+
+                                       0                                                                0                                                            0
+                                            24        48         72     96                                   24      48       72       96                                 24         32      40      48
+                                             Parallel workflow number                                         Parallel workflow number                                     Parallel workflow number
+
+
+
+                                            (d) SWEAgent-Qwen3-235B                                    (e) OpenHands(code)-Qwen3-235B                                          (f) ScienceAgent-GLM4.6
+                                                                                                                                                                     60
+              Throughput (step/min)
+
+
+
+
+                                                                               Throughput (step/min)
+
+
+
+
+                                                                                                                                             Throughput (step/min)
+                                                                      3.02×                            200                                                                                        1.24×
+                                      400                                                                                          2.43×                             50
+                                                                                                                                                                                                  1.06×
+                                                                                                       150                                                           40
+                                      300
+
+                                                                      1.44×                                                        1.22×                             30
+                                                                                                       100
+                                      200
+                                                                                                                                                                     20
+                                      100                                                              50
+                                                                                                                                                                     10
+
+                                       0                                                                0                                                            0
+                                            144            168          192                                  24      48       72      96                                  48         72      96     120
+                                             Parallel workflow number                                         Parallel workflow number                                     Parallel workflow number
+
+Figure 4. Serving Evaluation Results. T HUNDER AGENT outperforms vLLM and Continuum across three models, four agentic workflows,
+and three datasets. For workflows with predictable tool call times (a, b, d, e), T HUNDER AGENT outperforms vLLM and Continuum up to
+2.43-3.56×. For workflows exhibit stochastic tool execution time (c, f), T HUNDER AGENT still achieves the best throughput performance.
+
+Baseline techniques. We compare against state-of-the-art                                                                      when no enough memory is available for ongoing requests’
+systems with different scheduling paradigms:                                                                                  decoding. As a result, active programs compete for limited
+                                                                                                                              memory and trigger thrashing.
+• vLLM (Inference): A widely adopted, request-aware
+  LLM inference engine that serves as a stateless base-                                                                       Robustness performance to high concurrency. T HUN -
+                                                                                                                              DER AGENT maintains maximum achievable throughput
+  line for inference performance, without incorporating any
+  agent- or program-specific awareness.                                                                                       even as the parallel workflow number scales beyond the
+                                                                                                                              GPU memory limit. As shown in Figure 4, T HUNDER -
+• Continuum (Inference): The current SOTA system for                                                                          AGENT ensures that throughput remains stable with the
+  multi-turn agentic workflows. It mitigates KV cache                                                                         number of parallel workflows, whereas baseline systems
+  thrashing by predicting tool execution durations and pin-                                                                   suffer from severe throughput collapse once the workload
+  ning KV cache to HBM correspondingly.                                                                                       exceeds memory limits. In practice, determining the opti-
+• vLLM + SGLang Gateway (Distributed Rollout): The                                                                            mal parallel workflow number to maximize utilization with
+  leading solution for large-scale distributed RL rollout.                                                                    limited KV cache thrashing and caching cost is infeasible
+  SGLang Gateway optimizes distributed inference by en-                                                                       due to the stochastic nature of agent environments and tool
+  hancing cross-node memory balancing and KV cache hit                                                                        execution durations. T HUNDER AGENT addresses this by
+  rates, making this combination a strong baseline for the                                                                    automatically adapting to the maximum available capac-
+  distributed RL rollout setting.                                                                                             ity without manual tuning, a capability critical for robust
+                                                                                                                              real-world deployments.
+5.2. Serving Evaluation Results                                                                                               Robustness across deterministic and stochastic tool ex-
+High throughput under high concurrency. Figure 4                                                                              ecutions. T HUNDER AGENT outperforms baselines not
+showcase that T HUNDER AGENT demonstrates superior                                                                            only in workflows with deterministic tool patterns (Fig-
+throughput at high concurrency levels (e.g., 96 parallel pro-                                                                 ure 4 a, b, d, e) but also under highly stochastic conditions
+grams), achieving a 1.48–3.58× speedup over vLLM and                                                                          (Figure 4 c, f). This comes from our dynamic program-
+1.17–3.31× speedup over Continuum across diverse base                                                                         aware waiting queue policy. vLLM’s request-aware sched-
+models and datasets. This gain rises from our program-                                                                        uler typically lacks reserved memory for acting programs,
+aware scheduler, which maintains a near-optimal KV cache                                                                      forcing frequent re-computation. Conversely, Continuum
+hit rate (≈100% for Mini-SWE-Bench and OpenHands, see                                                                         statically reserves memory for all paused programs and mis-
+Figure 5 a, b, d, e) and enables the asynchronous preparation                                                                 predicts the tool execution time. These lead to expensive
+of environments. In contrast, Continuum suffers from per-                                                                     Costrecompute or Costcaching during long, unpredictable tool
+formance degradation under high concurrency. As shown                                                                         calls. T HUNDER AGENT balances them via a time-decay
+in Figure 5, its KV cache hit rate drops significantly from                                                                   function f (t), which prioritizes retaining KV cache for pro-
+>90% to ≈60%. This is because Continuum suffers from                                                                          grams with short tool calls while preemptively pausing pro-
+KV cache eviction among requests in different programs                                                                        grams with long tool execution time to prevent memory
+
+                                                                                                                          8
+
+===== PDF p.9 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+
+                                                  (a) SWEAgent-GLM4.6                                            (b) OpenHands(code)-GLM4.6                                                    (c) ToolOrchestra(HLE)-Qwen3-8B
+                                      100                                                                  100
+
+
+
+
+              KV cache hit rate (%)
+
+
+
+
+                                                                                   KV cache hit rate (%)
+
+
+
+
+                                                                                                                                                                     KV cache hit rate (%)
+                                                                                                                                                                                              25
+                                      80                                                                   80
+
+                                                                                                                                                                                              20
+                                      60                                                                   60
+                                                                                                                                                                                              15
+                                      40                                                                   40
+                                                    vLLM                                                              vLLM                                                                    10                   vLLM
+                                      20            Continuum                                              20         Continuum                                                                                    Continuum
+                                                                                                                                                                                                   5
+                                                    ThunderAgent(Ours)                                                ThunderAgent(Ours)                                                                           ThunderAgent(Ours)
+                                       0                                                                    0                                                                                      0
+                                            24        48         72      96                                      24     48       72                      96                                            24            32                                  40        48
+                                             Parallel workflow number                                             Parallel workflow number                                                               Parallel workflow number
+
+
+
+                                            (d) SWEAgent-Qwen3-235B                                        (e) OpenHands(code)-Qwen3-235B                                                                   (f) ScienceAgent-GLM4.6
+                                      100                                                                  100
+                                                                                                                                                                                              60
+              KV cache hit rate (%)
+
+
+
+
+                                                                                   KV cache hit rate (%)
+
+
+
+
+                                                                                                                                                                     KV cache hit rate (%)
+                                      80                                                                   80
+                                                                                                                                                                                              55
+                                      60                                                                   60
+
+                                                                                                                                                                                              50
+                                      40                                                                   40
+                                                    vLLM                                                              vLLM                                                                                         vLLM
+                                      20            Continuum                                              20         Continuum                                                               45                   Continuum
+                                                    ThunderAgent(Ours)                                                ThunderAgent(Ours)                                                                           ThunderAgent(Ours)
+                                       0                                                                    0                                                                                 40
+                                            144            168           192                                     24     48       72                      96                                            48            72                                  96        120
+                                             Parallel workflow number                                             Parallel workflow number                                                               Parallel workflow number
+
+
+Figure 5. KV Cache Hit Rate. T HUNDER AGENT achieves near-optimal KV hit rate with predictable tool call time (a, b, d, e), while
+dynamically trading KV cache hit rate for better compute utility when serving workflows with stochastic tool execution time (c, f).
+    Table 2. GLM-4.6 rollout (N = 144) on 2×H100 nodes.                                                                                                                                                                                                                    x in f(t) = x −t
+                                                                                                                                                                                                                                                               2   3        4     5     6         7   8
+                                                                                                                                                                                                                                                         400
+                                                                                                                                                          Decode                             Env         Prefill         Disk                            350
+    Workflow                                       Serving System                Throughput
+                                                                                                                                                    80                                         4.8s                                                      300
+
+
+
+
+                                                                                                                                                                                                                                           Throughputs
+    mini-SWEAgent                                  vLLM + Gateway                      375.4                                                                                                                         4
+
+
+
+
+                                                                                                                                                                                                                         Disk Usage (TB)
+                                                                                                                                  E2E Latency (s)
+
+
+
+
+                                                                                                                                                                                                                                                         250
+                                                                                                                                                               3.3
+                                                                                                                                                         58s
+                                                                                                                                                    60
+    mini-SWEAgent                                  T HUNDER AGENT              671.8 (1.79×)                                                                                                                         3                                   200
+                                                                                                                                                                                                             0.3s
+    OpenHands                                      vLLM + Gateway                        69.1                                                       40
+                                                                                                                                                                                                                     2
+                                                                                                                                                                                                                                                         150
+
+                                                                                                                                                                                                                                                         100
+    OpenHands                                      T HUNDER AGENT              270.8 (3.92×)                                                                                                                                                                               x = 2 and change Δt
+                                                                                                                                                    20                                             12s       0.8     1                                   50
+                                                                                                                                                                                                                                                                           Δt = 5 and change x
+                                                                                                                                                                                                                                                          0
+waste. As shown in Figure 5 (right), although T HUNDER A-                                                                                           0
+                                                                                                                                                          vLLM                                         Ours
+                                                                                                                                                                                                                     0                                         2       4          6
+                                                                                                                                                                                                                                                                                 Δt
+                                                                                                                                                                                                                                                                                              8       10
+
+
+GENT exhibits a lower KV cache hit rate than Continuum in
+                                                                                                                                                     (a) Latency Breakdown                                                                               (b) Ablation of ∆t and f(t)
+stochastic settings, it achieves higher throughput by ensur-
+ing active GPU utilization.                                                                                                      Figure 6. Ablation study of end-to-end latency breakdown and
+                                                                                                                                 parameter sensitivity of T HUNDER AGENT.
+5.3. Rollout Evaluation Results
+We evaluate RL rollout using GLM-4.6 on a two-node H100
+cluster. Table 2 shows that T HUNDER AGENT can maintain                                                                          might decrease the KV cache hit rate and thereby reduce
+effective scalability, achieving a 1.79–3.92× throughput in-                                                                     throughput because thrashing might occur in the middle of
+crease over the vLLM + Gateway baseline, making it highly                                                                        detecting. Also, increasing x in f (t) allows more aggres-
+efficient for memory-intensive distributed RL workloads.                                                                         sive eviction of acting programs, which trade recomputation
+5.4. Ablation Study                                                                                                              costs to reduce caching costs. This reduces throughput as
+End-to-end latency breakdown. Figure 6a decomposes                                                                               acting programs with short tool execution time are prema-
+the average end-to-end latency for OpenHands rollouts. The                                                                       turely evicted.
+throughput gain stems primarily from reductions in prefill
+and decode latency. Moreover, the tool resource manage-                                                                          6. Conclusion
+ment policy (Section 4.4) contributes approximately 10% to                                                                       We introduce T HUNDER AGENT, a fast and simple agentic
+the latency improvement while providing 4.2× disk memory                                                                         system built on a program-level abstraction that tracks meta-
+savings. Per-step end-to-end latency are further discussed                                                                       data throughout the entire lifecycle of each agentic work-
+in Appendix E.                                                                                                                   flow. T HUNDER AGENT leverages the program abstraction
+Ablation on ∆t and f(t). We study the sensitivity of                                                                             for runtime scheduling and resource management. Specif-
+detecting period ∆t and decaying function f (t) = x−t .                                                                          ically, T HUNDER AGENT dynamically schedules program
+Figure 6b shows T HUNDER AGENT offline serving mini-                                                                             execution across GPU nodes to mitigate KV cache thrashing
+SWEAgent with GLM4.6 as base model on a single H100                                                                              and memory imbalance, while managing tool resources to
+node. We observe that T HUNDER AGENT maintains high                                                                              prevent resource leakage. Experimental results showcase
+throughput under different parameter settings, demonstrat-                                                                       that T HUNDER AGENT outperforms previous systems by
+ing the robustness of our method. Further increasing ∆t                                                                          1.48–3.58× for serving and 1.79–3.92× for RL rollouts.
+
+                                                                                                                             9
+
+===== PDF p.10 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+Acknowledgements                                                     Impact Statement
+We are grateful to Together AI for making this work possible.        This paper presents work whose goal is to advance the field
+We thank Ben Athiwaratkun and Ce Zhang for assistance in             of Machine Learning Systems, specifically by optimizing
+developing the multi-backend scheduler. We thank Wenyi               the execution efficiency of agentic workflows. By signifi-
+Hong and Luke Huang for helpful feedback and discussions             cantly reducing the memory footprint and hardware require-
+during this work.                                                    ments for maintaining agent inference and RL rollout, our
+                                                                     method improves the cost-efficiency and energy sustain-
+                                                                     ability of large-scale agent serving.
+                                                                     Our approach enables the training and inference of larger
+                                                                     models and more complex environments on limited hard-
+                                                                     ware resources. This efficiency helps companies and individ-
+                                                                     uals to advanced agent research, allowing a broader range
+                                                                     of institutions and practitioners to engage in high-fidelity
+                                                                     simulations without necessitating prohibitive computational
+                                                                     investments. While increasing system throughput could the-
+                                                                     oretically accelerate both positive and negative applications
+                                                                     of autonomous agents, our work primarily targets infrastruc-
+                                                                     ture optimization, which is essential for the scalable and
+                                                                     sustainable development of the field.
+
+
+
+
+                                                                10
+
+===== PDF p.11 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+References                                                            Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu,
+                                                                       C. H., Gonzalez, J. E., Zhang, H., and Stoica, I. Ef-
+Belady, L. A. A study of replacement algorithms for a
+                                                                       ficient memory management for large language model
+  virtual-storage computer. IBM Systems Journal, 5(2):
+                                                                       serving with pagedattention, 2023. URL https://
+  78–101, 1966. doi: 10.1147/sj.52.0078.
+                                                                       arxiv.org/abs/2309.06180.
+Bonatti, R., Zhao, D., Bonacci, F., Dupont, D., Abdali,
+                                                                      Langley, P. Crafting papers on machine learning. In Langley,
+  S., Li, Y., Lu, Y., Wagle, J., Koishida, K., Bucker, A.,
+                                                                        P. (ed.), Proceedings of the 17th International Conference
+  Jang, L., and Hui, Z. Windows agent arena: Evaluating
+                                                                        on Machine Learning (ICML 2000), pp. 1207–1216, Stan-
+  multi-modal os agents at scale, 2024. URL https:
+                                                                        ford, CA, 2000. Morgan Kaufmann.
+  //arxiv.org/abs/2409.08264.
+                                                                      Li, H., Mang, Q., He, R., Zhang, Q., Mao, H., Chen,
+Cao, S., Li, D., Zhao, F., Yuan, S., Hegde, S. R., Chen,
+                                                                        X., Zhou, H., Cheung, A., Gonzalez, J., and Stoica, I.
+  C., Ruan, C., Griggs, T., Liu, S., Tang, E., et al. Skyrl-
+                                                                        Continuum: Efficient and robust multi-turn llm agent
+  agent: Efficient rl training for multi-turn llm agent. arXiv
+                                                                        scheduling with kv cache time-to-live, 2025. URL
+  preprint arXiv:2511.16108, 2025.
+                                                                        https://arxiv.org/abs/2511.02230.
+Chen, Z., Chen, S., Ning, Y., Zhang, Q., Wang, B., Yu,                Liu, Y., Cheng, Y., Yao, J., An, Y., Chen, X., Feng, S.,
+  B., Li, Y., Liao, Z., Wei, C., Lu, Z., Dey, V., Xue, M.,              Huang, Y., Shen, S., Zhang, R., Du, K., and Jiang, J.
+  Baker, F. N., Burns, B., Adu-Ampratwum, D., Huang,                    Lmcache: An efficient kv cache layer for enterprise-scale
+  X., Ning, X., Gao, S., Su, Y., and Sun, H. Scienceagent-              llm inference, 2025. URL https://arxiv.org/
+  bench: Toward rigorous assessment of language agents                  abs/2510.09665.
+  for data-driven scientific discovery, 2024. URL https:
+  //arxiv.org/abs/2410.05080.                                         Luo, M., Shi, X., Cai, C., Zhang, T., Wong, J., Wang, Y.,
+                                                                        Wang, C., Huang, Y., Chen, Z., Gonzalez, J. E., and
+Fu, W., Gao, J., Shen, X., Zhu, C., Mei, Z., He, C., Xu, S.,            Stoica, I. Autellix: An efficient serving engine for
+  Wei, G., Mei, J., Wang, J., Yang, T., Yuan, B., and Wu, Y.            llm agents as general programs, 2025. URL https:
+  Areal: A large-scale asynchronous reinforcement learning              //arxiv.org/abs/2502.13965.
+  system for language reasoning, 2025. URL https://
+  arxiv.org/abs/2505.24298.                                           Parzen, E. Stochastic processes. SIAM, 1999.
+
+Gao, W., Zhao, Y., Wu, T., Xiong, S., Wang, W., An, D., Cao,          Phan, L., Gatti, A., Han, Z., Li, N., Hu, J., Zhang, H.,
+  L., Muhtar, D., Liu, Z., Zhao, H., et al. Rollart: Scaling            Zhang, C. B. C., Shaaban, M., Ling, J., Shi, S., Choi,
+  agentic rl training via disaggregated infrastructure. arXiv           M., Agrawal, A., Chopra, A., Khoja, A., Kim, R., Ren,
+  preprint arXiv:2512.22560, 2025.                                      R., Hausenloy, J., Zhang, O., Mazeika, M., Dodonov,
+                                                                        D., Nguyen, T., Lee, J., Anderson, D., Doroshenko, M.,
+He, Y., Xu, M., Wu, J., Hu, J., Ma, C., Shen, M., Chen,                 Stokes, A. C., Mahmood, M., Pokutnyi, O., Iskra, O.,
+  L., Xu, C., Qu, L., and Ye, K. Banaserve: Unified kv                  Wang, J. P., Levin, J.-C., Kazakov, M., Feng, F., Feng,
+  cache and dynamic module migration for balancing dis-                 S. Y., Zhao, H., Yu, M., Gangal, V., Zou, C., Wang, Z.,
+  aggregated llm serving in ai infrastructure, 2025. URL                Popov, S., Gerbicz, R., Galgon, G., Schmitt, J., Yeadon,
+  https://arxiv.org/abs/2510.13223.                                     W., Lee, Y., Sauers, S., Sanchez, A., Giska, F., Roth,
+                                                                        M., Riis, S., Utpala, S., Burns, N., Goshu, G. M., Naiya,
+Jain, N., Han, K., Gu, A., Li, W.-D., Yan, F., Zhang, T.,
+                                                                        M. M., Agu, C., Giboney, Z., Cheatom, A., Fournier-
+  Wang, S., Solar-Lezama, A., Sen, K., and Stoica, I.
+                                                                        Facio, F., Crowson, S.-J., Finke, L., Cheng, Z., Zampese,
+   Livecodebench: Holistic and contamination free eval-
+                                                                        J., Hoerr, R. G., Nandor, M., Park, H., Gehrunger, T.,
+   uation of large language models for code, 2024. URL
+                                                                        Cai, J., McCarty, B., Garretson, A. C., Taylor, E., Sileo,
+   https://arxiv.org/abs/2403.07974.
+                                                                        D., Ren, Q., Qazi, U., Li, L., Nam, J., Wydallis, J. B.,
+Jiang, D., Lu, Y., Li, Z., Lyu, Z., Nie, P., Wang, H., Su, A.,          Arkhipov, P., Shi, J. W. L., Bacho, A., Willcocks, C. G.,
+   Chen, H., Zou, K., Du, C., et al. Verltool: Towards holis-           Cao, H., Motwani, S., de Oliveira Santos, E., Veith, J.,
+   tic agentic reinforcement learning with tool use. arXiv              Vendrow, E., Cojoc, D., Zenitani, K., Robinson, J., Tang,
+   preprint arXiv:2509.01055, 2025.                                     L., Li, Y., Vendrow, J., Fraga, N. W., Kuchkin, V., Mak-
+                                                                        simov, A. P., Marion, P., Efremov, D., Lynch, J., Liang,
+Jimenez, C. E., Yang, J., Wettig, A., Yao, S., Pei, K., Press,          K., Mikov, A., Gritsevskiy, A., Guillod, J., Demir, G.,
+  O., and Narasimhan, K. Swe-bench: Can language                        Martinez, D., Pageler, B., Zhou, K., Soori, S., Press, O.,
+  models resolve real-world github issues?, 2024. URL                   Tang, H., Rissone, P., Green, S. R., Brüssel, L., Twayana,
+  https://arxiv.org/abs/2310.06770.                                     M., Dieuleveut, A., Imperial, J. M., Prabhu, A., Yang, J.,
+
+                                                                 11
+
+===== PDF p.12 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+Crispino, N., Rao, A., Zvonkine, D., Loiseau, G., Kalinin,          Kolt, N., Pan, J., Rodman, E., Drori, J., Fossum, C. J.,
+M., Lukas, M., Manolescu, C., Stambaugh, N., Mishra,                Muennighoff, N., Jagota, M., Pradeep, R., Fan, H., Eicher,
+S., Hogg, T., Bosio, C., Coppola, B. P., Salazar, J., Jin,          J., Chen, M., Thaman, K., Merrill, W., Firsching, M., Har-
+J., Sayous, R., Ivanov, S., Schwaller, P., Senthilkuma,             ris, C., Ciobâcă, S., Gross, J., Pandey, R., Gusev, I., Jones,
+S., Bran, A. M., Algaba, A., den Houte, K. V., Sypt, L.             A., Agnihotri, S., Zhelnov, P., Mofayezi, M., Piperski, A.,
+V. D., Verbeken, B., Noever, D., Kopylov, A., Mykle-                Zhang, D. K., Dobarskyi, K., Leventov, R., Soroko, I.,
+bust, B., Li, B., Schut, L., Zheltonozhskii, E., Yuan, Q.,          Duersch, J., Taamazyan, V., Ho, A., Ma, W., Held, W.,
+Lim, D., Stanley, R., Yang, T., Maar, J., Wykowski, J.,             Xian, R., Zebaze, A. R., Mohamed, M., Leser, J. N., Yuan,
+Oller, M., Sahu, A., Ardito, C. G., Hu, Y., Kamdoum, A.             M. X., Yacar, L., Lengler, J., Olszewska, K., Fratta, C. D.,
+G. K., Jin, A., Vilchis, T. G., Zu, Y., Lackner, M., Kop-           Oliveira, E., Jackson, J. W., Zou, A., Chidambaram, M.,
+pel, J., Sun, G., Antonenko, D. S., Chern, S., Zhao, B.,            Manik, T., Haffenden, H., Stander, D., Dasouqi, A., Shen,
+Arsene, P., Cavanagh, J. M., Li, D., Shen, J., Crisostomi,          A., Golshani, B., Stap, D., Kretov, E., Uzhou, M., Zhid-
+D., Zhang, W., Dehghan, A., Ivanov, S., Perrella, D.,               kovskaya, A. B., Winter, N., Rodriguez, M. O., Lauff, R.,
+Kaparov, N., Zang, A., Sucholutsky, I., Kharlamova, A.,             Wehr, D., Tang, C., Hossain, Z., Phillips, S., Samuele, F.,
+Orel, D., Poritski, V., Ben-David, S., Berger, Z., Whitfill,        Ekström, F., Hammon, A., Patel, O., Farhidi, F., Medley,
+P., Foster, M., Munro, D., Ho, L., Sivarajan, S., Hava,             G., Mohammadzadeh, F., Peñaflor, M., Kassahun, H.,
+D. B., Kuchkin, A., Holmes, D., Rodriguez-Romero, A.,               Friedrich, A., Perez, R. H., Pyda, D., Sakal, T., Dhamane,
+Sommerhage, F., Zhang, A., Moat, R., Schneider, K.,                 O., Mirabadi, A. K., Hallman, E., Okutsu, K., Battaglia,
+Kazibwe, Z., Clarke, D., Kim, D. H., Dias, F. M., Fish, S.,         M., Maghsoudimehrabani, M., Amit, A., Hulbert, D.,
+Elser, V., Kreiman, T., Vilchis, V. E. G., Klose, I., Anan-         Pereira, R., Weber, S., Handoko, Peristyy, A., Malina,
+theswaran, U., Zweiger, A., Rawal, K., Li, J., Nguyen,              S., Mehkary, M., Aly, R., Reidegeld, F., Dick, A.-K.,
+J., Daans, N., Heidinger, H., Radionov, M., Rozhoň, V.,            Friday, C., Singh, M., Shapourian, H., Kim, W., Costa,
+Ginis, V., Stump, C., Cohen, N., Poświata, R., Tkadlec,            M., Gurdogan, H., Kumar, H., Ceconello, C., Zhuang,
+J., Goldfarb, A., Wang, C., Padlewski, P., Barzowski, S.,           C., Park, H., Carroll, M., Tawfeek, A. R., Steinerberger,
+Montgomery, K., Stendall, R., Tucker-Foltz, J., Stade, J.,          S., Aggarwal, D., Kirchhof, M., Dai, L., Kim, E., Fer-
+Rogers, T. R., Goertzen, T., Grabb, D., Shukla, A., Givré,         ret, J., Shah, J., Wang, Y., Yan, M., Burdzy, K., Zhang,
+A., Ambay, J. A., Sen, A., Aziz, M. F., Inlow, M. H.,               L., Franca, A., Pham, D. T., Loh, K. Y., Robinson, J.,
+He, H., Zhang, L., Kaddar, Y., Ängquist, I., Chen, Y.,             Jackson, A., Giordano, P., Petersen, P., Cosma, A., Col-
+Wang, H. K., Ramakrishnan, K., Thornley, E., Terpin, A.,            ino, J., White, C., Votava, J., Vinnikov, V., Delaney, E.,
+Schoelkopf, H., Zheng, E., Carmi, A., Brown, E. D. L.,              Spelda, P., Stritecky, V., Shahid, S. M., Mourrat, J.-C., Ve-
+Zhu, K., Bartolo, M., Wheeler, R., Stehberger, M., Brad-            toshkin, L., Sponselee, K., Bacho, R., Yong, Z.-X., de la
+shaw, P., Heimonen, J., Sridhar, K., Akov, I., Sandlin,             Rosa, F., Cho, N., Li, X., Malod, G., Weller, O., Albani,
+J., Makarychev, Y., Tam, J., Hoang, H., Cunningham,                 G., Lang, L., Laurendeau, J., Kazakov, D., Adesanya,
+D. M., Goryachev, V., Patramanis, D., Krause, M., Re-               F., Portier, J., Hollom, L., Souza, V., Zhou, Y. A., De-
+denti, A., Aldous, D., Lai, J., Coleman, S., Xu, J., Lee,           gorre, J., Yalın, Y., Obikoya, G. D., Rai, Bigi, F., Boscá,
+S., Magoulas, I., Zhao, S., Tang, N., Cohen, M. K., Par-            M. C., Shumar, O., Bacho, K., Recchia, G., Popescu, M.,
+adise, O., Kirchner, J. H., Ovchynnikov, M., Matos, J. O.,          Shulga, N., Tanwie, N. M., Lux, T. C. H., Rank, B., Ni,
+Shenoy, A., Wang, M., Nie, Y., Sztyber-Betley, A., Fara-            C., Brooks, M., Yakimchyk, A., Huanxu, Liu, Cavalleri,
+boschi, P., Riblet, R., Crozier, J., Halasyamani, S., Verma,        S., Häggström, O., Verkama, E., Newbould, J., Gundlach,
+S., Joshi, P., Meril, E., Ma, Z., Andréoletti, J., Singhal,        H., Brito-Santana, L., Amaro, B., Vajipey, V., Grover, R.,
+R., Platnick, J., Nevirkovets, V., Basler, L., Ivanov, A.,          Wang, T., Kratish, Y., Li, W.-D., Gopi, S., Caciolai, A.,
+Khoury, S., Gustafsson, N., Piccardo, M., Mostaghimi,               de Witt, C. S., Hernández-Cámara, P., Rodolà, E., Robins,
+H., Chen, Q., Singh, V., Khánh, T. Q., Rosu, P., Szlyk, H.,        J., Williamson, D., Cheng, V., Raynor, B., Qi, H., Segev,
+Brown, Z., Narayan, H., Menezes, A., Roberts, J., Alley,            B., Fan, J., Martinson, S., Wang, E. Y., Hausknecht,
+W., Sun, K., Patel, A., Lamparth, M., Reuel, A., Xin,               K., Brenner, M. P., Mao, M., Demian, C., Kassani, P.,
+L., Xu, H., Loader, J., Martin, F., Wang, Z., Achilleos,            Zhang, X., Avagian, D., Scipio, E. J., Ragoler, A., Tan, J.,
+A., Preu, T., Korbak, T., Bosio, I., Kazemi, F., Chen, Z.,          Sims, B., Plecnik, R., Kirtland, A., Bodur, O. F., Shinde,
+Bálint, B., Lo, E. J. Y., Wang, J., Nunes, M. I. S., Mil-          D. P., Labrador, Y. C. L., Adoul, Z., Zekry, M., Karakoc,
+bauer, J., Bari, M. S., Wang, Z., Ansarinejad, B., Sun, Y.,         A., Santos, T. C. B., Shamseldeen, S., Karim, L., Li-
+Durand, S., Elgnainy, H., Douville, G., Tordera, D., Bal-           akhovitskaia, A., Resman, N., Farina, N., Gonzalez, J. C.,
+abanian, G., Wolff, H., Kvistad, L., Milliron, H., Sakor,           Maayan, G., Anderson, E., Pena, R. D. O., Kelley, E.,
+A., Eron, M., O., A. F. D., Shah, S., Zhou, X., Kamalov,            Mariji, H., Pouriamanesh, R., Wu, W., Finocchio, R.,
+F., Abdoli, S., Santens, T., Barkan, S., Tee, A., Zhang,            Alarab, I., Cole, J., Ferreira, D., Johnson, B., Safdari, M.,
+R., Tomasiello, A., Luca, G. B. D., Looi, S.-Z., Le, V.-K.,         Dai, L., Arthornthurasuk, S., McAlister, I. C., Moyano,
+
+                                                               12
+
+===== PDF p.13 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+A. J., Pronin, A., Fan, J., Ramirez-Trinidad, A., Maly-               X., Agrawal, A., Yifei, L. S., Zhang, Z., Cai, M., Sonmez,
+sheva, Y., Pottmaier, D., Taheri, O., Stepanic, S., Perry,            Y., Cozianu, C., Li, C., Slen, A., Yu, S., Park, H. K.,
+S., Askew, L., Rodrı́guez, R. A. H., Minissi, A. M. R.,               Sarti, G., Briański, M., Stolfo, A., Nguyen, T. A., Zhang,
+Lorena, R., Iyer, K., Fasiludeen, A. A., Clark, R., Ducey,            M., Perlitz, Y., Hernandez-Orallo, J., Li, R., Shabani, A.,
+J., Piza, M., Somrak, M., Vergo, E., Qin, J., Borbás, B.,            Juefei-Xu, F., Dhingra, S., Zohar, O., Nguyen, M. C.,
+Chu, E., Lindsey, J., Jallon, A., McInnis, I. M. J., Chen,            Pondaven, A., Yilmaz, A., Zhao, X., Jin, C., Jiang, M.,
+E., Semler, A., Gloor, L., Shah, T., Carauleanu, M., Lauer,           Todoran, S., Han, X., Kreuer, J., Rabern, B., Plassart, A.,
+P., Huy, T. D., Shahrtash, H., Duc, E., Lewark, L., Brown,            Maggetti, M., Yap, L., Geirhos, R., Kean, J., Wang, D.,
+A., Albanie, S., Weber, B., Vaz, W. S., Clavier, P., Fan, Y.,         Mollaei, S., Sun, C., Yin, Y., Wang, S., Li, R., Chang,
+e Silva, G. P. R., Long, Lian, Abramovitch, M., Jiang, X.,            Y., Wei, A., Bizeul, A., Wang, X., Arrais, A. O., Mukher-
+Mendoza, S., Islam, M., Gonzalez, J., Mavroudis, V., Xu,              jee, K., Chamorro-Padial, J., Liu, J., Qu, X., Guan, J.,
+J., Kumar, P., Goswami, L. P., Bugas, D., Heydari, N.,                Bouyamourn, A., Wu, S., Plomecka, M., Chen, J., Tang,
+Jeanplong, F., Jansen, T., Pinto, A., Apronti, A., Galal, A.,         M., Deng, J., Subramanian, S., Xi, H., Chen, H., Zhang,
+Ze-An, N., Singh, A., Jiang, T., of Arc Xavier, J., Agar-             W., Ren, Y., Tu, H., Kim, S., Chen, Y., Marjanović, S. V.,
+wal, K. P., Berkani, M., Zhang, G., Du, Z., de Oliveira Ju-           Ha, J., Luczyna, G., Ma, J. J., Shen, Z., Song, D., Zhang,
+nior, B. A., Malishev, D., Remy, N., Hartman, T. D.,                  C. E., Wang, Z., Gendron, G., Xiao, Y., Smucker, L.,
+Tarver, T., Mensah, S., Loume, G. A., Morak, W., Habibi,              Weng, E., Lee, K. H., Ye, Z., Ermon, S., Lopez-Miguel,
+F., Hoback, S., Cai, W., Gimenez, J., Montecillo, R. G.,              I. D., Knights, T., Gitter, A., Park, N., Wei, B., Chen,
+Łucki, J., Campbell, R., Sharma, A., Meer, K., Gul, S.,               H., Pai, K., Elkhanany, A., Lin, H., Siedler, P. D., Fang,
+Gonzalez, D. E., Alapont, X., Hoover, A., Chhablani, G.,              J., Mishra, R., Zsolnai-Fehér, K., Jiang, X., Khan, S.,
+Vargus, F., Agarwal, A., Jiang, Y., Patil, D., Outevsky,              Yuan, J., Jain, R. K., Lin, X., Peterson, M., Wang, Z.,
+D., Scaria, K. J., Maheshwari, R., Dendane, A., Shukla,               Malusare, A., Tang, M., Gupta, I., Fosin, I., Kang, T.,
+P., Cartwright, A., Bogdanov, S., Mündler, N., Möller,              Dworakowska, B., Matsumoto, K., Zheng, G., Sewuster,
+S., Arnaboldi, L., Thaman, K., Siddiqi, M. R., Saxena,                G., Villanueva, J. P., Rannev, I., Chernyavsky, I., Chen,
+P., Gupta, H., Fruhauff, T., Sherman, G., Vincze, M., Us-             J., Banik, D., Racz, B., Dong, W., Wang, J., Bashmal, L.,
+awasutsakorn, S., Ler, D., Radhakrishnan, A., Enyekwe,                Gonçalves, D. V., Hu, W., Bar, K., Bohdal, O., Patlan,
+I., Salauddin, S. M., Muzhen, J., Maksapetyan, A., Ross-              A. S., Dhuliawala, S., Geirhos, C., Wist, J., Kansal, Y.,
+bach, V., Harjadi, C., Bahaloohoreh, M., Sparrow, C.,                 Chen, B., Tire, K., Yücel, A. T., Christof, B., Singla, V.,
+Sidhu, J., Ali, S., Bian, S., Lai, J., Singer, E., Uro, J. L.,        Song, Z., Chen, S., Ge, J., Ponkshe, K., Park, I., Shi,
+Bateman, G., Sayed, M., Menshawy, A., Duclosel, D.,                   T., Ma, M. Q., Mak, J., Lai, S., Moulin, A., Cheng, Z.,
+Bezzi, D., Jain, Y., Aaron, A., Tiryakioglu, M., Siddh, S.,           Zhu, Z., Zhang, Z., Patil, V., Jha, K., Men, Q., Wu, J.,
+Krenek, K., Shah, I. A., Jin, J., Creighton, S., Peskoff,             Zhang, T., Vieira, B. H., Aji, A. F., Chung, J.-W., Mah-
+D., EL-Wasif, Z., V, R. P., Richmond, M., McGowan,                    foud, M., Hoang, H. T., Sperzel, M., Hao, W., Meding,
+J., Patwardhan, T., Sun, H.-Y., Sun, T., Zubić, N., Sala,            K., Xu, S., Kostakos, V., Manini, D., Liu, Y., Toukmaji,
+S., Ebert, S., Kaddour, J., Schottdorf, M., Wang, D.,                 C., Paek, J., Yu, E., Demircali, A. E., Sun, Z., Dewerpe,
+Petruzella, G., Meiburg, A., Medved, T., ElSheikh, A.,                I., Qin, H., Pflugfelder, R., Bailey, J., Morris, J., Heilala,
+Hebbar, S. A., Vaquero, L., Yang, X., Poulos, J., Zouhar,             V., Rosset, S., Yu, Z., Chen, P. E., Yeo, W., Jain, E.,
+V., Bogdanik, S., Zhang, M., Sanz-Ros, J., Anugraha,                  Yang, R., Chigurupati, S., Chernyavsky, J., Reddy, S. P.,
+D., Dai, Y., Nhu, A. N., Wang, X., Demircali, A. A.,                  Venugopalan, S., Batra, H., Park, C. F., Tran, H., Max-
+Jia, Z., Zhou, Y., Wu, J., He, M., Chandok, N., Sinha,                imiano, G., Zhang, G., Liang, Y., Shiyu, H., Xu, R., Pan,
+A., Luo, G., Le, L., Noyé, M., Perełkiewicz, M., Pan-                R., Suresh, S., Liu, Z., Gulati, S., Zhang, S., Turchin, P.,
+tidis, I., Qi, T., Purohit, S. S., Parcalabescu, L., Nguyen,          Bartlett, C. W., Scotese, C. R., Cao, P. M., Wu, B., Kar-
+T.-H., Winata, G. I., Ponti, E. M., Li, H., Dhole, K.,                wowski, J., Scaramuzza, D., Nattanmai, A., McKellips,
+Park, J., Abbondanza, D., Wang, Y., Nayak, A., Caetano,               G., Cheraku, A., Suhail, A., Luo, E., Deng, M., Luo, J.,
+D. M., Wong, A. A. W. L., del Rio-Chanona, M., Kondor,                Zhang, A., Jindel, K., Paek, J., Halevy, K., Baranov, A.,
+D., Francois, P., Chalstrey, E., Zsambok, J., Hoyer, D.,              Liu, M., Avadhanam, A., Zhang, D., Cheng, V., Ma, B.,
+Reddish, J., Hauser, J., Rodrigo-Ginés, F.-J., Datta, S.,            Fu, E., Do, L., Lass, J., Yang, H., Sunkari, S., Bharath,
+Shepherd, M., Kamphuis, T., Zhang, Q., Kim, H., Sun,                  V., Ai, V., Leung, J., Agrawal, R., Zhou, A., Chen, K.,
+R., Yao, J., Dernoncourt, F., Krishna, S., Rismanchian,               Kalpathi, T., Xu, Z., Wang, G., Xiao, T., Maung, E., Lee,
+S., Pu, B., Pinto, F., Wang, Y., Shridhar, K., Overholt,              S., Yang, R., Yue, R., Zhao, B., Yoon, J., Sun, S., Singh,
+K. J., Briia, G., Nguyen, H., David, Bartomeu, S., Pang,              A., Luo, E., Peng, C., Osbey, T., Wang, T., Echeazu,
+T. C., Wecker, A., Xiong, Y., Li, F., Huber, L. S., Jaeger,           D., Yang, H., Wu, T., Patel, S., Kulkarni, V., Sundara-
+J., Maddalena, R. D., Lù, X. H., Zhang, Y., Beger, C.,               pandiyan, V., Zhang, A., Le, A., Nasim, Z., Yalam, S.,
+Kon, P. T. J., Li, S., Sanker, V., Yin, M., Liang, Y., Zhang,         Kasamsetty, R., Samal, S., Yang, H., Sun, D., Shah, N.,
+
+                                                                 13
+
+===== PDF p.14 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+  Saha, A., Zhang, A., Nguyen, L., Nagumalli, L., Wang,                     Zhao, Z., Chen, W., Zhai, J., Xu, B., Huang, M., Wang,
+  K., Zhou, A., Wu, A., Luo, J., Telluri, A., Yue, S., Wang,                H., Li, J., Dong, Y., and Tang, J. Glm-4.5: Agentic,
+  A., and Hendrycks, D. Humanity’s last exam, 2025. URL                     reasoning, and coding (arc) foundation models, 2025.
+  https://arxiv.org/abs/2501.14249.                                         URL https://arxiv.org/abs/2508.06471.
+
+Shenfeld, I., Pari, J., and Agrawal, P. Rl’s razor: Why                   vLLM Team.      KV-aware Routing — vLLM Pro-
+  online reinforcement learning forgets less, 2025. URL                     duction Stack Documentation.      https://docs.
+  https://arxiv.org/abs/2509.04259.                                         vllm.ai/projects/production-stack/en/
+                                                                            vllm-stack-0.1.5/tutorials/kvaware.
+Sheng, G., Zhang, C., Ye, Z., Wu, X., Zhang, W., Zhang, R.,
+                                                                            html, 2025. Accessed: 2026-01-15.
+  Peng, Y., Lin, H., and Wu, C. Hybridflow: A flexible and
+  efficient rlhf framework. In Proceedings of the Twentieth               Wang, W., Xu, X., An, W., Dai, F., Gao, W., He, Y., Huang,
+  European Conference on Computer Systems, EuroSys                         J., Ji, Q., Jin, H., Li, X., et al. Let it flow: Agen-
+  ’25, pp. 1279–1297. ACM, March 2025. doi: 10.1145/                       tic crafting on rock and roll, building the rome model
+  3689031.3696075. URL http://dx.doi.org/10.                               within an open agentic learning ecosystem. arXiv preprint
+  1145/3689031.3696075.                                                    arXiv:2512.24873, 2025a.
+Su, H., Diao, S., Lu, X., Liu, M., Xu, J., Dong, X., Fu, Y.,              Wang, X., Li, B., Song, Y., Xu, F. F., Tang, X., Zhuge, M.,
+  Belcak, P., Ye, H., Yin, H., Dong, Y., Bakhturina, E., Yu,               Pan, J., Song, Y., Li, B., Singh, J., Tran, H. H., Li, F.,
+  T., Choi, Y., Kautz, J., and Molchanov, P. Toolorches-                   Ma, R., Zheng, M., Qian, B., Shao, Y., Muennighoff, N.,
+  tra: Elevating intelligence via efficient model and tool or-             Zhang, Y., Hui, B., Lin, J., Brennan, R., Peng, H., Ji, H.,
+  chestration, 2025. URL https://arxiv.org/abs/                            and Neubig, G. Openhands: An open platform for ai
+  2511.21689.                                                              software developers as generalist agents, 2025b. URL
+Sun, H., Chang, L.-W., Bao, W., Zheng, S., Zheng, N., Liu,                 https://arxiv.org/abs/2407.16741.
+  X., Dong, H., Chi, Y., and Chen, B. Shadowkv: Kv                        Xie, T., Zhang, D., Chen, J., Li, X., Zhao, S., Cao, R.,
+  cache in shadows for high-throughput long-context llm                     Hua, T. J., Cheng, Z., Shin, D., Lei, F., Liu, Y., Xu, Y.,
+  inference, 2025. URL https://arxiv.org/abs/                               Zhou, S., Savarese, S., Xiong, C., Zhong, V., and Yu,
+  2410.21465.                                                               T. Osworld: Benchmarking multimodal agents for open-
+Team, ., Zeng, A., Lv, X., Zheng, Q., Hou, Z., Chen, B.,                    ended tasks in real computer environments, 2024. URL
+  Xie, C., Wang, C., Yin, D., Zeng, H., Zhang, J., Wang, K.,                https://arxiv.org/abs/2404.07972.
+  Zhong, L., Liu, M., Lu, R., Cao, S., Zhang, X., Huang,
+                                                                          Xie, Z., Xu, Z., Zhao, M., An, Y., Mailthody, V. S., Mahlke,
+  X., Wei, Y., Cheng, Y., An, Y., Niu, Y., Wen, Y., Bai, Y.,
+                                                                            S., Garland, M., and Kozyrakis, C. Strata: Hierarchical
+  Du, Z., Wang, Z., Zhu, Z., Zhang, B., Wen, B., Wu, B.,
+                                                                            context caching for long context language model serv-
+  Xu, B., Huang, C., Zhao, C., Cai, C., Yu, C., Li, C., Ge,
+                                                                            ing, 2025. URL https://arxiv.org/abs/2508.
+  C., Huang, C., Zhang, C., Xu, C., Zhu, C., Li, C., Yin,
+                                                                            18572.
+  C., Lin, D., Yang, D., Jiang, D., Ai, D., Zhu, E., Wang,
+  F., Pan, G., Wang, G., Sun, H., Li, H., Li, H., Hu, H.,                 Yang, A., Li, A., Yang, B., Zhang, B., Hui, B., Zheng,
+  Zhang, H., Peng, H., Tai, H., Zhang, H., Wang, H., Yang,                  B., Yu, B., Gao, C., Huang, C., Lv, C., Zheng, C., Liu,
+  H., Liu, H., Zhao, H., Liu, H., Yan, H., Liu, H., Chen, H.,               D., Zhou, F., Huang, F., Hu, F., Ge, H., Wei, H., Lin,
+  Li, J., Zhao, J., Ren, J., Jiao, J., Zhao, J., Yan, J., Wang,             H., Tang, J., Yang, J., Tu, J., Zhang, J., Yang, J., Yang,
+  J., Gui, J., Zhao, J., Liu, J., Li, J., Li, J., Lu, J., Wang,             J., Zhou, J., Zhou, J., Lin, J., Dang, K., Bao, K., Yang,
+  J., Yuan, J., Li, J., Du, J., Du, J., Liu, J., Zhi, J., Gao, J.,          K., Yu, L., Deng, L., Li, M., Xue, M., Li, M., Zhang,
+  Wang, K., Yang, L., Xu, L., Fan, L., Wu, L., Ding, L.,                    P., Wang, P., Zhu, Q., Men, R., Gao, R., Liu, S., Luo,
+  Wang, L., Zhang, M., Li, M., Xu, M., Zhao, M., Zhai,                      S., Li, T., Tang, T., Yin, W., Ren, X., Wang, X., Zhang,
+  M., Du, P., Dong, Q., Lei, S., Tu, S., Yang, S., Lu, S., Li,              X., Ren, X., Fan, Y., Su, Y., Zhang, Y., Zhang, Y., Wan,
+  S., Li, S., Shuang-Li, Yang, S., Yi, S., Yu, T., Tian, W.,                Y., Liu, Y., Wang, Z., Cui, Z., Zhang, Z., Zhou, Z., and
+  Wang, W., Yu, W., Tam, W. L., Liang, W., Liu, W., Wang,                   Qiu, Z. Qwen3 technical report, 2025. URL https:
+  X., Jia, X., Gu, X., Ling, X., Wang, X., Fan, X., Pan, X.,                //arxiv.org/abs/2505.09388.
+  Zhang, X., Zhang, X., Fu, X., Zhang, X., Xu, Y., Wu, Y.,
+  Lu, Y., Wang, Y., Zhou, Y., Pan, Y., Zhang, Y., Wang, Y.,               Yang, J., Jimenez, C. E., Wettig, A., Lieret, K., Yao,
+  Li, Y., Su, Y., Geng, Y., Zhu, Y., Yang, Y., Li, Y., Wu,                  S., Narasimhan, K., and Press, O. Swe-agent: Agent-
+  Y., Li, Y., Liu, Y., Wang, Y., Li, Y., Zhang, Y., Liu, Z.,                computer interfaces enable automated software engineer-
+  Yang, Z., Zhou, Z., Qiao, Z., Feng, Z., Liu, Z., Zhang,                   ing, 2024. URL https://arxiv.org/abs/2405.
+  Z., Wang, Z., Yao, Z., Wang, Z., Liu, Z., Chai, Z., Li, Z.,               15793.
+
+                                                                     14
+
+===== PDF p.15 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+Yu, L., Lin, J., and Li, J. Stateful large language model
+  serving with pensieve. In Proceedings of the Twentieth
+  European Conference on Computer Systems, EuroSys
+  ’25, pp. 144–158. ACM, March 2025. doi: 10.1145/
+  3689031.3696086. URL http://dx.doi.org/10.
+  1145/3689031.3696086.
+Yuan, Y., Iyer, A., Ma, L., and Talati, N. Vortex: Overcom-
+  ing memory capacity limitations in gpu-accelerated large-
+  scale data analytics, 2025. URL https://arxiv.
+  org/abs/2502.09541.
+Zhang, H., Liu, X., Lv, B., Sun, X., Jing, B., Iong, I. L.,
+  Hou, Z., Qi, Z., Lai, H., Xu, Y., et al. Agentrl: Scaling
+  agentic reinforcement learning with a multi-turn, multi-
+  task framework. arXiv preprint arXiv:2510.04206, 2025.
+Zhang, L., Chen, M., Cao, R., Chen, J., Zhou, F., Xu, Y.,
+  Yang, J., Chen, L., Luo, C., Zhang, K., et al. Megaflow:
+  Large-scale distributed orchestration system for the agen-
+  tic era. arXiv preprint arXiv:2601.07526, 2026.
+Zheng, C., Dang, K., Yu, B., Li, M., Jiang, H., Lin, J.,
+  Liu, Y., Lin, H., Wu, C., Hu, F., Yang, A., Zhou, J.,
+  and Lin, J. Stabilizing reinforcement learning with
+  llms: Formulation and practices, 2025. URL https:
+  //arxiv.org/abs/2512.01374.
+Zheng, L., Yin, L., Xie, Z., Sun, C., Huang, J., Yu, C. H.,
+  Cao, S., Kozyrakis, C., Stoica, I., Gonzalez, J. E., Bar-
+  rett, C., and Sheng, Y. Sglang: Efficient execution
+  of structured language model programs, 2024. URL
+  https://arxiv.org/abs/2312.07104.
+
+Zhong, Y., Liu, S., Chen, J., Hu, J., Zhu, Y., Liu, X., Jin, X.,
+  and Zhang, H. Distserve: Disaggregating prefill and de-
+  coding for goodput-optimized large language model serv-
+  ing, 2024. URL https://arxiv.org/abs/2401.
+  09670.
+
+Zhou, S., Xu, F. F., Zhu, H., Zhou, X., Lo, R., Sridhar,
+  A., Cheng, X., Ou, T., Bisk, Y., Fried, D., Alon, U.,
+  and Neubig, G. Webarena: A realistic web environment
+  for building autonomous agents, 2024. URL https:
+  //arxiv.org/abs/2307.13854.
+
+
+
+
+                                                               15
+
+===== PDF p.16 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+A. Extended Discussion
+A.1. KV Cache Optimization
+Multi-tiered KV cache management. To alleviate GPU memory pressure, systems such as Pensieve (Yu et al., 2025),
+Continuum (Li et al., 2025), Strata (Xie et al., 2025), and ShadowKV (Sun et al., 2025) exploit the hardware memory
+hierarchy, comprising GPU HBM, CPU DRAM, and NVMe SSD for KV cache management. These tiered caching
+mechanisms mitigate transient preemption by offloading inactive KV states to lower-tier storage and prefetching them back
+to GPU upon request resumption. However, the practical efficiency of these methods is fundamentally constrained by the
+inter-tier bandwidth between device and host memory. In high-frequency agentic workflows, the overhead of frequent
+swap-in and swap-out cycles often negates the benefits of multi-tier caching as shown in Section 5.
+
+
+Distributed KV cache management. Distributed management of agentic states introduces significant complexity to KV
+cache eviction and preemption policies. While systems like BanaServe (He et al., 2025) and LMCache (Liu et al., 2025)
+enable KV cache transfer across DP nodes, their performance in large-batch agentic serving and rollout is often constrained
+by limited interconnect bandwidth. The strong intra-program dependencies in agentic workflows necessitate frequent state
+transferring without program-level management, which can easily saturate the network during serving or rollout.
+To bypass these bandwidth bottlenecks, standard inference systems like vLLM KV-aware router (vLLM Team, 2025) and
+SGLang Model Gateway (Zheng et al., 2024) employ KV-aware routing policies that pin requests to specific nodes based
+on prefix locality or session ID. Similarly, Vortex (Yuan et al., 2025) introduces session-aware prefetching to minimize
+cross-node data transfer latency. However, these approaches lack the capability to dynamically migrate active program
+states between DP nodes. This absence of workload transfer leads to severe memory utilization imbalance across the cluster,
+shown in Figure 2a. Nodes hosting long-running agentic programs cannot offload states to idle peers, resulting in fragmented
+resource utilization and degraded aggregate throughput.
+
+A.2. Existing KV cache optimization methods
+KV cache offloading. We investigated KV cache offloading by using LMcache (Liu et al., 2025) as a potential remedy
+for capacity constraints. While offloading theoritically extends effective memory space by utilizing CPU or SSD storage,
+our implementation with vLLM + LMcache reveals a critical bottleneck: the PCIe bandwidth is insufficient to sustain
+the high-frequency context switching and large-volume data transfers inherent to agentic workloads. As demonstrated in
+Figure 7a, when serving the GLM-4.6 model (Team et al., 2025) with the mini-SWEAgent framework (Yang et al., 2024),
+the latency penalty from frequent swap-in and swap-out operations negates the memory capacity benefits, resulting in severe
+throughput degradation under heavy agentic workloads.
+
+
+Prefill-Decode (PD) disaggregation. We also explored PD disaggregation (Zhong et al., 2024), a standard optimization
+for chatbot serving by isolating the decoding phase from prefill interference. However, when applied to agentic workloads
+characterized by continuous context growth, we observe that PD disaggregation exacerbates thrashing. By partitioning the
+cluster into prefill-only and decode-only nodes, the effective HBM pool available for handling prefill is significantly smaller
+than that in a unified architecture. This memory fragmentation causes the system to hit capacity limits and trigger thrashing
+at much lower concurrency levels, as shown in Figure 7b. These results demonstrate that generic architectural optimizations
+cannot substitute for a program-centric scheduler that actively manages the working set.
+
+A.3. Scaling up agentic workflows
+Heterogeneous resource allocation and scheduling. To orchestrate multi-turn agent-environment interactions at scale,
+recent systems such as MegaFlow (Zhang et al., 2026), RollArt (Gao et al., 2025; Wang et al., 2025a), AgentRL (Zhang et al.,
+2025), and VerlTool (Jiang et al., 2025) decouple model inference from environment execution. While these frameworks
+effectively scale environment concurrency via specialized services, they exhibit the inherent limitations of coarse-grained
+disaggregation. By treating the inference engine and tool executor as isolated black boxes, these systems lack unified
+resource management and are unable to coordinate KV cache lifecycles with the environment execution. Without fine-
+grained scheduling at program-level, disaggregation-based approaches waste KV cache reuse potential in agentic workloads,
+yielding sub-optimal throughput.
+
+                                                              16
+
+===== PDF p.17 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+                                                                                 100%
+
+
+
+
+                                                                                                                             Throughput (step/min)
+                                     120 11188%          Throughput                                                                                       Aggregated serving(214.9)
+                                                         KV Cache Hit Rate                                                                     200
+
+
+             Throughput (step/min)
+                                                                                 80%                                                                                          183.15
+
+
+
+
+                                                                                       KV Cache Hit Rate (%)
+                                     100
+                                                                                                                                                                     160.10
+                                                                                                                                               160
+                                      80                                         60%
+                                                             62                                                                                120
+                                      60           54
+                                                                                 40%                                                                      87.05
+                                                                       40                                                                            80
+                                      40
+                                                                                 20%
+                                      20                                                                                                             40
+                                                        2%        1%        1%
+                                       0                                         0%
+                                           24      48     72    96                                                                                   0
+                                                                                                                                                           1:3        2:2        3:1
+                                           Parallel program number                                                                                               PD ratio(p:d)
+         (a) KV Cache Hit Rate with KV Cache Offloading                                                             (b) Throughput v.s. Prefill-Only/Decode-Only Node Ratio
+                                            Figure 7. Ablation study on KV cache offloading and Prefill-Decode (PD) disaggregation
+
+
+
+
+Scalability of T HUNDER AGENT as a Routing Policy For multi-node deployment, ThunderAgent replaces session-based
+static node-pinning with a global waiting queue. When a paused workflow is ready to resume, ThunderAgent routes its
+requests to the node with the most available capacity. Such routing strategy balances the tradeoff between KV cache locality
+and multi-node workload balance, achieving both efficient cache utilization and even load distribution across the cluster.
+The main paper’s distributed-rollout result (Table 2) uses the standard 2-node setting; we now extend the experiment to up
+to 8 nodes (64×H100) on the same GLM-4.6 + mini-SWEAgent workload, with concurrency scaled proportionally (72
+programs per node). The baseline is the Cache-Aware Routing Policy in SGLang Model Gateway2 , which pins requests to
+specific backend replicas based on prefix locality but cannot redistribute paused programs across nodes.
+Figure 8 compares throughput against this baseline and against an idealized linear-scaling reference. T HUNDER AGENT
+tracks the linear-scaling line closely from 2 to 8 nodes, whereas the Cache-Aware Routing Policy quickly falls off because
+cross-node memory imbalance grows with cluster size and a locality-only router cannot rebalance the paused-program pool
+(cf. Section G.1). Concretely, T HUNDER AGENT’s speedup over the SGLang baseline widens from 1.79× at 2 nodes to
+2.39× at 8 nodes. We also instrumented the per-tick communication delay of T HUNDER AGENT’s global scheduler: it grows
+sub-linearly from 13.5 ms at 2 nodes to 22.7 ms at 8 nodes (i.e., 1.68× for a 4× increase in nodes) and remains well below
+per-step inference latency, which is on the order of seconds. The global scheduler is therefore not a bottleneck for scaling.
+
+A.4. Compatibility of T HUNDER AGENT with KV-cache offloading
+T HUNDER AGENT is orthogonal to KV-cache offloading and remains effective when offloading is enabled. To demonstrate
+this, we integrate T HUNDER AGENT into SGLang HiCache (Xie et al., 2025) with the host-memory ratio set to 2.0, serving
+MiniMax M2.5 on R2E-Gym across 8×H100 GPUs. We sweep serving batch size from 64 to 192 and compare against the
+same SGLang + HiCache stack without T HUNDER AGENT as the baseline.
+Offloading alone is insufficient at high concurrency. Figure 9 shows that the baseline keeps a high throughput up to batch
+size 96, where the combined host + device capacity still accommodates the working set. As we push to batch sizes 160 and
+192, however, the baseline’s combined capacity is exhausted: P50 latency jumps from ∼ 10 s to ∼ 30 s at batch 160 and to
+∼ 70 s at batch 192, while throughput decreases despite the larger batch.
+T HUNDER AGENT prevents capacity collapse and improves throughput at every batch size. By temporarily pausing
+short programs to keep the live working set within available capacity, T HUNDER AGENT holds both P50 and P90 latency
+essentially flat at ∼ 10 s and ∼ 20 s respectively across the entire sweep, while throughput grows monotonically with batch
+size. Even at small batch sizes where both methods achieve high cache hit via PCIe swapping, T HUNDER AGENT still
+improves throughput and latency by selectively pausing acting programs.
+
+A.5. Portability of T HUNDER AGENT across Hardware Generations
+We test T HUNDER AGENT on hardware with a lower compute-to-bandwidth ratio than H100. Table 3 reports the relevant
+ratio for the two GPU tiers we use in the paper: the A100 sits at 153 GFLOPS/GB, roughly half H100’s 295.
+   2
+       https://docs.sglang.io/docs/advanced_features/sgl_model_gateway#cache-aware-policy-tuning
+
+                                                                                                               17
+
+===== PDF p.18 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+
+
+
+Figure 8. Scaling up T HUNDER AGENT to 8 H100 nodes, GLM-4.6 + mini-SWEAgent (72 concurrent programs per node). T HUNDER -
+AGENT tracks the ideal linear-scaling reference, while the Cache-Aware Routing Policy in SGLang Model Gateway falls progressively
+further behind as the cluster grows.
+
+
+
+
+                                       Figure 9. T HUNDER AGENT with SGLang HiCache
+
+
+
+Figure 10 reports throughput on 8×A100 with the same workloads as Figure 4(a, b). At low concurrency (24), T HUNDER A-
+GENT matches vLLM within noise on both pipelines, because the working set fits comfortably in HBM and thrashing is rare.
+As concurrency rises to 48 and 72, the picture flips: T HUNDER AGENT widens the gap to 1.71–2.08× on mini-SWEAgent
+and 1.16–1.62× on OpenHands, while vLLM’s throughput decreases from concurrency 48 onward as it begins to thrash.
+
+                                                              18
+
+===== PDF p.19 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+                                GPU      Compute (TFLOPs)            Bandwidth (GB/s)   Ratio
+                                H100                      989                   3350    295.2
+                                A100                      312                   2039    153.0
+Table 3. Compute-to-bandwidth ratio across hardware tiers. We report FP16 Tensor Core (without sparsity) compute performance in
+TFLOPs and Global-to-L2 memory bandwidth in GB/s.
+
+
+
+
+                                          Figure 10. T HUNDER AGENT on A100 GPUs
+
+
+A.6. Adoption of T HUNDER AGENT in Open-Source Frameworks
+Beyond our own evaluation, T HUNDER AGENT has been adopted by open-source RL and serving frameworks to accelerate
+agentic rollout and serving, demonstrating that it can be integrated into existing stacks with small interface changes.
+
+SkyRL (RL rollout). ThunderAgent is integrated into upstream SkyRL (Cao et al., 2025)’s main repository under
+examples/train/thunder agent with an example training recipe at: https://github.com/NovaSky-AI/
+SkyRL/tree/main/examples/train/thunder_agent. This recipe uses T HUNDER AGENT as a rollout gateway
+for SkyRL training. Each agent trajectory is exposed to T HUNDER AGENT as a program through a program id, and the
+program is explicitly released after termination, matching the minimal interface described in Appendix B. The released
+recipe trains Qwen3-32B on R2EGym with SkyRL’s fully asynchronous framework and achieves a 3.01× wall-clock
+speedup over the baseline, demonstrating that T HUNDER AGENT can be adopted in an existing agentic RL stack with
+minimal interface changes.
+
+NVIDIA Dynamo (serving). As part of Dynamo 2.03 , T HUNDER AGENT is being integrated into NVIDIA Dynamo4 , a
+datacenter-scale distributed inference serving framework, to improve throughput for agentic inference workloads.
+
+
+
+
+   3
+       https://github.com/ai-dynamo/dynamo/issues/9208
+   4
+       https://github.com/ai-dynamo/dynamo/pull/9448
+
+                                                                19
+
+===== PDF p.20 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+B. System Portability and Interface Abstraction.
+B.1. Middleware Architecture and Unified Interfaces.
+T HUNDER AGENT serves as a program-aware runtime layer that mediates between agent control flow and backend
+inference engines via a program-level abstraction. The scheduler controls program state transitions based on the abstracted
+ProgramState (see Table 4a) together with the backend cache capacity view (see Table 5). Meanwhile, each program
+binds only to the endpoint and does not depend on the concrete backend implementation.
+
+B.2. Why program ID matters.
+While the standard session ID serves as a routing label, the program ID is used by our system to check the workflow
+metadata. This visibility is critical: it allows the scheduler to distinguish valid tool-wait times from idle sessions, enabling
+smart preemption strategies that session-based baselines cannot support.
+
+        Only inference backend (e.g., vLLM/SGLang)                                           With ThunderAgent
+
+  1   # 1) LLM request                                                 1 # 1) LLM request
+  2   chat_completion(model_id, messages,                              2 extrabody["program id"] = "PID"
+          extrabody)                                                   3 chat_completion(model_id, messages,
+  3                                                                          extrabody)
+  4   # 2) Tool execution                                              4
+  5   run_tool(command, sandbox)                                       5   # 2) Tool execution
+  6                                                                    6   run_tool(command, sandbox,
+  7   # 3) Program end                                                         program id="PID")
+  8   # (no explicit release)                                          7
+                                                                       8 # 3) Program end (explicit release)
+                                                                       9 POST /programs/release
+                                                                      10 { "program id": "PID" }
+
+
+
+                              Figure 11. Only three changes are required to use the ThunderAgent.
+
+
+B.3. Low-overhead adoption of the ThunderAgent.
+Figure 11 shows that adopting ThunderAgent only requires attaching program id to requests (for both LLM inference
+and tool execution) and sending an explicit release signal with program id when a program ends. The program id
+tags each request with its own program instance for scheduling, while the release signal allows ThunderAgent to reclaim
+per-program resources after termination. All other request fields and the OpenAI-style API surface remain unchanged.
+
+Field             Type            Meaning                                      Status                  Meaning
+ProgramState                                                                   ProgramStatus
+status       ProgramStatus Current lifecycle state.                            REASONING               On-GPU inference.
+backend url str            Assigned backend endpoint.                          ACTING                  Off-GPU tool exec.
+step count   int           Executed steps so far.                              PAUSED                  In global paused waiting set.
+total tokens int           Total tokens over full history.                     STOPPED                 Released; resources reclaimed.
+                         (a) ProgramState fields.                                             (b) ProgramStatus semantics.
+                                            Table 4. Program state and status definitions.
+
+
+
+
+                                                                 20
+
+===== PDF p.21 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+             Field                          Type                       Meaning
+             BackendState
+             url                   str                   Backend endpoint.
+             healthy               bool                  Health flag for scheduling.
+             cache config          Optional[CacheConfig] Static cache configuration (fetched at startup).
+             active program tokens int                   Active token footprint on this backend.
+
+                                              Table 5. Key fields of BackendState.
+
+
+
+C. Tool execution time variability.
+Practical agent tool calls are hard to characterize and often unpredictable. In some code-centric settings (e.g., serving
+SWE-Bench (Jimenez et al., 2024) with SWE-agent (Yang et al., 2024) or OpenHands (Wang et al., 2025b)), agents primarily
+invoke local, lightweight tools, and tool latency is relatively stable with low variance. However, in broader and more realistic
+scenarios, e.g., serving HLE (Phan et al., 2025) with ToolOrchestra (Su et al., 2025), the workload relies more heavily on
+remote-service tools (Table 6), making tool execution time volatile and difficult to predict. This volatility largely stems from
+factors external to the agent runtime, such as network jitter, backend load and queuing delays, and rate limiting, which can
+vary across requests and over time.
+We empirically confirm this behavior in Figure 12. For remote-service tools (and some execution tools), the gap between
+the median and tail quantiles is large: p95 and p99 are substantially higher than the median, and the tail can extend to
+tens or even hundreds of seconds. This suggests that tool latency in these settings lacks a stable central tendency; instead,
+heavy-tailed behavior dominates, making tool latency prediction intrinsically brittle in practice.
+Given the unpredictability of tool execution, underestimation wastes pinned cache capacity while still triggering premature
+KV eviction, causing thrashing upon resume. Overestimation, in contrast, may lead to unnecessary eviction of programs’ KV
+that should have remained pinned. Even if tool runtimes were perfectly predictable, existing methods such as continuum (Li
+et al., 2025) still decide whether to keep the KV cache pinned using a static, threshold-based rule. In contrast, ThunderAgent
+builds a complete cost-modeling framework and dynamically trades off Costrecompute and Costcaching .
+
+           Tool bucket                          Role                       Primary variability source
+           HLE-search                           Retrieve evidence          Remote service(Network latency/Rate limits)
+           HLE-enhance-reasoning                Model-as-a-tool call       Remote service
+           HLE-answer                           Final generation           Local LLM inference
+           SAB-execute bash                     Shell execution            Sandbox and I/O
+           SAB-execute ipython cell             Python cell execution      Program runtime
+           SAB-str replace editor               File edit                  Local filesystem
+           SAB-task tracker                     Task state tracking        Local filesystem
+
+                                                       Table 6. Tool buckets.
+
+
+
+
+                                                                21
+
+===== PDF p.22 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+
+
+
+                                  HLE-answer                                                       HLE-enhance_reasoning                                                    HLE-search
+                 30                                                                 25                                                                     30
+                          p95           p99                                                                    p95          p99                                     p95              p99
+                 24                                                                 20                                                                     24
+Percentage (%)
+
+
+
+
+                                                                   Percentage (%)
+
+
+
+
+                                                                                                                                          Percentage (%)
+                 18                                                                 15                                                                     18
+
+                 12                                                                 10                                                                     12
+
+                 6                                                                  5                                                                      6
+
+                 0                                                                  0                                                                      0
+                      0          80         160       240                                0                50         100          150                           0          20          40          60
+                                  Duration (s)                                                             Duration (s)                                                     Duration (s)
+
+                                SAB-execute_bash                                                   SAB-execute_ipython_cell                                               SAB-task_tracker
+                 30                                                                 40                                                                     25
+                          p95     p99                                                        p95    p99                                                                     p95              p99
+                 24                                                                 32                                                                     20
+Percentage (%)
+
+
+
+
+                                                                  Percentage (%)
+
+
+
+
+                                                                                                                                         Percentage (%)
+                 18                                                                 24                                                                     15
+
+                 12                                                                 16                                                                     10
+
+                 6                                                                  8                                                                      5
+
+                 0                                                                  0                                                                      0
+                      0          200        400       600                                0                200        400          600                           0         0.05        0.1      0.15
+                                  Duration (s)                                                             Duration (s)                                                     Duration (s)
+
+                                                                                                    SAB-str_replace_editor
+                                                                                    25
+                                                                                                      p95          p99
+                                                                                    20
+                                                                  Percentage (%)
+
+
+
+
+                                                                                    15
+
+                                                                                    10
+
+                                                                                    5
+
+                                                                                    0
+                                                                                         0                0.25        0.5         0.75
+                                                                                                            Duration (s)
+
+                      Figure 12. Tool execution time distributions.Tool execution time exhibits high variability and is difficult to predict.
+
+
+
+
+                                                                                                              22
+
+===== PDF p.23 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+D. KV cache hit rate statistics and interpretation
+In our cost decomposition Equation (3), throughput loss in agentic serving mainly comes from non-productive overheads: KV
+re-computation induced by thrashing and idle KV caching during external tool execution, i.e., Costrecompute and Costcaching .
+When tool calls are short and predictable, the acting phase occupies KV for only a short time, so Costcaching is small; thus,
+avoiding thrashing dominates: a higher KV cache hit rate typically implies fewer re-prefills and higher throughput.
+However, when tool execution times are highly variable (see Appendix C), a TTL-based scheduler can end up pinning the
+KV for long tool calls. While this can reduce Costrecompute and thus increase the KV cache hit rate, it simultaneously inflates
+Costcaching and reduces throughput. This helps explain why continuum (Li et al., 2025) can underperform on tool-heavy
+workloads despite achieving a higher KV cache hit rate (Figs. 4, 5).
+ThunderAgent adapts to these regimes by explicitly balancing caching and recomputation. ThunderAgent introduces
+a time-decay function f (t) in Sec. 4.3 for acting programs to trade off Costcaching and Costrecompute ; we rigorously derive
+the optimal functional form of f (t) in Appendix F.1. By progressively lowering the effective memory priority of long-idle
+acting programs, the scheduler evicts their KV caches to reduce idle caching cost while controlling recomputation, yielding
+better throughput in practice (Figs. 4).
+
+E. End-to-End Latency Analysis
+Though we have stated in Section 1 that program-level latency(time used for whole workflow generation) is far more impor-
+tant than end-to-end per step latency for autonomous agents and agentic RL rollout. Here we compare T HUNDER AGENT’s
+average per-step latency with vLLM and Continuum. Figure 13 shows that T HUNDER AGENT significantly outperforms
+vLLM and Continuum when applying GLM4.6 and Qwen3 235B with mini-SWEAgent and Openhands on a single H100
+serving in either low or high parallel workflow number. The reason is that it seems to improve end-to-end latency by
+switching acting programs. But it actually delays all the running programs’ latency by triggering heavy KV-cache
+thrashing.
+
+                                                                vLLM     Continuum                       ThunderAgent(Ours)
+
+                                              (a) SWEAgent-GLM4.6                                                       (b) OpenHands-GLM4.6
+                               60                                                                       70
+
+                               50                                                                       60
+             E2E Latency (s)
+
+
+
+
+                                                                                      E2E Latency (s)
+
+
+
+
+                                                                                                        50
+                               40
+                                                                                                        40
+                               30
+                                                                                                        30
+                               20
+                                                                                                        20
+
+                               10                                                                       10
+                                                                                                                                                  0.24×
+                                                                         0.19×
+                                0                                                                        0
+                                    24          48             72         96                                 24               48         72        96
+                                             Parallel workflow number                                                  Parallel workflow number
+
+                                            (c) SWEAgent-Qwen3-235B                                                   (d) OpenHands-Qwen3-235B
+                               60                                                                       70
+
+                               50                                                                       60
+             E2E Latency (s)
+
+
+
+
+                                                                                      E2E Latency (s)
+
+
+
+
+                                                                                                        50
+                               40
+                                                                                                        40
+                               30
+                                                                                                        30
+                               20
+                                                                                                        20
+
+                               10                                                                       10
+                                                                                                                                                  0.24×
+                                                                         0.19×
+                                0                                                                        0
+                                    24          48             72         96                                 24               48         72        96
+                                             Parallel workflow number                                                  Parallel workflow number
+
+
+                                                             Figure 13. End-to-End latency comparision
+
+
+
+
+                                                                                 23
+
+===== PDF p.24 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+F. Extended Theoretical Analysis.
+F.1. Proof of Time Decay Function for Periodic Thrashing Detection.
+Hypothesis F.1 (Unpredictable Tool Execution Time). For acting programs, we hypothesize that the scheduler cannot
+reliably predict the tool return time for a given program (see Appendix C). Consequently, the decay function f should
+depend only on the elapsed acting time t in a time-homogeneous manner (Parzen, 1999).
+Hypothesis F.2 (Boundary Conditions). We assume the time decay function f : [0, ∞) → (0, 1] satisfies
+
+                                                  f (0) = 1, lim f (t) = 0,                                                (12)
+                                                              t→∞
+
+An intuitive interpretation of these boundary conditions is that, when the tool execution time is 0, corresponding to a multi-
+turn interaction without tool calls, all acting programs reduce to reasoning programs, and therefore f (t) = 1. Conversely, if
+the tool execution time is infinite, the agentic workflow collapses to single-turn generation, akin to standard chatbot serving,
+since requests never return for the next-turn interactions. In this regime, setting f (t) = 0 aligns the decay function with
+request-level scheduling policies.
+Theorem F.3 (Admissible Time Decay Functions). Under Hypothesis F.1 and F.2, the admissible time decay function f for
+our capacity check function in Equation 7 must take one of the following forms: exponential in continuous time, f (t) = e−λt
+with λ > 0, or geometric in discrete tick time, f (k) = x−k with x > 1.
+
+Proof. We prove this theorem by first formalizing the time-homogeneous property implied by Hypothesis F.1. Next, we
+inducing the admissible time decay functions f under the boundary conditions in Hypothesis F.2.
+
+Formalization of unpredictable tool time. Let t denote the elapsed acting time, measured in wall-clock time (continuous
+time) or in periodic-monitor ticks (discrete time). Under Hypothesis F.1, the relative decay after waiting an additional
+duration ∆ should not depend on the absolute elapsed time t, but only on the increment ∆. We formalize this as the existence
+of a function ϕ : [0, ∞) → (0, 1] such that, for all t, ∆ ≥ 0,
+
+                                                   f (t + ∆) = f (t) ϕ(∆).                                                 (13)
+
+Semigroup equation. Setting t = 0 in Equation 13 and using the boundary condition f (0) = 1 (from Hypothesis F.2)
+yields ϕ(∆) = f (∆). Substituting back, we obtain the multiplicative semigroup equation
+
+                                          f (t + ∆) = f (t) f (∆),       ∀t, ∆ ≥ 0.                                        (14)
+
+Continuous-time case (exponential decay). We first consider the continuous-time case. Define h(t) ≜ ln f (t). Applying
+the logarithms on both sides of Equation 14 yields the Cauchy functional equation
+
+                                                  h(t + ∆) = h(t) + h(∆).                                                  (15)
+
+Since f (t) ∈ (0, 1], we have h(t) ≤ 0 for all t ≥ 0, which implies that h is bounded above on [0, ∞). Under this
+boundedness condition, the Cauchy functional equation admits only linear solutions of the form h(t) = ct for some c ∈ R.
+Writing λ ≜ −c ≥ 0, we obtain
+                                                    f (t) = e−λt .                                                  (16)
+Finally, the boundary condition limt→∞ f (t) = 0 (Hypothesis F.2) rules out λ = 0, and thus λ > 0.
+
+Discrete-time case (geometric decay). We next consider the discrete-time setting, where elapsed acting time is measured in
+integer ticks k ∈ Z≥0 . Equation 14 becomes
+
+                                        f (m + n) = f (m) f (n),        ∀m, n ∈ Z≥0 .                                      (17)
+
+Setting n = 1 yields the recurrence f (k) = f (k − 1)f (1). Let γ ≜ f (1), we have f (k) = f (1)k ≜ γ k . The boundary
+condition limk→∞ f (k) = 0 implies 0 < γ < 1. Equivalently, we can parameterize
+
+                                              f (k) = x−k ,        x ≜ γ −1 > 1.                                           (18)
+
+This completes the proof.
+
+                                                              24
+
+===== PDF p.25 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+F.2. Proof of recomputation STP cost
+As defined in Section 4.2, the STP recomputation cost is given by:
+                                                           Z trecompute
+                                          Costrecompute =               ci (t) dt                                             (19)
+                                                                0
+
+where ci (t) represents the instantaneous cost, which is proportional to the decoding step (i.e., ci (t) ∝ t). This proportionality
+arises because chunked prefill processes a constant number of KV pairs per iteration, resulting in a linear increase in
+accumulated computation over time. Consequently, evaluating the integral yields Costrecompute ∝ t2recompute . Given the
+relationship trecompute = ci × Tdecode /chunk, where both Tdecode and the chunk size are constant, it follows that:
+
+                                                       Costrecompute ∝ c2i
+
+F.3. Proof of minimized recomputation STP cost
+We provide a rigorous proof for the optimality of the Shortest-First Eviction policy using an exchange argument.
+Problem    Definition. We aim to select a subset of paused programs S to evict
+                                                                          P such     that the total reclaimed memory satisfies
+                                                                                 2                                        2
+P
+   i∈S  ci ≥ ∆C,   while minimizing the  total re-computation cost J(S) =   i∈S i Note that the cost function f (x) = x is
+                                                                               c   .
+                                                  2    2    2
+strictly convex and super-additive (i.e., (a + b) > a + b for positive a, b).
+Theorem. The optimal strategy to minimize J(S) is to strictly select programs with the smallest context lengths ci .
+Proof. Suppose, for the sake of contradiction, that the optimal set S ∗ is not the set of the shortest programs. This implies
+there exists a ”long” program plong ∈ S ∗ and a ”short” program pshort ∈        / S ∗ (available but not selected) such that
+cshort < clong .
+We can construct a new set S ′ by swapping or decomposing plong . Since clong > cshort , we can conceptualize plong as
+being composed of a segment of length cshort and a residue r = clong − cshort .
+Replacing the selection of plong with pshort (and theoretically the residue r) changes the cost. Consider the inequality
+derived from the convexity of the square function:
+
+                                       c2long = (cshort + r)2 = c2short + r2 + 2cshort r                                      (20)
+
+Since cshort > 0 and r > 0, the cross-term 2cshort r > 0. Therefore:
+
+                                                      c2short + r2 < c2long                                                   (21)
+
+This inequality implies that breaking a large eviction target (clong ) into smaller components (cshort + r) strictly reduces the
+sum of squares. In the context of our scheduler, this means that if we are satisfying the memory constraint ∆C using a large
+program, we can strictly decrease the penalty by swapping it for available smaller programs (or a combination thereof) that
+sum to the same capacity.
+By iteratively applying this exchange—replacing the largest selected programs with smaller unselected programs—we
+monotonically decrease the cost function J(S). The cost reaches its global minimum only when no such exchange is
+possible, i.e., when S consists entirely of the programs with the smallest available context lengths.
+Conclusion. The Shortest-First strategy is globally optimal because the super-linear cost of attention (O(L2 )) penalizes
+fragmentation less than aggregation.
+
+
+
+
+                                                                25
+
+===== PDF p.26 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+G. Additional Ablation Studies
+We provide additional ablation studies that isolate the contribution of T HUNDER AGENT’s individual design decisions,
+complementing the parameter-sensitivity ablation in Section 5.4.
+
+G.1. Global vs. Local Waiting Queue
+We compare T HUNDER AGENT’s global waiting queue, which permits paused programs to be restored on a different DP
+node from their original backend, against a local waiting queue that always restores a program to its origin node. In the local
+variant, programs that pause on memory-saturated nodes must wait until their original node has capacity, whereas the global
+queue redistributes them to under-utilized peers.
+As shown in Figure 14, the global queue consistently improves throughput as we scale from 2 to 4 H100 nodes. At 4 nodes,
+the gain widens to 1.28×, reflecting that cross-node memory imbalance grows with cluster size (Figure 2a); the global queue
+directly mitigates this imbalance.
+
+
+
+
+  Figure 14. Global vs. local waiting queue on GLM-4.5-fp8 + mini-SWEAgent (8xH100 GPU, 72 concurrent programs per node).
+
+
+G.2. Time-Decay Function Form
+Theorem F.3 establishes that exponential decay is the unique admissible form of f (t) under the unpredictable-tool-latency
+assumption and the boundary conditions in Hypothesis F.2; we now empirically compare it against two practical alternatives:
+constant (f (t) = 1, i.e., no decay), linear (f (t) = max(1 − t, 0)), and exponential (f (t) = e−t ). We evaluate on three
+agentic pipelines with progressively less predictable tool latency: mini-SWE-Agent (short, regular tool calls), OSWorld
+(longer but largely periodic tool calls, e.g., a fixed 5s interval between screenshots), and ScienceAgent (highly stochastic,
+heavy-tailed tool calls; see Appendix C).
+As shown in Figure 15, exponential decay is the most robust choice overall: it outperforms both alternatives on mini-SWE-
+Agent (1.08×) and ScienceAgent (1.63× vs. 1.39× for linear), where unpredictable or long-tailed tool latency exposes the
+brittleness of a static f (t). On OSWorld, however, exponential decay trails linear by about 6% (1.14× vs. 1.21×): when
+tool durations are themselves near-deterministic, a linearly shrinking weight tracks the predictable tool clock more tightly.
+Constant decay, which never reclaims memory from long-idle acting programs, is the weakest on every workload that
+exhibits any waiting at all.
+
+
+
+
+                                                              26
+
+===== PDF p.27 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+G.3. Eviction Policy
+We empirically validate the shortest-first eviction policy proved optimal in Section F.3 against two natural baselines: random
+eviction and longest-first eviction. We run on two agentic pipelines, mini-SWE-Agent (SWE) and OpenHands, both with
+GLM-4.5-fp8 on a single H100 node at 72 concurrent programs.
+As predicted by the O(L2 ) recomputation cost (Section F.2), evicting the longest paused programs is the worst choice: the
+dropped KV state is the most expensive to rebuild on resume, inflating average prefill time and starving the decoding stream.
+Shortest-first achieves the highest throughput and the lowest average prefill time on both pipelines (Figure 16). The gap is
+largest on OpenHands, where program contexts are heaviest – shortest-first is roughly 2.0× the throughput of longest-first
+and cuts average prefill time by 2× (7.5 s vs. 15.1 s). Random falls between the two, consistent with it being an unbiased
+estimator over the same cost surface.
+
+
+
+
+Figure 15. Ablation of the decay function f (t) across three agentic pipelines. Throughput is reported as speedup vs. the constant (no
+decay) baseline. Exponential decay is the most robust overall; linear decay is preferable only on OSWorld, where tool execution time is
+near-deterministic. Experiments are conducted on an 8xH100 node with 72 concurrent programs using GLM-4.5-fp8 model.
+
+
+
+
+Figure 16. Ablation of the eviction policy. (Left) throughput, (right) average prefill time. Shortest-first eviction wins on both axes,
+with the gap widening on the heavier-context OpenHands pipeline. Experiments are conducted on an 8xH100 node with 72 concurrent
+programs using GLM-4.5-fp8 model.
+
+
+
+
+                                                                  27
+
+===== PDF p.28 =====
+ThunderAgent: A Fast, Simple, and Program-Aware Agentic Inference System
+
+G.4. Component-wise Contribution
+We disentangle the contribution of T HUNDER AGENT’s two main scheduling components by starting from vanilla vLLM and
+incrementally enabling local program-aware scheduling (the cost-driven eviction + decay function operating per backend)
+and then the global waiting queue (cross-node program migration). Table 7 reports throughput on 2×H100 nodes with
+GLM-4.5-fp8 + mini-SWEAgent at 144 concurrent programs.
+The largest jump comes from local program-aware scheduling, which raises throughput from 375 to 602 steps/min (1.61×)
+by directly suppressing unnecessary recomputation and idle caching cost (Equation 3) within each backend. Layering the
+global waiting queue on top adds a further 1.12× (602 → 672) by reducing cross-node memory imbalance, consistent with
+the standalone global-vs-local result in Section G.1.
+
+                           Component                                              Throughput (steps/min)
+                           vLLM (baseline)                                                   375
+                             + local program-aware scheduling                                602
+                                + global waiting queue (T HUNDER AGENT)                      672
+Table 7. Component-wise ablation on 2×H100 + GLM-4.5-fp8 + mini-SWEAgent at 144 concurrent programs. Speedups are reported
+against vLLM. Local scheduling delivers the majority of the gain; the global queue is responsible for the remaining cross-node imbalance
+reduction.
+
+
+
+
+                                                                  28

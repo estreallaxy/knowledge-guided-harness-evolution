@@ -1,0 +1,1418 @@
+===== PDF p.1 =====
+STAR-KV: Low-Rank KV Cache Compression
+                         via Soft Thresholding for Adaptive Rank Control
+
+
+      Priyansh Bhatnagar * 1 Ashkan Moradifirouzabadi * 1 Se-Hyun Yang 2 SeungJae Lee 2 Jungwook Choi 3
+                                                Mingu Kang 1
+
+
+                         Abstract                                    Grattafiori et al., 2024), while state-of-the-art work demon-
+                                                                     strates architectures capable of handling context lengths of
+      Low-rank projection has emerged as a promising
+                                                                     one million tokens or more (Liu et al., 2024b; Ding et al.,
+      approach for compressing the KV cache by ex-
+                                                                     2024). However, supporting longer contexts introduces se-
+      ploiting hidden-dimension redundancy. However,
+                                                                     vere system-level bottlenecks during inference (Kwon et al.,
+      prior methods rely on fixed or heuristic rank selec-
+                                                                     2023; Hooper et al., 2024). A primary source of these bot-
+      tion and struggle to achieve aggressive compres-
+                                                                     tlenecks is the key–value (KV) cache, whose storage and
+      sion with minimal accuracy degradation. We pro-
+                                                                     access costs increase as generation proceeds. The KV cache
+      pose STAR-KV, an adaptive low-rank KV cache
+                                                                     stores key and value tensors associated with previously pro-
+      compression framework with fine-grained rank
+                                                                     cessed tokens to avoid recomputation, resulting in a memory
+      control. STAR-KV encompasses 1) a differen-
+                                                                     footprint that grows linearly with context length and domi-
+      tiable thresholding mechanism that enables op-
+                                                                     nates GPU memory consumption and bandwidth, often ex-
+      timal rank selection at both attention-head and
+                                                                     ceeding the storage required for model weights (Dao, 2023;
+      block levels, 2) a hybrid decomposition strategy
+                                                                     Gholami et al., 2024). For example, when fully utilizing the
+      that applies different low-rank factorizations ac-
+                                                                     128K token context window in LLaMA-3.1-8B (Grattafiori
+      cording to the sensitivity of key and value pro-
+                                                                     et al., 2024) with a batch size of four, the KV cache accounts
+      jections, and 3) a low-rank–aware mixed pre-
+                                                                     for 81% of the model’s total 85GB FP16 memory footprint,
+      cision quantization that leverages data statistics
+                                                                     becoming a central obstacle to long-context inference.
+      for near lossless low-bit quantization. Evaluated
+      across multiple LLMs and benchmarks, STAR-                     Recently, KV cache compression using low-rank decom-
+      KV achieves up to 75% KV cache compression                     position has emerged as a promising direction that targets
+      and up to 20× overall KV cache reduction when                  redundancy in the hidden (channel) dimension of key and
+      combined with quantization. Enabled by custom                  value tensors. Low-rank decomposition faces two funda-
+      Triton-based GPU kernels, STAR-KV delivers                     mental challenges. First, aggressive compression introduces
+      up to 6.9× speedup for the attention module and                information loss whose impact varies substantially across
+      3.1× end-to-end generation throughput. Our code                layers and attention heads, making it difficult to maintain
+      is publicly available at: https://github.                      model quality at high compression rates. As a result, prior
+      com/PriyanshBhatnagar/STAR-KV.                                 work (Chang et al., 2025; Yan et al., 2025; Saxena et al.,
+                                                                     2024) typically limits compression to moderate levels (e.g.,
+                                                                     30–50%), since pushing beyond this regime leads to notice-
+1. Introduction                                                      able quality degradation. Second, although compression re-
+                                                                     duces memory footprint, reconstructing compressed key and
+Recent advances in large language models (LLMs) are                  value tensors at inference introduces additional computa-
+driven by rapid scaling in both model size and supported             tion, which significantly increases inference latency (Chang
+context length. Conventional models support context win-             et al., 2025; Yan et al., 2025; Saxena et al., 2024).
+dows on the order of 105 tokens, such as up to 128K (Meta;
+                                                                     To address these challenges, we introduce STAR-KV (Soft
+  *
+    Equal contribution 1 University of California San Diego,         Thresholding for Adaptive Rank KV Cache Compression), a
+San Diego, CA, USA 2 Dnotitia Inc., Seoul, Republic of Korea         framework for KV cache compression via fine-grained rank
+3
+  Hanyang University, Seoul, Republic of Korea. Correspondence       control. To enhance the accuracy–compression trade-off,
+to: Mingu Kang <mingu@ucsd.edu>.
+                                                                     STAR-KV proposes an adaptive rank learning framework
+Proceedings of the 43 rd International Conference on Machine         that reduces the latent dimensionality of low-rank KV repre-
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026         sentations at fine granularities. Specifically, we parameter-
+by the author(s).
+
+                                                                 1
+
+===== PDF p.2 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+                       61%                                                                                                            over KVQuant (Hooper et al., 2024) and Palu with 4-bit
+                                                                                              n ew P
+Avg. 0-Shot Accuracy
+
+                                                         KIVI-2                                          areto
+                       60%   STAR-KV                                                                             front
+                                                                                                                      !
+                                                                                                                                      quantization, respectively. With custom Triton-based GPU
+                               (60%)                STAR-KV                        STAR-KV
+                                                      (75%)                       (60%) + 3.2b                                        kernels, STAR-KV (75%) achieves up to 6.9× and 4.0×
+                                     high mp.
+                       59%
+
+                                               c.
+                                         er ac
+                                 3% ore co                                                                                            speedup in the attention operator compared to PyTorch
+                                                                                                                    STAR-KV
+                                                                                                 ssion             (75%) + 3.2b
+                                                                                            mpre
+                       58%                                        KVQuant-2bit         re co accuracy
+                                  2x m
+
+
+                                                                                  x mo
+                                                                            2.5-3 % highe
+                                                                                            r                                         SDPA implementation (Shah et al., 2024), with and without
+                                                                              1-2.5
+                       57%           Palu (50%)                                                                                       4-bit quantization, respectively. STAR-KV also yields 3.1×
+                                        ReCalKV (60%)                 Palu (50%) + 4b
+
+                       56%
+                                                                                                                                      higher end-to-end generation throughput (tokens/second)
+                             1                       5                  9                13                17              21         in long context (128K) or high batch size scenarios com-
+                                                    KV Cache Compression Rate (✕)                                                     pared to PyTorch native implementation. In summary, our
+                                                                                                                                      contributions are:
+Figure 1. The average zero-shot accuracy of LongChat-v1.5-7B on
+five tasks (ARC-e, ARC-c, OBQA, PIQA, Hella) across different                                                                            • A learnable and adaptive low-rank KV cache com-
+KV cache compression rates applied by SoTA methods.                                                                                        pression method that automatically determines optimal
+                                                                                                                                           ranks at decoder block and attention head granularity.
+                                                                                                                                         • A hybrid decomposition scheme that exploits the dif-
+ize the rank selection of each low-rank KV representation
+                                                                                                                                           fering sensitivity of key and value tensors under com-
+using a differentiable threshold applied to the singular val-
+                                                                                                                                           pression with minimal reconstruction overhead.
+ues. By doing so, STAR-KV yields rank profiles that are
+                                                                                                                                         • A low-rank–aware mixed-precision quantization strat-
+learned, in contrast to prior approaches that set ranks via
+                                                                                                                                           egy that leverages the data statistics induced by low-
+heuristics or sensitivity estimations (Saxena et al., 2024;
+                                                                                                                                           rank compression.
+Chang et al., 2025; Zhang et al., 2024).
+                                                                                                                                         • Customized Triton-based GPU kernels that translate
+Furthermore, low-rank decomposition can be applied at                                                                                      the proposed techniques into real speedups.
+different granularities: (i) head-wise decomposition (HD),
+which factorizes each head’s projection independently, and                                                                            Conflict of Interest Disclosure. Se-Hyun Yang and Se-
+(ii) joint decomposition (JD), which factorizes a single ma-                                                                          ungJae Lee are employed by Dnotitia Inc., which develops
+trix formed by concatenating heads. These two decompo-                                                                                technologies related to this work. Mingu Kang has a finan-
+sition granularities exhibit trade-offs in terms of accuracy                                                                          cial interest in Dnotitia Inc.
+and reconstruction overhead. We characterize this trade-off
+along with a sensitivity analysis and adopt a hybrid decom-                                                                           2. Related Work
+position scheme in STAR-KV: (i) HD for the key projection
+to minimize reconstruction overhead, and (ii) JD for the                                                                              KV Cache Optimization. Recent attention variants, such
+value projection to better preserve fidelity.                                                                                         as grouped-query attention (GQA) (Ainslie et al., 2023) and
+                                                                                                                                      multi-head latent attention (MLA) (Liu et al., 2024a), reduce
+Finally, STAR-KV adopts a mixed-precision low-rank–
+                                                                                                                                      KV cache memory by sharing or projecting key/value heads.
+aware quantization that synergistically leverages the inher-
+                                                                                                                                      However, these approaches require architectural changes
+ently ordered singular values of the key/value projection
+                                                                                                                                      and additional (re-)training, limiting their applicability to
+matrices to demarcate important channels from the rest.
+                                                                                                                                      existing models. In contrast, lightweight post-training al-
+This enables efficient identification and handling of outlier
+                                                                                                                                      ternatives include KV cache quantization, which reduces
+channels in contrast to prior KV quantization methods that
+                                                                                                                                      key/value precision (Hooper et al., 2024; Liu et al., 2024c),
+rely on explicit outlier modeling, non-uniform quantiza-
+                                                                                                                                      and token eviction, which retains only a subset of tokens
+tion, or additional computations to address outliers at high
+                                                                                                                                      under a cache budget (Zhang et al., 2023; Xiao et al., 2024).
+cost (Hooper et al., 2024; Liu et al., 2024c; Su et al., 2025;
+Ashkboos et al., 2024; Tseng et al., 2024).                                                                                           Low-Rank KV Cache. Low-rank KV cache methods
+Evaluated on a wide range of LLMs and tasks, STAR-                                                                                    exploit redundancy in the hidden (channel) dimension
+KV yields improved accuracy–compression Pareto trade-                                                                                 of key/value tensors by projecting them into a lower-
+offs relative to prior KV cache compression approaches,                                                                               dimensional latent space (Chang et al., 2025; Saxena et al.,
+as shown in Fig. 1, achieving up to 4.0× low-rank KV                                                                                  2024; Lin et al., 2024; Yan et al., 2025). Unlike quantization
+cache compression with a negligible accuracy degradation                                                                              or token eviction, these methods cache compact latent repre-
+compared to the uncompressed model, and 2.70% better                                                                                  sentations. A common approach is low-rank decomposition,
+average zero-shot accuracy and 2.0× higher compression                                                                                which factorizes key/value projection weights offline during
+rate compared to a SoTA method, Palu (Chang et al., 2025).                                                                            model preparation (Chang et al., 2025). The resulting low-
+When combined with 3.2-bit average mixed-precision quan-                                                                              rank factors are used directly at inference time, incurring no
+tization, STAR-KV attains up to 20.0× overall KV cache                                                                                additional runtime overhead.
+compression while achieving a higher zero-shot accuracy
+by 1.18% and 2.47% and compression by 2.5× and 2.9×
+
+                                                                                                                                  2
+
+===== PDF p.3 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+3. Background                                                                                                  Baseline       Static
+                                                                                                               Fisher-Based   STAR-KV
+
+
+
+
+                                                                               Avg. 0-Shot Acc. (%)
+                                                                                                      70
+3.1. Multi-Head Attention (MHA)                                                                                                    61.53%
+                                                                                                      60
+                                                                                                                                    -1.0%
+Attention mechanism (Vaswani et al., 2017) selectively fo-                                            50
+cuses on relevant sections of the input sequence using three                                          40                          -17.1%
+separate spaces: query, key, and value. Given an input x,                                                                      -26.3%
+                                                                                                      30
+these spaces are computed as, Q = x · WQT , K = x · WK     T
+                                                             ,                                             0   20       40    60       80
+            T
+V = x · WV , where WQ , WK , and WV denote the projec-                                                          Compression Rate (%)
+                    i i, ithe
+tion matrices. For head
+                            T
+                              attention weights are computed        Figure 2. Comparison of rank selection strategies at varying KV
+as P i = Softmax Q√·K   dh
+                                , where dh is the per-head di-       cache compression rates. Average zero-shot accuracy is reported
+mensionality. The output of multi-head attention is obtained         for LongChat-v1.5-7B evaluated on common sense tasks.
+by computing the weighted sum for each head, concatenat-
+                                    to the Toriginal hidden
+ing the results, and projecting back
+dimension: MHA(x) = P i ·V i concat ·Wout        , where Wout        prior to computing attention scores. The position-dependent
+                                         i
+is the output projection matrix.                                     RoPE matrix is inserted between WQ and UK , preventing
+                                                                     offline fusion (Li et al., 2025; Ji et al., 2025). In contrast,
+3.2. Low-rank KV Cache                                               value processing does not involve positional encoding and
+                                                                     therefore allows operation reordering. The attention output
+Singular Value Decomposition (SVD) factorizes a matrix                                                            i T
+W ∈ Rm×n as W = U ΣV ⊤ , where U ∈ Rm×m and                          computation for head i, (pi · V i ) · Wout       , is reordered as:
+                                                                                     T      i T                      T     i T
+                                                                      pi · V ′ · UVi              = (pi · V ′ ) · UVi Wout
+                                                                                                                               
+V ∈ Rn×n are orthogonal and Σ ∈ Rm×n is diagonal with                                    · Wout                                   , where
+singular values in descending order; a rank-r approxima-             pi ∈ Rl are the attention probabilities, V ′ ∈ Rl×rv are the
+tion keeps the top-r components, yielding W ≈ Ur Σr Vr⊤              compressed value states, UVi ∈ Rdh ×rv is the value recon-
+                                                                                                i
+with Ur ∈ Rm×r , Σr ∈ Rr×r , and Vr ∈ Rn×r . The                     struction matrix, and Wout    ∈ Rd×dh is the head-wise output
+key and value projection matrices (WK , WV ∈ Rdout ×din )            projection. Before weight absorption, the total FLOPs of the
+are factorized using SVD for low-rank KV cache com-                  value processing across h heads is l ·rv ·h2 ·dh +l ·h·dh . By
+                                                                                                     ′i          i
+pression, and only the top-r singular values and corre-              defining the precomputed Wout        ≜ Wout    UVi , the reordering
+sponding singular vectors are retained for a rank-r ap-              of operations reduces the FLOPs count to l · rv · h · dh +
+proximation. During inference, the truncated decompo-                h · rv · dh . With a sufficiently large sequence length l, the
+sitions of the key and value projection matrices are ex-             computational saving approaches a factor of dh , which is
+pressed in factorized form, where the right singular vec-            typically 128 in current widely used LLMs.
+tors and singular values are merged into a single matrix
+as WK ≈ UK (ΣV )TK and WV ≈ UV (ΣV )TV , where                       4. The STAR-KV Framework
+UK , UV ∈ Rdout ×r and (ΣV )TK , (ΣV )TV ∈ Rr×din denote
+the low-rank factors of the key and value projections, re-           4.1. Rank-Adaptive KV Cache Compression
+spectively, yielding the corresponding low-rank key repre-           4.1.1. R ANK S ELECTION C HALLENGE FOR KV C ACHE
+sentation as K = (x · (ΣV )K ) · UK T
+                                      = K ′ · UKT
+                                                  , and value
+representation as V = (x · (ΣV )V ) · UV = V ′ · UVT . In
+                                          T                          Low-rank KV cache compression critically depends on rank
+this formulation, the intermediate key (K ′ ) and value (V ′ )       allocation across decoder blocks, as latent dimensionality
+representations lie in a reduced r-dimensional subspace and          directly controls the trade-off between approximation error
+are stored in the KV cache instead of the full-dimensional           and memory reduction. Aggressive rank reduction degrades
+tensors, resulting in a reduced memory footprint.                    accuracy, whereas conservative choices limit KV cache sav-
+                                                                     ings. Selecting ranks that balance this trade-off under a
+3.3. Weight Absorption                                               global compression budget is therefore a central challenge.
+                                                                     Rank allocation largely follows two paradigms. (1) Static
+A key technique for reducing the computational complexity            rank assignment uses a uniform rank (or fixed compression
+in low-rank KV caching is weight absorption, introduced              ratio) across blocks and often across WK and WV , ignor-
+in DeepSeek-V2 (Liu et al., 2024a) in the context of MLA.            ing heterogeneous block-wise and operator sensitivity. (2)
+The core idea is to absorb the reconstruction matrices (e.g.,        Heuristic-based allocation assigns ranks using offline im-
+UK and UV ) into the query and output projections (e.g.,             portance proxies (e.g., Fisher-information- scores (Ly et al.,
+WQ and Wout ) by reordering associative matrix multipli-             2017)) (Chang et al., 2025). While these heuristics improve
+cations, so that reconstruction cost is reduced at decoding          over uniform ranks at moderate compression, they exhibit
+time. However, recent LLMs apply Rotary Positional Em-               non-negligible accuracy loss at high compression budgets.
+bedding (RoPE (Su et al., 2024)) to the query and key states         Fig. 2 shows degradation increases with compression rate,
+
+                                                                 3
+
+===== PDF p.4 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+              reff                           reff
+                          dout                           din                 din
+                                                                                                                              Z
+
+
+
+
+                                                                                                                                                                  X
+                                                                                                                                                     Z
+
+
+
+
+                                                                                                                                      X
+
+
+
+
+                                                                                                                                                               ≈
+                                                                                                                                                                      x tanh(s(x - 𝛼))
+
+
+
+
+                                                                                                                                                              Z
+                                                                                                                                   =
+          u11 u12 u13 u14 u15           𝞼1   0      0    0     0       v11 v12 v13 v14 v15                                                            1
+
+
+
+
+                                                                                                                                  Z
+          u21 u22 u23 u24 u25    reff   0           0    0     0       v21 v22 v23 v24 v25    reff
+                                             𝞼2
+                                                                                                                          Z=0                  Z=C=0      𝛼
+   dout   u31 u32 u33 u34 u35           0    0      𝞼3   0     0       v31 v32 v33 v34 v35
+                                 X                                 X
+          u41 u42 u43 u44 u45           0    0      0    0     0       v41 v42 v43 v44 v45                                         𝛼      X                                  X
+                                 dout                                                        din
+          u51 u52 u53 u54 u45           0    0      0    0     0       v51 v52 v53 v54 v45                                                                    Z = tanh(s(x - 𝛼))
+                                                                                                                                                     -1
+                     U                              𝚺                              VT
+                                                                                                                     (a) Hard Threshold          (b) Soft Threshold
+Figure 3. A projection matrix is decomposed as W = U ΣV T .
+Applying a threshold α on the diagonal of Σ suppresses singular                                                Figure 4. Thresholding operators: (a) conventional non-
+values with σi < α to zero and retains only the corresponding                                                  differentiable hard threshold, and (b) soft threshold using shifted
+columns of U and rows of VT , yielding an effective rank reff .                                                tanh with sharpness control factor s.
+
+
+reaching 26.33% for the static and 17.14% for the heuristic-                                                   a smooth surrogate for spectral truncation: for x ≫ α,
+based approach at 75% compression. This motivates an                                                           tanh(s(x − α)) → 1 and the singular value is approx-
+adaptive rank-selection strategy that supports aggressive                                                      imately preserved; for x < α, the output is driven to-
+KV cache compression while minimizing performance loss.                                                        ward zero. Larger s yields a closer approximation to a
+                                                                                                               hard cutoff, while smaller s produces a smoother transi-
+4.1.2. A DAPTIVE R ANK S ELECTION VIA S OFT                                                                    tion. Applying T hs (·; α) to the singular spectra of the
+       T HRESHOLDING                                                                                           key/value projections yields WKΣr = T hs (WKΣ ; αK )
+                                                                                                                                                   eff
+
+To address the rank selection challenge, STAR-KV intro-                                                        and WVΣr = T hs (WVΣ ; αV ), where αK and αV are
+                                                                                                                             eff
+
+duces an adaptive rank selection method which applies a                                                        learned independently (per block and attention head). As
+threshold to singular values of KV projection matrices.                                                        discussed in Section 5.1, this training process is done on
+                                                                                                               a small subset of data, taking only <6 GPU hours. Once
+Thresholding Singular Values. We parameterize rank se-                                                         training is completed, we employ hard thresholding offline
+lection via a threshold α applied to the singular spectrum,                                                    prior to inference and replace the decomposed projection
+which directly controls the effective rank (reff ) of each de-                                                 matrices with their truncated form during inference.
+composed projection. Given the SVD, W = U ΣV ⊤ with
+Σ = diag(σ1 , . . . , σp ) and σ1 ≥ · · · ≥ σp ≥ 0, we define                                                  4.2. Adaptive Compression Objective
+the thresholded spectrum
+                                                                                                               To maximize low-rank KV cache compression while pre-
+   Σ
+   e α ≜ diag(σ̃1 , . . . , σ̃p ),                       σ̃i ≜ σi 1{σi ≥ α}.                         (1)       serving model performance, we optimize a joint objective
+                                                                                                               that balances compression and accuracy through an adaptive
+As shown in Fig. 3, increasing α moves the cutoff upward
+                                                                                                               compression loss and a knowledge distillation loss.
+along the diagonal of WΣ , decreasing the number of retained
+singular values and reducing the effective rank reff , while                                                   Compression Loss. Each decoder block contains learnable
+decreasing α retains more components increasing reff .                                                         soft-threshold parameters that control compression for the
+                                                                                                               key and value projections. Let αi denote the threshold
+Soft Threshold Mechanism. To capture the varying rank
+                                                                                                               parameter associated with decoder block i. We introduce an
+sensitivity across decoder blocks, the threshold must be
+                                                                                                               adaptive compression loss
+learned independently for the key and value projections                                                                                     X
+in each block. In singular value thresholding, optimizing                                                                          Lacmp =      e−αi .                (3)
+the threshold parameter α implicitly controls the effective                                                                                      i
+rank reff ; however, hard thresholding is non-differentiable                                                   This formulation naturally yields phase-adaptive compres-
+(Fig. 4a) and therefore unsuitable for gradient-based opti-                                                    sion behavior. When αi is small, e−αi is large, producing
+mization. (Li et al., 2022) proposes a differentiable thresh-                                                  a strong optimization signal that quickly increases αi and
+olding mechanism in the context of token pruning by replac-                                                    thus boosts compression in the early stage of training. As
+ing the hard threshold with a surrogate function. Inspired by                                                  αi grows, the exponential term decays rapidly, leading to
+it, we apply a differentiable thresholding operator (Fig. 4b)                                                  diminishing compression pressure. This slows the growth
+on the singular values. Let x denote a singular value (a di-                                                   of αi and allows the model to focus on recovering and stabi-
+agonal entry of WΣ ). We define the soft-threshold operator                                                    lizing task performance at the achieved compression level.
+                      (                   
+                        x tanh s(x − α) , x ≥ α,                                                               Knowledge Distillation Loss. We compute the distillation
+       T hs (x; α) =                                     (2)                                                  loss using the Kullback–Leibler divergence:
+                        c tanh s(x − α) , x < α,
+                                                                                                                                                     
+                                                                                                                                  LKD = KL pt ∥ ps ,                 (4)
+where α is a learnable threshold, s > 0 controls tran-
+sition sharpness, and c is a constant (we set c = 0 so                                                         where pt and ps denote the output token distributions of the
+sub-threshold values are suppressed). This operator is                                                         teacher and student models, respectively. This encourages
+
+                                                                                                           4
+
+===== PDF p.5 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+                      din                 rj                          din                                                          also analyze how different low-rank decomposition schemes
+                                                      din                                  rh             din
+                                                                      W1
+       dout           W        SVD
+                                         U X rj      (𝚺V)T     dh             SVD
+                                                                                                 X rh
+                                                                                                                                   affect the approximation error.
+
+
+
+
+                                                                       …
+                               JD dout                                              dh
+                                                                       Wh     HD         (U) i          (𝚺V)Ti
+                                                                                                                                   Lemma 4.1. Let W ∈ Rm×n have singular values σ1 ≥
+                            a) Joint Decomposition                   b) Head-wise Decomposition
+                                                                                                                                   · · · ≥ σp with p = min(m, n), and let Wr be its rank-
+                                 Figure 5. Comparison of JD and HD.                                                                r truncated SVD. By Eckart-Young-Mirsky theorem, the
+                                                                                                                                   relative error of the optimal rank-r approximation in the
+                                                                                                                                   spectral norm satisfies
+Normalized Singular
+ Value Magnitude
+
+
+
+
+                                                                                                                 Block Index
+                                                                                                                                                                 ∥W − X∥2   σr+1 (W )
+                                                                                                                                     ε2 (W ; r) ≜      min                =           . (6)
+                                                                                                                                                    rank(X)≤r      ∥W ∥2     σ1 (W )
+
+                                                                                                                                   where ∥ · ∥2 denotes the spectral norm (∥W ∥2 = σ1 ).
+     a) Singular Values for Key Projection Matrix            b) Singular Values for Value Projection Matrix
+
+Figure 6. The singular-value spectra of the key and value projection                                                               Implication. In Fig. 6, we plot the normalized spectra σi /σ1
+matrices in LLaMA-2-7B, normalized by their spectral norms                                                                         for WK and WV . At the truncation index r+1, we observe
+(∥ · ∥2 ), across 32 decoder blocks.                                                                                               that the value projection typically has a larger normalized
+                                                                                                                                   singular value than the key projection, i.e.,
+
+ the compressed student model to match the teacher’s predic-                                                                                        σr+1 (WK )   σr+1 (WV )
+                                                                                                                                                               ≤            .                       (7)
+ tive distribution, preserving model behavior under aggres-                                                                                          σ1 (WK )     σ1 (WV )
+ sive compression. The final training objective is therefore:
+                                                                                                                                   Observation 2. (6) and (7) imply ε2 (WK ; r) ≤ ε2 (WV ; r),
+                                         Ltot = LKD + γ · Lacmp ,                                            (5)                   which indicates that under the same rank constraint, the
+                                                                                                                                   optimal rank-r approximation of values incurs higher (or
+where γ scales the contributions of the compression loss,                                                                          equal) relative error than that of keys.
+thereby modulating their relative influence on the objective.                                                                      Lemma 4.2. Let W ∈ Rm×d be partitioned into h heads
+                                                                                                                                   along columns as W = W (1) W (2) · · · W (h) with
+ 4.3. Decomposition Scheme                                                                                                         W (i) ∈ Rm×dh for i ∈ {1, . . . , h} and d = hdh . The best
+Fig. 5 shows low-rank decomposition can be applied at dif-                                                                         joint rank-R approximation is
+ferent granularities: (i) joint decomposition (JD), which fac-
+                                                                                                                                             cjoint ∈ arg
+                                                                                                                                             W                    min       ∥W − X∥F ,              (8)
+torizes a single matrix formed by concatenating heads, and                                                                                                    rank(X)≤R
+(ii) head-wise decomposition (HD), which factorizes each
+head’s projection independently. We analyze the trade-off                                                                          while the best head-wise approximation with rank at most r
+in terms of accuracy and reconstruction overhead to propose                                                                        per head is
+a decomposition scheme for STAR-KV in this section.
+                                                                                                                                                                          W − X (1) · · · X (h)
+                                                                                                                                                                                               
+                                                                                                                                   chw ∈ arg
+                                                                                                                                   W                    min                                               .
+                                                                                                                                               {X (i) : rank(X (i) )≤r}                             F
+ 4.3.1. R ECONSTRUCTION OVERHEAD A NALYSIS                                                                                                                                                 (9)
+ In JD, all heads are concatenated and reconstructed jointly                                                                       Under the same compression budget R = hr, the joint
+ using a shared cache A ∈ Rl×rj and reconstruction matrix                                                                          reconstruction error is no larger than the head-wise error:
+ B ∈ Rrj ×d , where rj = c d, d = h dh , c is the compression
+ rate, and dh is the per-head dimension. The reconstruction
+                                                                                                                                                   cjoint ∥F ≤ ∥W − W
+                                                                                                                                              ∥W − W                chw ∥F .                    (10)
+ cost is l · rj · d = l · c · h2 · d2h . In contrast, HD reconstructs
+ each head independently with per-head cache Ah ∈ Rl×rh                                                                            Proof for Lemma 4.2 is in Appendix A.2.
+ and reconstruction matrix Bh ∈ Rrh ×dh , where rh = c dh .
+                                                                                                                                   Observation 3. Under the same compression budget, the
+ Summing across h heads gives h·l·rh ·dh = l·c·h·d2h , which
+                                                                                                                                   Frobenius-norm approximation error achieved by JD is no
+ is a factor of h lower than JD for the same compression rate.
+                                                                                                                                   larger than that of HD.
+ Observation 1. The total reconstruction FLOPs in JD is
+ h× larger than HD at the same compression rate c.                                                                                 4.3.3. H YBRID KV D ECOMPOSITION
+                                                                                                                                   The above observations indicate that (i) JD incurs h× higher
+ 4.3.2. R ECONSTRUCTION E RROR A NALYSIS
+                                                                                                                                   reconstruction overhead than HD, (ii) value projections
+ In this section, we analyze the sensitivity of key and value                                                                      have higher (or equal) low-rank approximation error than
+ projections by examining the singular value distributions                                                                         key projections, and (iii) JD provides less (or equal) ap-
+ of their corresponding projection matrices (WK , WV ). We                                                                         proximation error than HD. Fig. 7 further corroborates
+
+                                                                                                                               5
+
+===== PDF p.6 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+                              1                Accuracy                                                 12
+       Normalized Accuracy                                                                                                            4.4. Integration with Quantization
+
+
+
+
+                                                                                                             Normalized Latency
+                                               Reconstruction Cost
+                        0.75                                                                            9
+                                               Reconstruction Cost w. Reordering                                                      To further enhance compression beyond low-rank decom-
+                             0.5                                                                        6                             position, we apply quantization to the resulting low-rank
+                                                                                                                                      latent representations of keys and values. After decomposi-
+                        0.25                                                                            3
+                                                                                                                                      tion, the latent key and value representations are scaled by
+                              0                                                                         0                             the retained singular values. Because these singular values
+                                   JD-K/JD-V       JD-K/HD-V         HD-K/HD-V             HD-K/JD-V
+                                                                                                                                      are ordered in decreasing magnitude, the resulting latent
+Figure 7. Normalized accuracy and reconstruction costs of JD and                                                                      channels exhibit a highly skewed distribution: a small num-
+HD with different combinations for keys and values. The average                                                                       ber of initial channels carry significantly larger magnitudes,
+zero-shot accuracy is measured across six tasks. The latency is the                                                                   whereas the remaining channels have much smaller mag-
+profiling result of the matrix multiplication operations involved in
+reconstruction on an NVIDIA RTX 4090 GPU.                                                                                             nitudes. This structure, illustrated in Fig. 8(a), introduces
+                                                                                                                                      prominent outlier channels that make subsequent quanti-
+                                                                                                                                      zation particularly challenging. Prior work (Chang et al.,
+                                                                                                                                      2025) mitigates this issue by applying a Hadamard transfor-
+                                    Outlier               cout reff - cout
+                                    channels                                                     Mixed
+                                                                                                                                      mation, which redistributes the outlier energy across chan-
+                                                              Hout                               Precision                            nels. However, applying a Hadamard transform globally
+                                                                     Hin                                                              with uniform precision over all latent channels incurs sub-
+                                                          Block-wise                                                                  stantial accuracy degradation (as shown in Appendix A.1.4),
+                                                          Hadamard
+                                                              (H)
+                                                                                                                                      which becomes even more pronounced under aggressive
+cout                                                               cout                                                               compression. To address this limitation, we propose a low-
+       reff - cout                                                           reff - cout
+                                                                                                                                      rank–aware block-wise Hadamard quantization integrated
+a) Before Block-wise-Hadamard                                                b) After Block-wise-Hadamard
+                                                                                                                                      with mixed precision. Let Z ∈ Rl×r be the latent represen-
+Figure 8. Visualization of low-rank key states for the first head of                                                                  tation after low-rank compression. We partition the latent
+the third layer in LongChat before and after applying block-wise                                                                      dimension into an outlier block Zout and an inlier block Zin
+Hadamard, which redistributes channel magnitudes and enables                                                                          based on channel magnitude, with routlier + rinlier = r. As
+mixed-precision quantization with minimal degradation.
+                                                                                                                                      shown in Fig. 8, independent Hadamard transforms are ap-
+                                                                                                                                      plied to each block, followed by mixed-precision per-token
+                                                                                                                                      quantization (Q), given by:
+this trend: applying JD to both WK and WV yields the                                                                                                                                    
+                                                                                                                                                  Ẑ = Qbout (Zout Hout ) Qbin (Zin Hin ) ,     (12)
+best accuracy but incurs the highest reconstruction latency,
+whereas using HD for keys and JD for values achieves the                                                                              where Hout and Hin are Hadamard matrices, bout and bin
+best accuracy-overhead balance. Combining these insights,                                                                             are the bit precision for the outlier and inlier blocks, re-
+STAR-KV adopts a hybrid decomposition strategy: since                                                                                 spectively, and bout > bin and routlier ≫ rinlier . Fig. 8(b)
+values are more sensitive and JD attains lower approxima-                                                                             illustrates the two smoothed regions after applying block-
+tion error, we apply JD to decompose value projections;                                                                               wise Hadamard quantization. We reserve the top 20% of r
+conversely, we apply HD to the less sensitive key projec-                                                                             latent channels in bout precision and quantize the remaining
+tions to reduce reconstruction overhead. Importantly, op-                                                                             80% with bin . Since r is adaptive in our low-rank decom-
+eration reordering is applicable to the value reconstruction                                                                          position method, the corresponding block-wise Hadamard
+(Section 3.3) to compensate for the overhead. As shown                                                                                matrices also become adaptive to each decoder block (for
+in Fig. 7, the normalized latency is substantially reduced                                                                            keys and values) and to each head (for keys). Moreover,
+for the HD-K/JD-V configuration after reordering, making                                                                              our block-wise Hadamard quantization incurs no overhead
+our hybrid decomposition optimal for maintaining accuracy-                                                                            as the Hadamard factors can be fused into the decomposed
+overhead balance. Consistent with our hybrid decomposi-                                                                               up/down projections as H ⊤ U ⊤ and (V Σ)H.
+tion, we apply separate adaptive compression losses to keys
+and values to give finer-grained control by modifying (3):
+                                                                                                                                      5. Experiments
+                                                 XX                    K          X             V
+                                                                                                                                      5.1. Experiment Settings
+                                   Lacmp =                      e−αi,h +                   e−αi ,                        (11)
+                                                   i      h                          i                                                Models and Tasks. We evaluate our method on four
+                                                                                                                                      LLM model families: LongChat-7B-v1.5-32K (Li et al.,
+                                                                                                                                      2023), LLaMA-2-7B (Touvron et al., 2023), LLaMA-3-
+        K
+where αi,h  denotes the threshold for the key projection of                                                                           8B-Instruct (Grattafiori et al., 2024), and LLaMA-3.1-8B-
+head h in block i, and αiV denotes the threshold for the                                                                              Instruct (Grattafiori et al., 2024). Model performance is
+value projection shared across all the heads in block i.                                                                              evaluated using perplexity on WikiText-2 (Merity et al.,
+
+                                                                                                                                  6
+
+===== PDF p.7 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+
+    Model                Comp (%)            Perplexity ↓                       Zero-Shot Accuracy (%) ↑
+                                       Wiki2     C4     lm-avg. OBQA PIQA ARC-e ARC-c Hella Wino Avg.
+    LongChat-7B-v1.5            0       6.86    9.93      8.40     41.00    76.28     71.84    41.38 71.20 67.48 61.53
+    Palu                       50       7.37   11.67      9.52     38.20    73.78     67.63    37.63 68.43 65.27 58.49
+    ReCalKV                    70       9.01   13.63     11.32     35.20    68.55     58.84    33.53 63.18 59.12 53.07
+    STAR-KV                    60       6.83    9.98      8.41     41.80    75.90     72.69    41.47 70.49 66.85 61.53
+    STAR-KV                    75       7.34   10.44      8.89     42.60    74.86     71.63    41.55 68.52 63.77 60.49
+    LLaMA-2-7B                  0       5.12    7.04      6.08     44.20    78.07     76.30    46.42 76.00 69.30 65.05
+    Palu                       50       5.63    8.38      7.01     43.60    76.33     73.02    42.57 73.39 66.67 62.60
+    ReCalKV                    70       6.75   13.63     11.32     39.80    74.48     70.37    39.42 69.59 65.75 59.90
+    STAR-KV                    60       5.49    7.45      6.47     43.40    79.22     75.55    44.71 74.63 68.51 64.34
+    STAR-KV                    75       5.86    8.02      6.94     43.00    78.18     73.78    41.64 73.14 66.61 62.73
+    LLaMA-3-8B-Inst             0       7.74   12.61     10.18     43.00    78.51     81.61    56.57 75.95 71.59 67.87
+    Palu                       50       9.43   17.37     13.40     42.40    76.12     76.14    49.06 70.33 71.82 64.31
+    STAR-KV                    60       8.52   13.51     11.01     42.20    78.13     79.29    49.83 73.37 69.69 65.42
+    STAR-KV                    75      10.20 15.46       12.83     42.20    78.02     77.57    49.32 71.59 66.22 64.15
+Table 1. Zero-shot evaluation on commonsense reasoning benchmarks using LM-Eval-Harness. We report accuracy (%) under different
+KV cache compression rates. Perplexity on WikiText-2 and C4 is reported separately.
+
+
+            Model               Comp (%) Qasper QMSum TriviaQA MultiQA TREC MultiNews VCSum Avg.
+            LongChat-7B-v1.5        0        27.7     22.7           82.3     43.0     68.5      26.1      15.4    40.81
+            Palu                    30      23.81     22.64      80.61        44.15    64.5      25.4      14.08   39.31
+            Palu                    50       21.1      22.4      75.81        40.78    62.5      22.6      12.58    36.8
+            STAR-KV                 60      22.58      22.4       81.3        41.04    65.0      25.7       15.6   39.09
+            LLaMA-3.1-8B-Inst       0       25.19     23.2       92.00        39.90    72.5      26.9      15.91   42.23
+            Palu                    30      14.47      23.3      86.71        26.57    73.0     26.19      8.33    36.93
+            Palu                    50      15.38     22.10      73.36        27.58    63.5     21.66      1.95    32.21
+            STAR-KV                 60       23.2      22.4      89.06        36.34    67.0     25.89      13.2    39.58
+                Table 2. LongBench evaluation for STAR-KV and Palu under different KV cache compression rates.
+
+
+
+2016) and C4 (Dodge et al., 2021b), and zero-shot accuracy            thereby reducing intermediate materialization and memory
+measured with LM-Evaluation-Harness (Gao et al., 2024)                traffic. The details of the Triton kernels and additional im-
+on six tasks. For long-context evaluation, we additionally            plementation optimizations are provided in Appendix A.6.
+benchmark our method on LongBench (Bai et al., 2024) and
+RULER (Hsieh et al., 2024), which together cover diverse              5.2. Accuracy Analysis
+document-level and structured long-context tasks. Addi-
+tional dataset and setting details are in Appendix A.4.               We show that adaptive rank selection across blocks and
+                                                                      heads, enabled by the soft thresholding, achieves signif-
+Training and Compression Settings. To learn optimal                   icantly higher accuracy than uniform rank allocation, as
+thresholds for adaptive low-rank decomposition, we fine-              demonstrated in Appendix A.1.1 and Fig. 2. We further
+tune models on a calibration set of merely 3000 samples               study the accuracy impact across various benchmarks by
+from FineWeb-Edu (Lozhkov et al., 2024) dataset using                 comparing state-of-the-art adaptive rank control methods.
+our custom loss described in Section 4.2, and evaluate our
+method under two KV cache compression budgets - 60%                   Perplexity and Zero-Shot Evaluation. Table 1 shows our
+and 75%. Additional details are provided in Appendix A.3.             method consistently preserves model quality under high
+Due to the small calibration set, the fine-tuning process             KV cache compression rates. On LongChat-7B-v1.5, our
+incurs a modest training cost, taking just <6 GPU hours in            method at 60% compression achieves a WikiText-2 per-
+total while using NVIDIA RTX Pro 6000.                                plexity of 6.83, matching the uncompressed baseline and
+                                                                      outperforming Palu at lower compression rates, while also
+GPU Kernel Implementation. To efficiently execute at-                 substantially improving over ReCalKV (Yan et al., 2025).
+tention in STAR-KV, we implement custom kernels in Tri-               Similar trends are observed on LLaMA-2-7B and LLaMA-
+ton (Tillet et al., 2019). These kernels fuse bandwidth-              3-8B-Instruct, where our method maintains lower perplexity
+bound element-wise operations (e.g., RoPE and dequantiza-             at both 60% and 75% compression compared to Palu and
+tion) with the matrix multiplications used for reconstruction,        ReCalKV. We further evaluate zero-shot accuracy using
+
+                                                                 7
+
+===== PDF p.8 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+          Model / Method         Comp (%) MK1 MK2             MQ       MV      S1      S2     S3      FWE    SQ     Avg.
+          LongChat-7B-v1.5            0        99.80 99.60 98.40 96.55 100.0 100.0 100.0 48.20 56.72 88.80
+          Palu                        50       99.80 98.80 75.30 97.40 100.0 100.0 98.60 42.40 53.25 85.06
+          STAR-KV                     60       99.40 99.60 98.50 96.55 100.0 100.0 99.80 46.00 54.45 88.26
+          STAR-KV, diff. seed         60       99.20 99.80 98.35 97.60 100.0 100.0 100.0 49.93 53.48 88.71
+          LLaMA-3.1-8B-Inst           0        100.0   99.8   99.9    98.95 100.0 100.0       99.6    96.07 78.12 96.94
+           Palu                      50        98.60 99.80 75.35 69.65 99.80 96.60 88.40 85.13 58.58 85.06
+           STAR-KV                   60        98.4 86.0 85.1 84.0 100.0 100.0 92.0 87.73 68.05 89.03
+Table 3. RULER evaluation at a sequence length of 4K. All values are reported as percentages. Tasks evaluated are MK1/MK2: multi-key
+tasks, MQ: multi-query, MV: multi-value, S1–S3: single-key tasks, FWE: few-shot word extraction, and SQ: SQuAD-style QA.
+
+
+LM-Eval-Harness across six benchmarks. Our method con-                        Method                 Bit Comp. Avg. (%)
+sistently achieves higher accuracy and compression than                       LongChat-7B-v1.5       16     1×     60.34
+Palu and ReCalKV. On LongChat-7B-v1.5, our method at                          KIVI-2-gs32-r32 3.16        5.1×      60.3
+60% compression completely recovers the average base-                         KVQuant-2bit-1% 2.33        6.9×     58.00
+line accuracy. For LLaMA-2-7B and LLaMA-3-8B-Instruct                         Palu (50%)             3    10.4×    56.42
+STAR-KV shows minimal degradation at 60% compression                          Palu (50%)             4     8.0×    56.71
+and remains competitive by outperforming both Palu and                         STAR-KV (60%)         3.2 12.5×     60.12
+ReCalKV even at 75% compression.                                               STAR-KV (75%)         3.2 20.0×     59.18
+                                                                     Table 4. Quantization results on LongChat-7B-v1.5, reporting av-
+Long Context Evaluation. To evaluate long-context perfor-            erage KV bit precision, KV cache compression rate, and zero-shot
+mance, we compare STAR-KV against Palu on both Long-                 accuracy on commonsense benchmarks (ARC-e, ARC-c, OBQA,
+Bench and RULER, and report the results in Table 2 and               PIQA, Hella).
+Table 3, respectively. Maintaining long-context accuracy be-
+comes challenging at higher compression rates, particularly
+for GQA-based models, a phenomenon also observed by                  while maintaining 59.18% 0-shot average accuracy. This
+Palu. As shown in Table 2, Palu exhibits noticeable degra-           substantially outperforms prior KV quantization methods
+dation at 50% compression and therefore adopts a lower               in both compression and accuracy, including KIVI (Liu
+compression rate of 30% for a better accuracy–compression            et al., 2024c), KVQuant (Hooper et al., 2024), and Palu,
+trade-off. In contrast, STAR-KV maintains stronger accu-             demonstrating strong synergy between our low-rank decom-
+racy at higher compression. At 60% compression, STAR-                position and block-wise Hadamard quantization. We further
+KV matches Palu on LongChat-7B-v1.5 and outperforms it               analyze the impact of different outlier–inlier splits and find
+on LLaMA-3.1-8B-Instruct, substantially narrowing the gap            that selecting the first 20% of channels as outliers yields the
+to the uncompressed baseline. We further validate this trend         best accuracy–compression trade-off. Results are shown in
+on RULER at a 4K sequence length. As shown in Table 3,               Appendix A.1.6.
+STAR-KV consistently achieves higher compression than
+Palu while preserving stronger long-context retrieval accu-
+                                                                     5.3. System-level Performance Analysis
+racy. On LongChat-7B-v1.5, STAR-KV at 60% compres-
+sion reaches an average score of 88.26, close to the dense           We evaluate the end-to-end attention speedups by STAR-
+baseline of 88.80 and higher than Palu at 50% compression.           KV on LLaMA-2-7B, executed on a single NVIDIA RTX
+The additional run with a different seed obtains a higher            4090, targeting regular consumer scenarios. We use
+average score of 88.71, indicating stable performance. On            PyTorch’s FP16 scaled dot product attention
+LLaMA-3.1-8B-Instruct, STAR-KV improves the RULER                    (SDPA) as the baseline, which dispatches to the fastest avail-
+average from 85.06 to 89.03 over Palu at a higher compres-           able kernel, including FlashAttention-2 (Dao, 2023) when
+sion rate. These results show that STAR-KV provides a                applicable.
+more favorable accuracy–compression trade-off for long-
+                                                                     Speedup. Fig. 9 reports the speedup of the attention op-
+context workloads across both LongBench and RULER.
+                                                                     erator. We test two STAR-KV variants at 75% compres-
+Quantization. Table 4 presents the quantization results of           sion, with and without 4-bit KV quantization, and compare
+STAR-KV. With our adaptive block-wise Hadamard quanti-               against Palu at 50% compression (Palu does not provide
+zation, we preserve the first 20% channels in 4-bit and quan-        an open-source quantized variant, so we report its FP16
+tize the remaining channels in 3-bit, resulting in average           results only). All experiments use a batch size 16. Since the
+3.2-bit precision. When applied on top of 75% compressed             PyTorch baseline runs out of memory at 32K and 64K, we
+LongChat model using our low-rank decomposition, our                 could not measure its latency on our hardware. We there-
+quantization achieves 20× overall KV cache compression               fore estimated the baseline by linear extrapolation from the
+
+                                                                 8
+
+===== PDF p.9 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+                 7      Palu (50%)                                         model variants, 2) the impact of the calibration dataset on
+                 6      STAR-KV (75%)                           6.9x
+       Speedup   5      STAR-KV (75%) + 4-b                                the final compression–accuracy trade-off, 3) the sensitivity
+                 4                                      4.0x               of STAR-KV to the compression-loss weight (γ) in the total
+                 3
+                 2                                                         training loss, and 4) the effect of combining STAR-KV with
+                 1                                                         token eviction.
+                 0
+                      4K       8K      16K        32K          64K
+                                                                           1) Stability of learned rank profiles. Our studies sug-
+                                 Context Length
+                                                                           gest that the learned rank profiles are highly consistent
+Figure 9. Normalized speedup of the attention module over the              across different calibration datasets and transferable across
+PyTorch SDPA FP16 implementation. The batch size is 16 in all              nearby model variants, such as models from the same fam-
+setups. Solid lines represent exact measurements, while dashed             ily with similar parameter counts. Results are shown in
+lines indicate that the PyTorch baseline is out of memory. For
+these data points, the latencies are measured for the non-baseline         Appendix A.1.2.
+variants, and the speedups are compared against the estimated              2) Sensitivity to the calibration dataset. Our studies show
+baseline’s latency.
+                                                                           that the learned thresholds are generally robust to the choice
+                                                                           of calibration dataset, with at most 0.68% difference in
+        Contx. Len. Pytorch SDPA STAR-KV Gain
+                                                                           average zero-shot accuracy. Details are provided in Ap-
+             1K          249.8 (16)  751.0 (128) 3.01×                     pendix A.1.3.
+             2K           130.4 (8)   400.7 (64) 3.07×
+             4K           69.0 (4)    212.2 (32) 3.07×
+             8K           35.6 (2)    110.6 (16) 3.11×                     3) Sensitivity to the compression-loss weight. Our studies
+            16K           18.0 (1)     56.6 (8) 3.14×                      verify that the reported results are not caused by fragile
+Table 5. End-to-end generation throughput (tokens/s). The gray             hyperparameter settings. Using a different compression-
+text in brackets denotes batch size.
+                                                                           loss weight results in only up to 0.25% average zero-shot
+                                                                           accuracy variation. Details are shown in Appendix A.1.5.
+measured 8K and 16K latencies. We note, however, that                      4) Combination with token eviction. We study the impact
+the latency of STAR-KV, with and without quantization, is                  of combining STAR-KV with H2O (Zhang et al., 2023),
+measured on the GPU in all data points, enabled by their re-               a representative KV cache compression method based on
+duced memory footprints. STAR-KV extends context length                    token pruning. Interestingly, on LongChat-v1.5-32K, com-
+support to 32K while achieving a 4.0× speedup. Adding                      bining 60% low-rank compression with 60% H20-style to-
+4-bit KV quantization reduces speedup at short contexts due                ken pruning achieves 84% KV cache compression outper-
+to quantization/dequantization overhead, but enables 64K                   forming H2O with 60% pruning alone by 0.04% average
+context length with 6.9× speedup. A detailed breakdown                     zero-shot accuracy. Results are shown in Appendix A.5.4.
+of the attention latency is provided in Appendix A.5.5. To
+demonstrate the portability of our kernels, we extend the
+experiments to the RTX Pro 6000 GPU. When the context
+                                                                           7. Conclusion
+length is limited to fit within GPU memory, our method                     We present STAR-KV, an adaptive low-rank KV cache com-
+still achieves a 4.3× speedup. Details are provided in Ap-                 pression framework that enables fine-grained rank control
+pendix A.5.6.                                                              across attention heads and decoder blocks. By introduc-
+Generation Throughput. We report the maximum achiev-                       ing a soft-thresholding mechanism, STAR-KV learns ef-
+able end-to-end generation throughput (tokens/s) of STAR-                  fective rank allocation directly from data, avoiding static
+KV across context lengths in Table 5. For each context                     or heuristic rank selection. Guided by sensitivity analy-
+length, we increase batch size until the run becomes GPU-                  sis, STAR-KV adopts a hybrid decomposition strategy that
+memory limited, and then measure the resulting generation                  balances reconstruction cost and accuracy, and further in-
+throughput. As context length increases, the maximum                       tegrates a low-rank–aware mixed-precision quantization to
+feasible batch size decreases due to the larger KV cache                   enable near-lossless low-bit KV storage at high compression.
+footprint, which in turn reduces throughput. Overall, STAR-                Across multiple LLMs and benchmarks, STAR-KV achieves
+KV consistently improves end-to-end generation throughput                  up to 75% KV cache reduction from low-rank compression
+across all tested settings, achieving a 3.1× average gain,                 alone and up to 20× overall KV cache reduction when com-
+with higher gains at longer context lengths. Notably, STAR-                bined with quantization, while maintaining model quality.
+KV can fit up to 128K context length in a single RTX 4090.                 Also, custom Triton kernels translate these algorithmic gains
+                                                                           into practice, enabling 3.5× attention speedup at a context
+                                                                           length of 16K and up to 6.9× (with an estimated baseline
+6. Ablation Results                                                        due to memory capacity limitation) at a context length of
+We present extended studies examining: 1) the sensitivity of               64K. Finally, STAR-KV provides 3.1× end-to-end genera-
+the learned rank profiles to calibration datasets and nearby               tion throughput improvement.
+
+                                                                       9
+
+===== PDF p.10 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+Acknowledgments                                                      the colossal clean crawled corpus. In Moens, M.-F.,
+                                                                     Huang, X., Specia, L., and Yih, S. W.-t. (eds.), Pro-
+This work was supported by the Korea Planning & Eval-                ceedings of the 2021 Conference on Empirical Methods
+uation Institute of Industrial Technology (KEIT) grant               in Natural Language Processing, pp. 1286–1305, On-
+funded by the Korea government (MOTIR) (No. RS-2024-                 line and Punta Cana, Dominican Republic, November
+00419977, Development of a Vector Database Accelerator               2021a. Association for Computational Linguistics. doi:
+for Large Language Models (LLM)).                                    10.18653/v1/2021.emnlp-main.98. URL https://
+This work was also supported by the National Research                aclanthology.org/2021.emnlp-main.98/.
+Foundation of Korea (NRF) grant funded by the Korea gov-
+                                                                   Dodge, J., Sap, M., Marasović, A., Agnew, W., Ilharco,
+ernment (MSIT) (No. RS-2025-00561961).
+                                                                     G., Groeneveld, D., Mitchell, M., and Gardner, M. Doc-
+                                                                     umenting large webtext corpora: A case study on the
+Impact Statement                                                     colossal clean crawled corpus, 2021b. URL https:
+                                                                    //arxiv.org/abs/2104.08758.
+This paper presents work whose goal is to advance the field
+of Machine Learning. There are many potential societal             Gao, L., Tow, J., Abbasi, B., Biderman, S., Black, S., DiPofi,
+consequences of our work, none of which we feel must be              A., Foster, C., Golding, L., Hsu, J., Le Noac’h, A., Li,
+specifically highlighted here.                                       H., McDonell, K., Muennighoff, N., Ociepa, C., Phang,
+                                                                     J., Reynolds, L., Schoelkopf, H., Skowron, A., Sutawika,
+References                                                           L., Tang, E., Thite, A., Wang, B., Wang, K., and Zou, A.
+                                                                     The language model evaluation harness, 07 2024. URL
+Ainslie, J., Lee-Thorp, J., de Jong, M., Zemlyanskiy, Y.,            https://zenodo.org/records/12608602.
+  Lebrón, F., and Sanghai, S. Gqa: Training generalized
+  multi-query transformer models from multi-head check-            Gholami, A., Yao, Z., Kim, S., Hooper, C., Mahoney, M. W.,
+  points, 2023. URL https://arxiv.org/abs/                           and Keutzer, K. Ai and memory wall. IEEE Micro, 44
+  2305.13245.                                                        (3):33–39, 2024.
+
+Ashkboos, S., Mohtashami, A., Croci, M. L., Li, B.,                Grattafiori, A., Dubey, A., Jauhri, A., Pandey, A., Kadian,
+  Cameron, P., Jaggi, M., Alistarh, D., Hoefler, T., and             A., Al-Dahle, A., Letman, A., Mathur, A., Schelten, A.,
+  Hensman, J. Quarot: Outlier-free 4-bit inference in ro-            Vaughan, A., Yang, A., Fan, A., Goyal, A., Hartshorn,
+  tated llms, 2024. URL https://arxiv.org/abs/                       A., Yang, A., Mitra, A., Sravankumar, A., Korenev,
+  2404.00456.                                                        A., Hinsvark, A., Rao, A., Zhang, A., Rodriguez, A.,
+                                                                     Gregerson, A., Spataru, A., Roziere, B., Biron, B., Tang,
+Bai, Y., Lv, X., Zhang, J., Lyu, H., Tang, J., Huang, Z.,            B., Chern, B., Caucheteux, C., Nayak, C., Bi, C., Marra,
+  Du, Z., Liu, X., Zeng, A., Hou, L., Dong, Y., Tang, J.,            C., McConnell, C., Keller, C., Touret, C., Wu, C., Wong,
+  and Li, J. Longbench: A bilingual, multitask benchmark             C., Ferrer, C. C., Nikolaidis, C., Allonsius, D., Song, D.,
+  for long context understanding, 2024. URL https:                   Pintz, D., Livshits, D., Wyatt, D., Esiobu, D., Choudhary,
+  //arxiv.org/abs/2308.14508.                                        D., Mahajan, D., Garcia-Olano, D., Perino, D., Hupkes,
+                                                                     D., Lakomkin, E., AlBadawy, E., Lobanova, E., Dinan,
+Chang, C.-C., Lin, W.-C., Lin, C.-Y., Chen, C.-Y., Hu, Y.-           E., Smith, E. M., Radenovic, F., Guzmán, F., Zhang, F.,
+  F., Wang, P.-S., Huang, N.-C., Ceze, L., Abdelfattah,              Synnaeve, G., Lee, G., Anderson, G. L., Thattai, G., Nail,
+  M. S., and Wu, K.-C. Palu: Kv-cache compression with               G., Mialon, G., Pang, G., Cucurell, G., Nguyen, H., Ko-
+  low-rank projection. In The Thirteenth International               revaar, H., Xu, H., Touvron, H., Zarov, I., Ibarra, I. A.,
+  Conference on Learning Representations, 2025.                      Kloumann, I., Misra, I., Evtimov, I., Zhang, J., Copet, J.,
+                                                                     Lee, J., Geffert, J., Vranes, J., Park, J., Mahadeokar, J.,
+Dao, T. Flashattention-2: Faster attention with bet-
+                                                                     Shah, J., van der Linde, J., Billock, J., Hong, J., Lee, J.,
+  ter parallelism and work partitioning. arXiv preprint
+                                                                     Fu, J., Chi, J., Huang, J., Liu, J., Wang, J., Yu, J., Bitton,
+  arXiv:2307.08691, 2023.
+                                                                     J., Spisak, J., Park, J., Rocca, J., Johnstun, J., Saxe, J., Jia,
+Ding, Y., Zhang, L. L., Zhang, C., Xu, Y., Shang, N., Xu,            J., Alwala, K. V., Prasad, K., Upasani, K., Plawiak, K., Li,
+  J., Yang, F., and Yang, M. Longrope: Extending llm                 K., Heafield, K., Stone, K., El-Arini, K., Iyer, K., Malik,
+  context window beyond 2 million tokens. arXiv preprint             K., Chiu, K., Bhalla, K., Lakhotia, K., Rantala-Yeary,
+  arXiv:2402.13753, 2024.                                            L., van der Maaten, L., Chen, L., Tan, L., Jenkins, L.,
+                                                                     Martin, L., Madaan, L., Malo, L., Blecher, L., Landzaat,
+Dodge, J., Sap, M., Marasović, A., Agnew, W., Ilharco,              L., de Oliveira, L., Muzzi, M., Pasupuleti, M., Singh,
+  G., Groeneveld, D., Mitchell, M., and Gardner, M.                  M., Paluri, M., Kardas, M., Tsimpoukelli, M., Oldham,
+  Documenting large webtext corpora: A case study on                 M., Rita, M., Pavlova, M., Kambadur, M., Lewis, M.,
+
+                                                              10
+
+===== PDF p.11 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+Si, M., Singh, M. K., Hassan, M., Goyal, N., Torabi, N.,               K., Huang, K., Chawla, K., Huang, K., Chen, L., Garg,
+Bashlykov, N., Bogoychev, N., Chatterji, N., Zhang, N.,                L., A, L., Silva, L., Bell, L., Zhang, L., Guo, L., Yu, L.,
+Duchenne, O., Çelebi, O., Alrassy, P., Zhang, P., Li, P.,             Moshkovich, L., Wehrstedt, L., Khabsa, M., Avalani, M.,
+Vasic, P., Weng, P., Bhargava, P., Dubal, P., Krishnan,                Bhatt, M., Mankus, M., Hasson, M., Lennie, M., Reso,
+P., Koura, P. S., Xu, P., He, Q., Dong, Q., Srinivasan,                M., Groshev, M., Naumov, M., Lathi, M., Keneally, M.,
+R., Ganapathy, R., Calderer, R., Cabral, R. S., Stojnic,               Liu, M., Seltzer, M. L., Valko, M., Restrepo, M., Patel,
+R., Raileanu, R., Maheswari, R., Girdhar, R., Patel, R.,               M., Vyatskov, M., Samvelyan, M., Clark, M., Macey,
+Sauvestre, R., Polidoro, R., Sumbaly, R., Taylor, R., Silva,           M., Wang, M., Hermoso, M. J., Metanat, M., Rastegari,
+R., Hou, R., Wang, R., Hosseini, S., Chennabasappa, S.,                M., Bansal, M., Santhanam, N., Parks, N., White, N.,
+Singh, S., Bell, S., Kim, S. S., Edunov, S., Nie, S., Narang,          Bawa, N., Singhal, N., Egebo, N., Usunier, N., Mehta,
+S., Raparthy, S., Shen, S., Wan, S., Bhosale, S., Zhang,               N., Laptev, N. P., Dong, N., Cheng, N., Chernoguz, O.,
+S., Vandenhende, S., Batra, S., Whitman, S., Sootla, S.,               Hart, O., Salpekar, O., Kalinli, O., Kent, P., Parekh, P.,
+Collot, S., Gururangan, S., Borodinsky, S., Herman, T.,                Saab, P., Balaji, P., Rittner, P., Bontrager, P., Roux, P.,
+Fowler, T., Sheasha, T., Georgiou, T., Scialom, T., Speck-             Dollar, P., Zvyagina, P., Ratanchandani, P., Yuvraj, P.,
+bacher, T., Mihaylov, T., Xiao, T., Karn, U., Goswami, V.,             Liang, Q., Alao, R., Rodriguez, R., Ayub, R., Murthy, R.,
+Gupta, V., Ramanathan, V., Kerkez, V., Gonguet, V., Do,                Nayani, R., Mitra, R., Parthasarathy, R., Li, R., Hogan,
+V., Vogeti, V., Albiero, V., Petrovic, V., Chu, W., Xiong,             R., Battey, R., Wang, R., Howes, R., Rinott, R., Mehta,
+W., Fu, W., Meers, W., Martinet, X., Wang, X., Wang,                   S., Siby, S., Bondu, S. J., Datta, S., Chugh, S., Hunt, S.,
+X., Tan, X. E., Xia, X., Xie, X., Jia, X., Wang, X., Gold-             Dhillon, S., Sidorov, S., Pan, S., Mahajan, S., Verma,
+schlag, Y., Gaur, Y., Babaei, Y., Wen, Y., Song, Y., Zhang,            S., Yamamoto, S., Ramaswamy, S., Lindsay, S., Lindsay,
+Y., Li, Y., Mao, Y., Coudert, Z. D., Yan, Z., Chen, Z.,                S., Feng, S., Lin, S., Zha, S. C., Patil, S., Shankar, S.,
+Papakipos, Z., Singh, A., Srivastava, A., Jain, A., Kelsey,            Zhang, S., Zhang, S., Wang, S., Agarwal, S., Sajuyigbe,
+A., Shajnfeld, A., Gangidi, A., Victoria, A., Goldstand,               S., Chintala, S., Max, S., Chen, S., Kehoe, S., Satter-
+A., Menon, A., Sharma, A., Boesenberg, A., Baevski, A.,                field, S., Govindaprasad, S., Gupta, S., Deng, S., Cho,
+Feinstein, A., Kallet, A., Sangani, A., Teo, A., Yunus, A.,            S., Virk, S., Subramanian, S., Choudhury, S., Goldman,
+Lupu, A., Alvarado, A., Caples, A., Gu, A., Ho, A., Poul-              S., Remez, T., Glaser, T., Best, T., Koehler, T., Robinson,
+ton, A., Ryan, A., Ramchandani, A., Dong, A., Franco,                  T., Li, T., Zhang, T., Matthews, T., Chou, T., Shaked,
+A., Goyal, A., Saraf, A., Chowdhury, A., Gabriel, A.,                  T., Vontimitta, V., Ajayi, V., Montanez, V., Mohan, V.,
+Bharambe, A., Eisenman, A., Yazdan, A., James, B.,                     Kumar, V. S., Mangla, V., Ionescu, V., Poenaru, V., Mi-
+Maurer, B., Leonhardi, B., Huang, B., Loyd, B., Paola,                 hailescu, V. T., Ivanov, V., Li, W., Wang, W., Jiang, W.,
+B. D., Paranjape, B., Liu, B., Wu, B., Ni, B., Hancock,                Bouaziz, W., Constable, W., Tang, X., Wu, X., Wang, X.,
+B., Wasti, B., Spence, B., Stojkovic, B., Gamido, B.,                  Wu, X., Gao, X., Kleinman, Y., Chen, Y., Hu, Y., Jia, Y.,
+Montalvo, B., Parker, C., Burton, C., Mejia, C., Liu, C.,              Qi, Y., Li, Y., Zhang, Y., Zhang, Y., Adi, Y., Nam, Y., Yu,
+Wang, C., Kim, C., Zhou, C., Hu, C., Chu, C.-H., Cai, C.,              Wang, Zhao, Y., Hao, Y., Qian, Y., Li, Y., He, Y., Rait,
+Tindal, C., Feichtenhofer, C., Gao, C., Civin, D., Beaty,              Z., DeVito, Z., Rosnbrick, Z., Wen, Z., Yang, Z., Zhao,
+D., Kreymer, D., Li, D., Adkins, D., Xu, D., Testuggine,               Z., and Ma, Z. The llama 3 herd of models, 2024. URL
+D., David, D., Parikh, D., Liskovich, D., Foss, D., Wang,              https://arxiv.org/abs/2407.21783.
+D., Le, D., Holland, D., Dowling, E., Jamil, E., Mont-
+gomery, E., Presani, E., Hahn, E., Wood, E., Le, E.-T.,              Hooper, C., Kim, S., Mohammadzadeh, H., Mahoney,
+Brinkman, E., Arcaute, E., Dunbar, E., Smothers, E., Sun,              M. W., Shao, Y. S., Keutzer, K., and Gholami, A.
+F., Kreuk, F., Tian, F., Kokkinos, F., Ozgenel, F., Cag-               Kvquant: Towards 10 million context length llm infer-
+gioni, F., Kanayet, F., Seide, F., Florez, G. M., Schwarz,             ence with kv cache quantization, 2024. URL https:
+G., Badeer, G., Swee, G., Halpern, G., Herman, G., Sizov,             //arxiv.org/abs/2401.18079.
+G., Guangyi, Zhang, Lakshminarayanan, G., Inan, H.,                  Hsieh, C.-P., Sun, S., Kriman, S., Acharya, S., Rekesh, D.,
+Shojanazeri, H., Zou, H., Wang, H., Zha, H., Habeeb, H.,               Jia, F., Zhang, Y., and Ginsburg, B. Ruler: What’s the real
+Rudolph, H., Suk, H., Aspegren, H., Goldman, H., Zhan,                 context size of your long-context language models?, 2024.
+H., Damlaj, I., Molybog, I., Tufanov, I., Leontiadis, I.,              URL https://arxiv.org/abs/2404.06654.
+Veliche, I.-E., Gat, I., Weissman, J., Geboski, J., Kohli,
+J., Lam, J., Asher, J., Gaya, J.-B., Marcus, J., Tang, J.,           Ji, T., Guo, B., Wu, Y., Guo, Q., Shen, L., Chen, Z., Qiu, X.,
+Chan, J., Zhen, J., Reizenstein, J., Teboul, J., Zhong, J.,             Zhang, Q., and Gui, T. Towards economical inference:
+Jin, J., Yang, J., Cummings, J., Carvill, J., Shepard, J.,              Enabling deepseek’s multi-head latent attention in any
+McPhie, J., Torres, J., Ginsburg, J., Wang, J., Wu, K., U,              transformer-based llms. arXiv preprint arXiv:2502.14837,
+K. H., Saxena, K., Khandelwal, K., Zand, K., Matosich,                  2025.
+K., Veeraraghavan, K., Michelena, K., Li, K., Jagadeesh,             Jiang, A. Q., Sablayrolles, A., Mensch, A., Bamford, C.,
+
+                                                                11
+
+===== PDF p.12 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+  Chaplot, D. S., de las Casas, D., Bressand, F., Lengyel,            Merity, S., Xiong, C., Bradbury, J., and Socher, R.
+  G., Lample, G., Saulnier, L., Lavaud, L. R., Lachaux, M.-            Pointer sentinel mixture models.     arXiv preprint
+  A., Stock, P., Scao, T. L., Lavril, T., Wang, T., Lacroix,           arXiv:1609.07843, 2016.
+  T., and Sayed, W. E. Mistral 7b, 2023. URL https:
+  //arxiv.org/abs/2310.06825.                                         Meta.     The llama 4 herd:   The beginning of
+                                                                       a new era of natively multimodal ai inno-
+Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu,                vation.           https://ai.meta.com/blog/
+ C. H., Gonzalez, J., Zhang, H., and Stoica, I. Efficient              llama-4-multimodal-intelligence/.         Ac-
+ memory management for large language model serving                    cessed: 2025-6-15.
+ with pagedattention. In Proceedings of the 29th sym-
+ posium on operating systems principles, pp. 611–626,                 Mu, J., Huang, H., Zhang, J., Yu, M., Wang, T., and Li, Y.
+ 2023.                                                                 Sals: Sparse attention in latent space for kv cache com-
+                                                                       pression, 2025. URL https://arxiv.org/abs/
+Li, D., Shao, R., Xie, A., Sheng, Y., Zheng, L., Gonzalez, J.,
+                                                                       2510.24273.
+   Stoica, I., Ma, X., and Zhang, H. How long can context
+   length of open-source LLMs truly promise? In NeurIPS               Saxena, U., Saha, G., Choudhary, S., and Roy, K. Eigen
+  2023 Workshop on Instruction Tuning and Instruction Fol-              attention: Attention in low-rank space for kv cache com-
+   lowing, 2023. URL https://openreview.net/                            pression, 2024. URL https://arxiv.org/abs/
+   forum?id=LywifFNXV5.                                                 2408.05646.
+Li, J., Zhang, Y., Hassan, M. Y., Chafekar, T., Cai, T., Ren,
+                                                                      Shah, J., Bikshandi, G., Zhang, Y., Thakkar, V., Ramani, P.,
+  Z., Guo, P., Karimzadeh, F., Wang, C., and Gan, C. Com-
+                                                                        and Dao, T. Flashattention-3: Fast and accurate attention
+  mvq: Commutative vector quantization for kv cache com-
+                                                                        with asynchrony and low-precision. Advances in Neural
+  pression. arXiv preprint arXiv:2506.18879, 2025.
+                                                                        Information Processing Systems, 37:68658–68685, 2024.
+Li, Z., Ghodrati, S., Yazdanbakhsh, A., Esmaeilzadeh, H.,
+  and Kang, M. Accelerating attention through gradient-               Su, J., Ahmed, M., Lu, Y., Pan, S., Bo, W., and Liu,
+  based learned runtime pruning. In Proceedings of the                  Y. Roformer: Enhanced transformer with rotary po-
+  49th Annual International Symposium on Computer Ar-                   sition embedding. Neurocomput., 568(C), February
+  chitecture, pp. 902–915, 2022.                                        2024. ISSN 0925-2312. doi: 10.1016/j.neucom.
+                                                                        2023.127063. URL https://doi.org/10.1016/
+Lin, B., Zeng, Z., Xiao, Z., Kou, S., Hou, T., Gao, X.,                 j.neucom.2023.127063.
+  Zhang, H., and Deng, Z. Matryoshkakv: Adaptive kv
+  compression via trainable orthogonal projection. arXiv              Su, Y., Zhou, Y., Qiu, Q., Li, J., Xia, Q., Li, P., Duan,
+  preprint arXiv:2410.14731, 2024.                                      X., Wang, Z., and Zhang, M. Accurate kv cache quan-
+                                                                        tization with outlier tokens tracing. arXiv preprint
+Liu, A., Feng, B., Wang, B., Wang, B., Liu, B., Zhao, C.,
+                                                                        arXiv:2505.10938, 2025.
+  Dengr, C., Ruan, C., Dai, D., Guo, D., et al. Deepseek-v2:
+  A strong, economical, and efficient mixture-of-experts              Tillet, P., Kung, H. T., and Cox, D. Triton: an intermediate
+  language model. arXiv preprint arXiv:2405.04434,                       language and compiler for tiled neural network computa-
+  2024a.                                                                 tions. In Proceedings of the 3rd ACM SIGPLAN Interna-
+Liu, H., Yan, W., Zaharia, M., and Abbeel, P. World model                tional Workshop on Machine Learning and Programming
+  on million-length video and language with blockwise                   Languages, 2019.
+  ringattention. arXiv preprint arXiv:2402.08268, 2024b.
+                                                                      Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+Liu, Z., Yuan, J., Jin, H., Zhong, S., Xu, Z., Braverman,               A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P.,
+  V., Chen, B., and Hu, X. Kivi: A tuning-free asym-                    Bhosale, S., Bikel, D., Blecher, L., Ferrer, C. C., Chen,
+  metric 2bit quantization for kv cache. arXiv preprint                 M., Cucurull, G., Esiobu, D., Fernandes, J., Fu, J., Fu, W.,
+  arXiv:2402.02750, 2024c.                                              Fuller, B., Gao, C., Goswami, V., Goyal, N., Hartshorn,
+                                                                        A., Hosseini, S., Hou, R., Inan, H., Kardas, M., Kerkez,
+Lozhkov, A., Ben Allal, L., von Werra, L., and Wolf,
+                                                                        V., Khabsa, M., Kloumann, I., Korenev, A., Koura, P. S.,
+  T. Fineweb-edu: the finest collection of educational
+                                                                        Lachaux, M.-A., Lavril, T., Lee, J., Liskovich, D., Lu, Y.,
+  content, 2024. URL https://huggingface.co/
+                                                                        Mao, Y., Martinet, X., Mihaylov, T., Mishra, P., Moly-
+  datasets/HuggingFaceFW/fineweb-edu.
+                                                                        bog, I., Nie, Y., Poulton, A., Reizenstein, J., Rungta, R.,
+Ly, A., Marsman, M., Verhagen, J., Grasman, R. P., and                  Saladi, K., Schelten, A., Silva, R., Smith, E. M., Subra-
+  Wagenmakers, E.-J. A tutorial on fisher information.                  manian, R., Tan, X. E., Tang, B., Taylor, R., Williams,
+  Journal of Mathematical Psychology, 80:40–55, 2017.                   A., Kuan, J. X., Xu, P., Yan, Z., Zarov, I., Zhang, Y.,
+
+                                                                 12
+
+===== PDF p.13 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+  Fan, A., Kambadur, M., Narang, S., Rodriguez, A., Sto-
+  jnic, R., Edunov, S., and Scialom, T. Llama 2: Open
+  foundation and fine-tuned chat models, 2023. URL
+  https://arxiv.org/abs/2307.09288.
+Tseng, A., Chee, J., Sun, Q., Kuleshov, V., and De Sa,
+  C. Quip#: Even better llm quantization with hadamard
+  incoherence and lattice codebooks. arXiv preprint
+  arXiv:2402.04396, 2024.
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+  L., Gomez, A. N., Kaiser, L. u., and Polosukhin, I. At-
+  tention is all you need. In Guyon, I., Luxburg, U. V.,
+  Bengio, S., Wallach, H., Fergus, R., Vishwanathan, S.,
+  and Garnett, R. (eds.), Advances in Neural Information
+  Processing Systems, volume 30. Curran Associates, Inc.,
+  2017.
+Weber, M., Fu, D. Y., Anthony, Q., Oren, Y., Adams, S.,
+ Alexandrov, A., Lyu, X., Nguyen, H., Yao, X., Adams,
+ V., Athiwaratkun, B., Chalamala, R., Chen, K., Ryabinin,
+ M., Dao, T., Liang, P., Ré, C., Rish, I., and Zhang, C.
+ Redpajama: an open dataset for training large language
+ models. In Proceedings of the 38th International Confer-
+ ence on Neural Information Processing Systems, NIPS
+ ’24, Red Hook, NY, USA, 2024. Curran Associates Inc.
+ ISBN 9798331314385.
+Xiao, G., Tian, Y., Chen, B., Han, S., and Lewis,
+  M. Efficient streaming language models with atten-
+  tion sinks, 2024. URL https://arxiv.org/abs/
+  2309.17453.
+
+Yan, X., Li, Z., Zhang, T., Qin, H., Kong, L., Zhang, Y.,
+  and Yang, X. Recalkv: Low-rank kv cache compression
+  via head reordering and offline calibration, 2025. URL
+  https://arxiv.org/abs/2505.24357.
+Zhang, R., Wang, K., Liu, L., Wang, S., Cheng, H., Zhang,
+  C., and Shen, Y. Lorc: Low-rank compression for llms
+  kv cache with a progressive compression strategy. arXiv
+  preprint arXiv:2410.03111, 2024.
+Zhang, Z., Sheng, Y., Zhou, T., Chen, T., Zheng, L., Cai,
+  R., Song, Z., Tian, Y., Ré, C., Barrett, C., Wang, Z., and
+  Chen, B. H2 o: Heavy-hitter oracle for efficient generative
+  inference of large language models, 2023. URL https:
+  //arxiv.org/abs/2306.14048.
+
+
+
+
+                                                                13
+
+===== PDF p.14 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+A. Appendix
+A.1. Ablation Studies
+A.1.1. S TATIC VS . A DAPTIVE R ANK S ELECTION
+We compare adaptive rank selection against static low-rank compression. Static rank selection assigns a uniform rank
+budget across all decoder blocks and attention heads, and applies the same rank to both key and value projections, ignoring
+the layer/head-specific spectral characteristics. As shown in Table 6, this uniform allocation leads to substantial accuracy
+degradation under the same compression target and training settings, highlighting the importance of STAR-KV’s adaptive
+per-layer/head rank selection.
+
+
+           Method                                         Comp (%)     OBQA       PIQA        ARC-e   ARC-c   Hella   Wino                      Avg.
+           Static Low-rank Decomposition                     75         26.80         58.49   37.52   23.38   37.30   49.80                     38.88
+           STAR-KV                                           75         42.60         74.86   71.63   41.55   68.52   63.77                     60.49
+                Table 6. Comparison of static vs. adaptive rank selection under the same KV cache compression target.
+
+
+
+
+                                                                                                                        Effective Rank Learnt
+                    Block Index
+
+
+
+
+                                                                     Head Index
+
+Figure 10. Ranks learned for Key projection matrices for each block and head using our adaptive rank selection strategy at 75%
+compression. The maximum rank of each head is 128.
+                                  Effective Rank Learnt
+
+
+
+
+                                                                        Block Index
+
+Figure 11. Ranks learned for Value projection matrices for each block using our adaptive rank selection strategy at 75% compression. The
+maximum rank of each layer is 4096.
+
+
+Fig. 10 and Fig. 11 present the rank maps learned by the key and value projections, respectively, using our adaptive rank
+selection strategy based on the soft-thresholding mechanism.
+
+                                                                             14
+
+===== PDF p.15 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+A.1.2. S TABILITY OF L EARNED R ANK P ROFILES
+We further analyze whether the learned rank profiles are stable across calibration datasets and nearby model variants. To use
+a unified metric, we define a generic profile distance between two settings A and B as
+                                                1 X T
+                               ∆T (A, B) =               pi (A) − pTi (B) ,       T ∈ {K, V },                           (13)
+                                              |IT |
+                                                     i∈IT
+
+where T denotes the tensor type, and IT is the set of profile entries being compared. For keys, the profile is defined per
+layer and per head, i.e., IK = {(ℓ, h) : ℓ ∈ L, h ∈ H}; for values, the profile is defined per layer, i.e., IV = {ℓ : ℓ ∈ L}.
+We instantiate pTi (·) differently depending on the comparison.
+Case 1: same model, different calibration datasets. When comparing two calibration datasets D and D′ for the same
+model, raw ranks are directly comparable. We therefore set
+                                         pK            K
+                                          (ℓ,h) (D) = rℓ,h (D),          pVℓ (D) = rℓV (D),                                     (14)
+       K
+where rℓ,h (D) is the learned key rank of head h in layer ℓ, and rℓV (D) is the learned value rank of layer ℓ. Thus,
+                                                          1 XX K
+                                    ∆K (D, D′ ) =                          K
+                                                               rℓ,h (D) − rℓ,h (D′ ) ,                                          (15)
+                                                        |L||H|
+                                                               ℓ∈L h∈H
+
+and
+                                                             1 X V
+                                          ∆V (D, D′ ) =          rℓ (D) − rℓV (D′ ) .                                           (16)
+                                                            |L|
+                                                                 ℓ∈L
+For readability, we report these rank differences together with their normalized forms, e.g., 1.6/128 ranks per head for keys
+and 20/4096 ranks per layer for values.
+Case 2: same calibration dataset, different model variants. When comparing nearby model variants M and M ′ under
+the same calibration dataset, raw ranks may not be directly comparable due to different attention layouts, such as GQA and
+non-GQA. We therefore compare the learned compression-rate profiles instead of raw rank profiles. Specifically, for keys
+and values, we define the per-entry compression profile as the normalized learned rank:
+                                                         K
+                                                        rℓ,h (M )                     rℓV (M )
+                                        cK
+                                         (ℓ,h) (M ) =             ,      cVℓ (M ) =            ,                                (17)
+                                                           dh                         dmodel
+       K
+where rℓ,h (M ) is the learned key rank of head h in layer ℓ, rℓV (M ) is the learned value rank of layer ℓ, dh is the key head
+dimension, and dmodel is the value hidden dimension. We then set
+                                             pTi (M ) = cTi (M ),        T ∈ {K, V }.                                           (18)
+The cross-model profile distance is defined as
+                                                  1 X T
+                              ∆T (M, M ′ ) =          ci (M ) − cTi (M ′ ) ,              T ∈ {K, V }.                          (19)
+                                                |IT |
+                                                     i∈IT
+
+We report ∆T (M, M ′ ) as a percentage by multiplying the normalized distance by 100.
+
+            Comparison                                      Key-profile deviation                  Value-profile deviation
+            C4 vs. FineWeb-Edu                       1.6/128 ranks per head (1.2%)        20/4096 ranks per layer (0.5%)
+            RedPajama vs. FineWeb-Edu                1.7/128 ranks per head (1.3%)        7.7/4096 ranks per layer (0.2%)
+            LLaMA-2-7B vs. LLaMA-3.1-8B-Inst                     3.2%                                 11.4%
+Table 7. Comparison of learned rank profiles across calibration datasets and nearby model variants. Dataset comparisons use LongChat-
+v1.5-32K.
+
+
+Table 7 shows learned profiles are highly consistent across calibration datasets - FineWeb-Edu, C4 (Dodge et al., 2021a) and
+RedPajama (Weber et al., 2024). On LongChat-v1.5-32K, the key-rank difference is only 1.2–1.3% of the head dimension,
+while the value-rank difference remains below 0.5% of the model dimension. Across nearby model variants, the key
+compression profile remains especially stable, while the value profile shows larger but still moderate variation. This indicates
+that the learned rank allocation captures persistent layer-wise sensitivity patterns.
+
+                                                                  15
+
+===== PDF p.16 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+A.1.3. S ENSITIVITY TO THE C ALIBRATION DATASET
+We evaluate whether the choice of calibration dataset affects the final compression–accuracy trade-off. We calibrate
+STAR-KV using FineWeb-Edu, C4, and RedPajama, including an additional FineWeb-Edu run with a different seed. As
+shown in Table 8, the final zero-shot average varies only mildly across calibration datasets at the same 60% KV cache
+compression ratio, suggesting that the learned thresholds are generally robust to the calibration source.
+
+
+         Model / Method        Calibration Data          Comp (%) OBQA PIQA ARC-e ARC-c Hella Wino Avg.
+         LongChat-v1.5-32K –                                   0            41.00   76.28 71.84       41.38 71.20 67.48 61.53
+                               FineWeb-Edu                     60           41.80   75.90    72.69    41.47   70.49 66.85 61.53
+         STAR-KV               C4                              60           42.20   76.77    71.76    40.78   70.53 66.30 61.39
+                               RedPajama                       60           43.00   76.66    71.59    41.98   68.09 65.75 61.18
+                               FineWeb-Edu, diff. seed         60           42.60   76.06    71.93    41.81   68.54 65.98 61.15
+         LLaMA-3.1-8B-Inst –                                   0            42.60   80.96 81.73       54.86 79.17 73.72 68.84
+                                FineWeb-Edu                     60       41.80 79.27 81.02 51.45 75.52 69.53 66.43
+         STAR-KV                C4                              60       42.80 77.97 79.55 50.94 75.10 70.09 66.08
+                                RedPajama                       60       42.40 78.07 79.46 50.43 74.37 69.77 65.75
+                              Table 8. Sensitivity to calibration dataset at 60% KV cache compression.
+
+
+
+A.1.4. E FFECT OF H ADAMARD ROTATION AND M IXED -P RECISION Q UANTIZATION
+
+
+              Method                                     Bit       OBQA        PIQA     ARC-e        ARC-c    Hella   Avg.
+              Global Hadamard (w/o mixed precision)      3.0        40.80      74.32    69.32        39.42    67.27   58.23
+              Mixed precision (w/o Hadamard)             3.2        42.00      74.10    67.93        37.80    64.51   57.27
+              STAR-KV                                    3.2        41.80      74.86    70.83        40.70    67.72   59.18
+Table 9. Ablation under 75% low-rank KV compression. We compare three strategies - 1) global Hadamard without mixed precision, 2)
+mixed-precision quantization without Hadamard transformation, and 3) the proposed block-wise Hadamard with mixed precision.
+
+
+
+Table 9 isolates the roles of structured rotation and mixed-precision quantization. Applying a single global Hadamard with
+uniform 3-bit quantization improves robustness over naive quantization but still exhibits noticeable accuracy degradation, as
+it cannot selectively protect high-magnitude channels. Conversely, mixed-precision quantization alone, preserving the top
+20% channels in 4-bit while quantizing the rest in 3-bit, resulting in a 3.2-bit average, also results in degraded performance,
+indicating that selective bit allocation without structured rotation is insufficient. In contrast, block-wise Hadamard enables
+effective mixed-precision quantization by redistributing outlier energy within each block. This combination achieves the
+best overall accuracy, demonstrating that neither Hadamard rotation nor mixed precision alone is sufficient; their synergy
+becomes vital for robust low-bit low-rank KV cache compression.
+
+A.1.5. S ENSITIVITY TO C OMPRESSION W EIGHT
+We further analyze the sensitivity of STAR-KV to the compression weight γ and the outlier–inlier split ratio. These ablations
+verify that the reported results are not caused by fragile hyperparameter settings.
+
+
+                          γ    Comp (%)     OBQA      PIQA          ARC-e      ARC-c        Hella    Wino     Avg.
+                       1.0         60        42.60    76.22         71.84       42.41       68.44    66.14    61.28
+                       0.1         60        41.80    75.90         72.69       41.47       70.49    66.85    61.53
+                       0.01        60        42.40    76.28         71.68       42.75       68.58    66.30    61.33
+               Table 10. Sensitivity to compression weight γ on LongChat-v1.5-32K at 60% KV cache compression.
+
+
+
+As shown in Table 10, the average zero-shot accuracy varies only mildly across the tested range. We use γ = 0.1 in the
+main experiments because it achieves the best average performance among the tested values.
+
+                                                                    16
+
+===== PDF p.17 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+A.1.6. S ENSITIVITY TO THE O UTLIER –I NLIER S PLIT
+Table 11 shows that the 20:80 split provides a strong balance between compression, speed-up, and downstream accuracy,
+and is therefore used as the default setting.
+
+                     Bits Out:In Comp (×) Speedup (×) OBQA PIQA ARC-e ARC-c Hella                            Avg.
+                      16      –        1.00          1.00         41.00   76.28   71.84     41.38   71.20 60.34
+                       3.1 10:90         20.64            4.16     42.20 74.54 70.54 38.99 67.74 58.80
+                       3.2 20:80         20.00            4.09     41.80 74.86 70.83 40.70 67.72 59.18
+                       3.3 30:70         19.39            4.05     42.40 74.59 71.38 38.91 67.93 59.04
+                       3.4 40:60         18.82            3.99     42.20 74.81 71.30 40.96 68.35 59.52
+Table 11. Sensitivity to the outlier–inlier split ratio on LongChat-v1.5-32K. The reported average is computed over the listed zero-shot
+tasks. The speedup is measured on an NVIDIA RTX 4090 GPU.
+
+
+
+A.2. Proof for Lemma 4.2
+The feasible set of the joint rank-R decomposition problem is
+                                              SR = { Y ∈ Rm×d : rank(Y ) ≤ R },                                                    (20)
+i.e., SR is the collection of all matrices with rank at most R.
+For any head-wise candidate X = [X (1) · · · X (h) ] with rank(X (i) ) ≤ r for all i, at the same compression budget (R = hr),
+its rank satisfies
+                                                      X h
+                                     rank(X) ≤             rank(X (i) ) ≤ hr = R,                                         (21)
+                                                            i=1
+which means that X ∈ SR . Therefore, the entire head-wise candidate family is a subset of the joint candidate family SR . In
+                                                                       cjoint minimizes ∥W − Y ∥F over all Y ∈ SR , we
+            chw ∈ SR is feasible for the joint optimization, and since W
+particular, W
+conclude
+                                           ∥W − W cjoint ∥F ≤ ∥W − W   chw ∥F .                                        (22)
+
+A.3. Training Settings
+All experiments are trained using the loss formulation defined in (5), which combines the distillation loss with a compression
+loss. We use the AdamW optimizer for all experiments. The learning rate is set to 2 × 10−5 for all model parameters, while a
+higher learning rate of 1 × 10−2 is used for the adaptive spectral threshold parameters α to enable rapid convergence of rank
+selection. Training is conducted on a subset of 3,000 samples randomly sampled from the FineWeb-Edu dataset. We first train
+the model for one full epoch on this dataset using the combined loss. After the adaptive compression parameters converge,
+we disable the compression loss and continue training using only the distillation loss for an additional 1,000 optimization
+steps on the same dataset. This second phase further stabilizes the model outputs introduced by compression-aware training.
+The sequence length is set to 8192 tokens for LongChat-v1.5-7B-32K, LLaMA-3-8B-Instruct and LLaMA-3.1-8B-Instruct
+models, and 4096 tokens for LLaMA-2-7B. In addition, we do not apply compression to layers 0, 1, and 31, which have been
+shown to be particularly sensitive across models (Mu et al., 2025), in order to ensure stable accuracy. All experiments are
+conducted on two NVIDIA RTX PRO 6000 GPUs. Training one epoch under the above configuration takes approximately 6
+GPU hours.
+
+A.4. Benchmark Details
+We evaluate the proposed method using three standard benchmark suites: LM-Eval-Harness, LongBench, and RULER.
+LM-Eval-Harness. We use the LM-Eval-Harness framework to evaluate zero-shot accuracy on a diverse set of reasoning
+and understanding benchmarks, including OpenBookQA, PIQA, ARC-easy, ARC-challenge, HellaSwag, and WinoGrande.
+Reported results follow the default evaluation protocols of LM-Eval-Harness, and accuracy (%) is used as the primary
+metric. For each configuration, we also report the average accuracy across all evaluated tasks.
+Long Context Evaluation. To assess long-context reasoning and information retrieval capabilities, we evaluate on
+LongBench tasks, including question answering, summarization, and multi-document understanding benchmarks such as
+
+                                                                   17
+
+===== PDF p.18 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+Qasper, QMSum, TriviaQA, MultiQA, TREC, MultiNews, and VCSum. We report task-specific accuracy or F1 scores as
+defined by the benchmark, along with the average performance across tasks. We further evaluate long-context robustness
+using the RULER benchmark. Unless otherwise specified, RULER evaluations are conducted at a fixed sequence length of
+4K tokens. We additionally include a 16K RULER evaluation on LongChat-v1.5-32K to test longer-context robustness.
+
+A.5. Additional Results
+A.5.1. A DDITIONAL M ODELS
+We include additional evaluations on Mistral-7B-Instruct-v0.2 (Jiang et al., 2023) and LLaMA-2-13B (Touvron et al., 2023)
+in Table 12. On Mistral-7B-Instruct-v0.2, STAR-KV achieves a higher zero-shot average than ReCalKV at the same 60%
+KV cache compression rate. On LLaMA-2-13B, STAR-KV substantially outperforms Palu at 60% compression and remains
+competitive even at 75% compression.
+
+      Model              Method    Comp (%) Wiki2     C4      LM Avg. OBQA PIQA ARC-e ARC-c Hella Wino Avg.
+      Mistral-7B-Inst. Baseline         0      5.94 9.72       7.83    46.80   80.41   81.31   55.63    83.48 74.35 70.33
+                       Palu            60      7.07 12.93      10.00   42.80   77.26   74.07   50.00    75.30 70.72 65.03
+                       ReCalKV         60       –     –          –     44.00   79.27   77.78   52.20    77.88 72.30 67.24
+                       STAR-KV         60      8.01 10.81      9.41    44.00   80.52   79.80   52.13    78.79 71.11 67.73
+      LLaMA-2-13B        Baseline         0       5.71 8.19     6.95   44.20 79.22 77.57 50.51 79.71 71.03 67.04
+                         Palu            60       6.48 9.69     8.09   42.00 76.28 71.80 41.72 72.99 69.93 62.45
+                         STAR-KV         60       5.69 8.22     6.96   43.60 79.00 77.36 48.12 79.30 71.27 66.44
+                         STAR-KV         75       5.89 8.66     7.28   42.40 77.97 75.80 46.16 77.79 68.35 64.75
+Table 12. Additional results on Mistral-7B-Instruct-v0.2 and LLaMA-2-13B. For LLaMA-2-13B, perplexity is evaluated at sequence
+length 1024 due to memory constraints.
+
+
+
+A.5.2. RULER E VALUATION
+
+                                        Method       Comp (%)       RULER@16K Avg.
+                                        Baseline          0              85.69
+                                        Palu             60              62.94
+                                        STAR-KV          60              84.16
+                         Table 13. RULER evaluation at a sequence length of 16K on LongChat-v1.5-32K.
+
+
+The RULER results in Table 3 show that STAR-KV preserves long-context performance under compression at 4K sequence
+length. The additional seed on LongChat-v1.5-32K obtains a similar average, indicating stable long-context behavior
+across repeated calibration runs. At 16K context length, Table 13 shows that STAR-KV remains close to the baseline while
+substantially outperforming Palu at the same 60% compression rate.
+
+A.5.3. L ONG B ENCH E VALUATION
+
+              Method     Comp (%) Qasper QMSum TriviaQA MultiQA TREC MultiNews VCSum                           Avg.
+              Baseline        0      25.19     23.20     92.00      39.90   72.50      26.90           15.91   42.23
+              Palu           30      14.47     23.30     86.71      26.57   73.00      26.19            8.33   36.93
+              Palu           50      15.38     22.10     73.36      27.58   63.50      21.66            1.95   32.21
+              STAR-KV        50      23.15     22.57     89.32      38.29   71.50      26.29           14.43   40.79
+              STAR-KV        60      22.58     22.40     81.30      41.04   65.00      25.70           15.60   39.09
+                                    Table 14. LongBench results on LLaMA-3.1-8B-Instruct.
+
+
+Table 14 reports additional LongBench results on LLaMA-3.1-8B-Instruct. At 50% compression, STAR-KV achieves
+an average score of 40.79%, close to the baseline of 42.23% and higher than Palu at 30% compression. Even at 60%
+compression, STAR-KV remains substantially better than Palu at 50% compression.
+
+A.5.4. C OMBINATION WITH T OKEN E VICTION
+STAR-KV compresses KV cache through learned low-rank structure, whereas token pruning methods reduce the number
+
+                                                               18
+
+===== PDF p.19 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+of retained tokens. These two directions are therefore complementary. Table 15 combines STAR-KV with H2O. On
+LongChat-v1.5-32K, the combined method with 60% compression from low-rank and 60% pruning, reaches 84% KV
+cache compression with an accuracy better than H2O (60% pruning) alone. On LLaMA-2-13B, combining STAR-KV with
+H2O increases compression from 75% (from low-rank) to 90% (combined with 60% pruning) while causing only a small
+additional zero-shot degradation compared with STAR-KV alone.
+
+          Model                               Method               Comp (%) OBQA PIQA ARC-e ARC-c Hella Wino                              Avg.
+          LongChat-v1.5-32K Baseline                                     0        41.00     76.28     71.84      41.38   71.20   67.48    61.53
+                            H2O                                         60        39.20     75.63     69.99      40.36   68.99   65.51    59.95
+                            STAR-KV                                     60        41.80     75.90     72.69      41.47   70.49   66.85    61.53
+                            STAR-KV + H2O                               84        40.80     75.46     70.03      40.36   68.32   64.96    59.99
+          LLaMA-2-13B            Baseline                0      44.20 79.22 77.57 50.51 79.71 71.03 67.04
+                                 H2O                    60      42.80 79.92 78.07 49.15 79.17 71.35 66.74
+                                 STAR-KV                75      42.40 77.97 75.80 46.16 77.79 68.35 64.75
+                                 STAR-KV + H2O          90      42.20 77.97 75.46 46.33 77.67 66.85 64.41
+Table 15. Combination with H2O. Token eviction and low-rank KV compression are complementary because they reduce different axes of
+the KV cache.
+
+
+
+A.5.5. L ATENCY B REAKDOWN
+
+                                                       FlashAttention        STAR-KV Attention        Attention Projections      Others
+                                          Pytorch SDPA
+                                                                               2.6x
+                              8K
+
+
+
+
+                                        STAR-KV (75%)
+             Context Length
+
+
+
+
+                                    STAR-KV (75%) + 4-b                         2.2x
+                                          Pytorch SDPA
+                              16K
+
+
+
+
+                                        STAR-KV (75%)                                                  3.3x
+                                    STAR-KV (75%) + 4-b                                               3.5x
+                                          Pytorch SDPA    OOM
+                              32K
+
+
+
+
+                                        STAR-KV (75%)
+                                    STAR-KV (75%) + 4-b
+                                                       0.00     2.00    4.00      6.00    8.00      10.00     12.00   14.00   16.00   18.00
+                                                                                       Attention Latency (ms)
+Figure 12. The latency breakdown of the attention operator in LLaMA-2-7B on the RTX 4090 GPU. The batch size is 16 in all setups.
+
+We performed a runtime breakdown of STAR-KV at 75% compression with and without quantization on LLaMA-2-7B,
+comparing it with PyTorch SDPA at context lengths of 8K, 16K, and 32K with batch size 16, as shown in Fig. 12. PyTorch
+SDPA runs out of memory at 32K, whereas both STAR-KV variants remain executable. At 8K and 16K, STAR-KV reduces
+KV-cache-related memory-access time by 3.2× and 5.9×, respectively, and reduces attention-related computation by 1.9×
+and 2.4×, resulting in overall speedups of 2.6× and 3.3×. Adding 4-bit quantization further reduces memory-access time
+by 4.0× and 8.6×, but achieves smaller compute-side gains of 1.1× and 1.6× due to quantization overhead, yielding overall
+speedups of 2.2× and 3.5×. At 32K, STAR-KV without quantization achieves a 4.1× speedup over the estimated baseline,
+while the variant with quantization reaches 4.9×, highlighting the increasing benefit of quantization at longer contexts.
+These results reveal a clear bottleneck shift: as context length grows, reducing KV-cache memory traffic becomes the
+dominant source of acceleration, while the relative impact of quantization overhead diminishes.
+
+A.5.6. S PEEDUP OF ATTENTION ON RTX P RO 6000 GPU
+To show the portability of our kernels, we extend the experiments to an RTX Pro 6000 GPU with 96 GB memory capacity.
+Fig. 13 illustrates the speedup of the attention operator in LLaMA-2-7B, using a batch size 16. Here, we limit the context
+length and batch size to a value that fits inside the GPU memory with the PyTorch SDPA baseline. At a context length of
+128K, STAR-KV achieves a 2.9× speedup, and adding 4-bit KV quantization increases the speedup to 4.3×.
+
+A.6. Implementation Optimizations
+Operation Fusion. RoPE is often implemented as bandwidth-bound element-wise operations on GPU; therefore, it is
+common practice to store keys after RoPE in the KV cache to avoid reapplying it repeatedly on the fly. In our setting, the
+
+                                                                                 19
+
+===== PDF p.20 =====
+STAR-KV: Low-Rank KV Cache Compression via Soft Thresholding for Adaptive Rank Control
+
+                                             6    Palu (50%)
+                                             5    STAR-KV (75%)                    4.3x
+                                                  STAR-KV (75%) + 4-b
+
+
+
+
+                                   Speedup
+                                             4
+                                                                                   2.9x
+                                             3
+                                             2                                     1.5x
+                                             1
+                                                 8K     16K        32K      64K    128K
+                                                           Context Length
+Figure 13. Normalized speedup of the attention module over the PyTorch SDPA FP16 implementation in RTX 6000 Pro GPU. The batch
+size is 16 in all setups.
+
+
+latent keys are cached in a pre-RoPE form because RoPE can only be applied after reconstructing the latent keys using
+the decomposed key projections. Therefore, naively applying RoPE to all cached keys at each step would be expensive.
+Moreover, when the KV cache is quantized, cached keys and values require dequantization before the necessary matrix
+multiplications. A naive dequantization approach expands low-bit data to higher-precision formats early, increasing memory
+traffic and incurring additional bandwidth overhead. To address these challenges, we implement custom Triton kernels
+that fuse (i) key dequantization along with RoPE application, key reconstruction, and attention-score computations q · K,
+and (ii) value dequantization with the reordered attention output computation (p · V ′ ). This fusion reduces intermediate
+materialization and redundant memory reads/writes, improving inference efficiency.
+Attention with GEMM. Another system-level inefficiency stems from the prevalence of General Matrix–Vector multiplica-
+tions (GEMV) during decoding, which typically underutilize GPU compute resource compared to General Matrix–Matrix
+multiplication (GEMM) due to lower arithmetic intensity (Operations/Byte) (Dao, 2023). During decoding, attention
+forms a single query for the current token against keys/values for the entire context length, leading to multiple GEMV
+operations across heads. In STAR-KV, the score path (q · K) is computed within our fused Triton kernel together with key
+reconstruction, RoPE, and dequantization, avoiding separate GEMV launches. For the value path, using the attention output
+reordering in Section 3.3, we stack per-head attention probabilities pi ∈ Rl into p ∈ Rh×l and apply them jointly to the
+shared compressed values V ′ . This transforms h independent GEMV-style operations into a single GEMM, improving
+throughput by increasing arithmetic intensity and GPU utilization.
+
+
+
+
+                                                              20
