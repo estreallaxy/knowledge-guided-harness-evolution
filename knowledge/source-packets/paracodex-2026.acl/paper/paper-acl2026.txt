@@ -1,0 +1,2573 @@
+===== PDF p.1 =====
+PARAC ODEX: A Profiling-Guided Autonomous Coding Agent for Reliable
+                  Parallel Code Generation and Translation
+                  Erel Kaplan1 Tomer Bitan1 Lian Ghrayeb1 Le Chen2
+                       Tom Yotam3 Niranjan Hasabnis3 Gal Oren1,4
+                   1
+                     Technion – Israel Institute of Technology, Haifa, Israel
+                        2
+                          Argonne National Laboratory, Lemont, USA
+                                      3
+                                        Code Metal, USA
+                             4
+                               Stanford University, Stanford, USA
+       {erel.kaplan, tomerbitan, lian.ghrayeb}@campus.technion.ac.il
+                lechen@anl.gov, {tom, niranjan}@codemetal.ai,
+                                 galoren@stanford.edu
+
+
+
+
+    Figure 1: PARAC ODEX: An autonomous LLM agent that parallelizes and migrates code. The core idea is
+    to turn generation into an artifact-driven, tool-verified agentic workflow: the agent first extracts bottlenecks and
+    a data-mapping plan, then proposes patch-level OpenMP target edits, and finally uses compiler/tests as a hard
+    correctness gate and profiler traces as a performance signal. By separating what to move (data planning) from what
+    to offload (kernel translation) and closing the loop with measurement, PARAC ODEX reduces brittle one-shot outputs
+    and makes iterations reproducible via structured plans, logs, and profiles.
+
+                           Abstract                                        speedups of 3.1× (A100) and 3.6× (RTX 4060)
+                                                                           on HeCBench and 1.5× and 1.1× on Rodinia,
+         Parallel programming is central to HPC and
+                                                                           and outperform a zero-shot Codex baseline on
+         AI, but producing code that is correct and fast
+                                                                           all suites. We also evaluate CUDA→OpenMP
+         remains challenging, especially for OpenMP
+                                                                           offload translation on ParEval, where PARA -
+         GPU offload, where data movement and tuning
+                                                                           C ODEX maintains high compilation and vali-
+         dominate. Autonomous coding agents can com-
+                                                                           dation rates in code-only and end-to-end set-
+         pile, test, and profile on target hardware, but
+                                                                           tings.1
+         outputs are brittle without domain scaffolding.
+         We present PARAC ODEX, an HPC-engineer                    1       Introduction
+         workflow that turns a Codex-based agent into
+                                                                   Parallel programming is central to modern high-
+         an autonomous OpenMP GPU offload system
+         using staged hotspot analysis, explicit data plan-        performance computing, but producing parallel im-
+         ning, correctness gating, and profiling-guided            plementations that are both correct and fast remains
+         refinement. We evaluate translation from se-              arduous. Developers face two recurring needs: in-
+         rial CPU kernels to OpenMP GPU offload ker-               troducing parallelism into serial kernels to exploit
+         nels on HeCBench, Rodinia, and NAS. Af-                   CPUs and GPUs, and migrating existing parallel
+         ter excluding five kernels, PARAC ODEX suc-               code between programming models to improve
+         ceeded on all 31 valid kernels. In 27/31 (87%)
+                                                                   portability and maintainability.
+         of these valid cases, the generated kernels im-
+         proved GPU time over the reference implemen-
+                                                                      Crucially, this work studies tool-using LLM code
+         tations, a result that holds independently on             autonomous agents for program transformation:
+         both the A100 and RTX 4060. The result-                       1
+                                                                      PARAC ODEX:        https://github.com/
+         ing OpenMP kernels achieve geometric-mean                 Scientific-Computing-Lab/ParaCodex
+
+                                                              16113
+Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 16113–16136
+                                 July 2-7, 2026 ©2026 Association for Computational Linguistics
+
+===== PDF p.2 =====
+systems that do not stop at text-only code genera-       that mirrors the iterative process of an HPC en-
+tion, but iteratively compile, test, and profile their   gineer (Mondesire et al., 2025). To prevent pre-
+outputs on target hardware, using structured inter-      mature parallelization of unsafe loops (a classi-
+mediate artifacts (e.g., hotspot analyses and data       cal tool weakness), PARAC ODEX enforces Stage 1
+plans) and environment feedback as first-class sig-      (Analysis). To avoid data thrashing, Stage 2 (Data
+nals for refinement (Gottschlich et al., 2018).          Planning) explicitly structures memory residency
+   Classical automation tools like polyhedral com-       before code generation. Finally, to catch perfor-
+pilers (Bondhugula et al., 2008; Doerfert et al.,        mance regressions that static analysis misses, Stage
+2015) reduce manual effort but struggle with non-        3 (Profiling) closes the loop with ground-truth mea-
+affine loops and ambiguous pointer aliasing, often       surement (Peng et al., 2024). Unlike approaches
+requiring expert intervention to inject pragmas or       that stop once tests pass, PARAC ODEX explicitly
+resolve dependencies (Harel et al., 2020; Mosseri        optimizes for performance via feedback.
+et al., 2020). Conversely, while Large Language             We      evaluate      PARAC ODEX        on     36
+Models (LLMs) can generate plausible OpenMP              serial→OpenMP tasks drawn from HeCBench (Jin
+directives, they lack the system-level awareness to      and Vetter, 2023) (23), Rodinia (Che et al., 2009)
+manage data movement efficiently (Nichols et al.,        (7), and NAS (Bailey et al., 1991; Fridman et al.,
+2024b; Bitan et al., 2025; Dearing et al., 2025).        2025) (6). Together, these widely used suites
+A common failure mode is “thrashing,” where an           span micro-kernels through end-to-end scientific
+LLM correctly parallelizes a loop but fails to map       benchmarks, with provided implementations
+a helper function or hoist data allocations, causing     ranging from optimized to highly tuned. Using
+the runtime to implicitly copy arrays back and forth     GPU time measured by NVIDIA Nsight Systems
+between CPU and GPU at every iteration, yielding         (kernel execution plus transfers), PARAC ODEX
+code that is functionally correct but much slower        achieves valid GPU offload on 31/36 kernels (86%;
+than serial execution.                                   5 kernels excluded, detailed in §4.2), and improves
+   Unlike text-only code generation, autonomous          GPU time over the provided OpenMP implemen-
+coding agents (Li et al., 2025) integrate code           tations in 27/31 cases (87%), a count that holds
+models with tool use in terminals or IDEs, en-           independently on both the A100 and RTX 4060,
+abling iterative editing, compilation, and testing       with geometric-mean GPU-time speedups of 3.1×
+directly on the target machine (Yang et al., 2024).      on HeCBench, 1.5× on Rodinia, and 2.95× on the
+This shifts the setting from offline code com-           highly tuned NAS suite (A100). As a separate gen-
+pletion to in-situ, feedback-driven development.         eralization study, we evaluate CUDA→OpenMP
+We focus on OpenMP GPU offloading (Deakin                migration on four ParEval (Nichols et al., 2024a)
+and Mattson, 2023) because it addresses the “ul-         kernels, where PARAC ODEX maintains high
+timate goal” of modern parallel computing with           compilation and validation rates under both a fixed
+one of the most used parallel APIs (Valero Lara          build environment (code-only) and an end-to-end
+et al., 2025; Kadosh et al., 2023a): exploiting          setting where the agent must also construct the
+the massive performance advantage of GPUs over           build flow (overall) (§4).
+CPUs, which has become ubiquitous over the last
+                                                         Key Question. To what extent can a tool-using
+decade (TOP500, 2025). By targeting OpenMP
+                                                         autonomous coding agent translate and migrate
+offloading, we tackle a triple challenge: (i) main-
+                                                         parallel code under automated build-and-test val-
+taining portability across heterogeneous systems,
+                                                         idation, and use profiling feedback to narrow the
+(ii) preserving CPU fallback (since OpenMP of-
+                                                         performance gap to reference implementations?
+floads are optional), and (iii) raising the bar for
+agentic reasoning, requiring the agent to correctly      Research Questions. To explore this space we
+manage device memory and kernel launches, not            pose four guiding questions:
+just thread-level parallelism. We evaluate two in-       1. RQ1 – Baseline feasibility: How effectively
+put settings: translation (serial→OpenMP) and               can contemporary agentic LLMs translate serial
+migration (CUDA→OpenMP), among the most                     code into correct OpenMP GPU offload without
+important tasks in the field (Chen et al., 2024a).          profiling-guided iteration?
+   These limitations motivate the design of              2. RQ2 – Benefit of specialization: Does a staged,
+PARAC ODEX, a Codex-based agentic work-                     expert-seeded workflow with structured inter-
+flow (Horikawa et al., 2025; Vangala et al., 2025)          mediate artifacts improve robustness and per-
+                                                    16114
+
+===== PDF p.3 =====
+formance?                                            work analyzed source-to-source OpenMP compil-
+3. RQ3 – Performance attainment: To what                ers, highlighting pitfalls and variability (Harel et al.,
+   extent can profiling-in-the-loop refinement ap-      2020; Mosseri et al., 2020). Recent efforts apply
+   proach or exceed the provided OpenMP im-             learned cost models, RL, and autotuning to opti-
+   plementations across diverse benchmarks, and         mization (Chen et al., 2019; Ahn et al., 2019; Wu
+   where do regressions persist?                        et al., 2023; Ding et al., 2023; Merouani et al.,
+4. RQ4 – Task generalization: Does the same             2025), relying on iterative search and measurement.
+   workflow generalize from serial→OpenMP               ML techniques predict parallelization opportunities
+   translation to CUDA→OpenMP migration?                and suggest OpenMP directives (Maramzin et al.,
+                                                        2019; Chen et al., 2023; Harel et al., 2023; Kadosh
+Contributions. We make three contributions:             et al., 2024a; Harel et al., 2025), but stop short of
+1. We systematize HPC engineering practice into a       generating complete code.
+   reusable agentic pattern: from hotspot analysis
+   via a loop taxonomy through data residency and       LLMs for Parallel Code. Domain-focused
+   transfer strategy selection to profile-guided tun-   LLMs (HPC-Coder, OMPGPT, MonoCoder) spe-
+   ing, connected via Makefile-based correctness        cialize in parallel kernels (Nichols et al., 2024b;
+   gates (RQ2, RQ3).                                    Chen et al., 2024b; Kadosh et al., 2024b; Schnei-
+2. We design a comprehensive evaluation proto-          der et al., 2024; Kadosh et al., 2023b; Chen et al.,
+   col for serial→OpenMP agentic parallelization        2024a). Broader models (CodeGeeX, Meta’s LLM
+   across HeCBench, Rodinia, and NAS under a            Compiler) extend coverage (Zheng et al., 2024;
+   unified build-and-test harness and a zero-shot       Cummins et al., 2024). Transformer advisors (OM-
+   Codex baseline, quantifying both robustness and      Pify, MPI-rical) provide data-driven guidance (Ka-
+   GPU-time performance relative to expert imple-       dosh et al., 2023c; Schneider et al., 2023, 2024).
+   mentations (RQ1, RQ3).                               However, these typically deliver single-shot out-
+3. We       demonstrate       generalization       to   puts without iterative feedback.
+   CUDA→OpenMP translation on ParEval,
+                                                        Autonomous Coding Agents. Recent work de-
+   and introduce bypass-detection analysis that
+                                                        scribes autonomous coding agents: systems pair-
+   surfaces pseudo-offload cases and suggests
+                                                        ing code models with developer tools in iterative
+   harness design strategies to enforce device-side
+                                                        loops (Li et al., 2025). Examples include CLI
+   work (RQ4).
+                                                        assistants and IDE integrations (GitHub Copilot,
+                                                        OpenAI Codex, Cursor). This is relevant for par-
+2   Related Work
+                                                        allel code, where correctness requires build-and-
+We organize prior work from static and learned          test harnesses and performance depends on con-
+parallelization methods, through LLM-based paral-       crete hardware. Codex has been evaluated on
+lel code generation and translation, to autonomous      code-generation benchmarks with strong perfor-
+coding agents and feedback-driven self-refinement.      mance.2 We build PARAC ODEX on Codex. Tool
+We distinguish PARAC ODEX from prior work               access alone is insufficient: without domain struc-
+along three axes: (1) Compile/test repair (UniPar,      ture, workflows can be brittle. Prior pipelines
+LASSI) fixes bugs but ignores speed; (2) Perfor-        emphasize compilation repair and correctness (Bi-
+mance feedback (PerfCodeGen, STOP) optimizes            tan et al., 2025; Dearing et al., 2025; Chen et al.,
+runtime but lacks rigorous correctness gates; and       2025), whereas PARAC ODEX operationalizes an
+(3) Artifact-driven planning – absent in prior agents   HPC-engineer with explicit artifacts, correctness
+– externalizes reasoning before coding. PARA -          gates, and profiling-guided optimization.
+C ODEX is, to our knowledge, the first system to
+                                                        LLM-Based Translation Pipelines. Frame-
+integrate all three axes.
+                                                        works such as UniPar and LASSI study
+Compilers and Learned Parallelization. Com-             LLMs for translating parallel code, includ-
+piler research explored automatic loop transfor-        ing serial→OpenMP (Bitan et al., 2025; Dearing
+mations via dependence analysis and the poly-           et al., 2025; Chen et al., 2025). They implement
+hedral model (Bondhugula et al., 2008; Doerfert         compile/test-driven repair: compiler errors and
+et al., 2015). Such tools excel at affine loop nests       2
+                                                           https://openai.com/index/
+but typically require expert intervention. Survey       introducing-gpt-5-2-codex/
+
+                                                   16115
+
+===== PDF p.4 =====
+test failures trigger iterative fixes, improving       offload in a single pass. Both baseline and PARA -
+compilation and correctness. However, they lack        C ODEX are evaluated under the same build and cor-
+(i) execution/performance feedback via profiling to    rectness harness; PARAC ODEX additionally uses
+guide optimization, and (ii) artifact-driven struc-    staged prompts and profiling-guided refinement.
+tured plans that externalize reasoning before code     This setup keeps the underlying model fixed and
+modification. Complementary work quantifies            isolates the impact of workflow scaffolding. The
+LLM capability on HPC kernel generation (Godoy         baseline is explained in more detail in App. B.6.
+et al., 2023; Valero-Lara et al., 2023; Cui et al.,
+2025; Bolet et al., 2025).                             3.2   Pipeline Stages
+                                                       PARAC ODEX executes a three-stage workflow as
+Self-Refinement and Feedback-Driven Opti-
+                                                       depicted in Figure 1. (See App. A for details on
+mization. Agentic research explores deliber-
+                                                       suite-specific adaptations.)
+ate search and refinement for program synthe-
+                                                       1. Analysis: Loop classification and data charac-
+sis (Yao et al., 2023; Shinn et al., 2023; Sing-
+                                                          terization. Inspects input code to identify and
+hal et al., 2025; Madaan et al., 2023; Jimenez
+                                                          rank candidate loops by computational weight,
+et al., 2024). PerfCodeGen demonstrates execution-
+                                                          defined as the estimated operation count (it-
+driven refinement by feeding performance metrics
+                                                          erations × ops/iteration) to distinguish O(N )
+back (Peng et al., 2024), and Self-Taught Opti-
+                                                          critical paths from setup code. It generates
+mizer (STOP) scaffolds LLMs to recursively op-
+                                                          analysis.md, which classifies loops using a
+timize programs (Zelikman et al., 2023). These
+                                                          taxonomy (Types A–G) and records data proper-
+systems show the value of execution feedback, but
+                                                          ties, dependencies, and hazards (App. B). Ratio-
+do not enforce correctness gating at each stage or
+                                                          nale: Externalizing reasoning before code modi-
+emit structured intermediate artifacts (e.g., data
+                                                          fication reduces chances of premature transfor-
+plans, optimization plans) that anchor reasoning
+                                                          mation of loops with hidden hazards (e.g., re-
+to domain constraints. PARAC ODEX combines all
+                                                          ductions, recurrences) that would silently break
+three mechanisms – compile/test repair, profiling
+                                                          correctness.
+feedback, and artifact-driven planning – within a
+                                                       2. GPU offloading + data strategy: Correctness
+unified HPC-engineering workflow.
+                                                          with explicit data plan. Before inserting prag-
+3       PARAC ODEX Agent Overview                         mas, the agent selects a data-management strat-
+                                                          egy based on the loop taxonomy: (A) Scoped
+PARAC ODEX is a guided agentic workflow in                Regions use explicit target data directives
+which the model iteratively uses standard devel-          for standard kernels to minimize transfers; (B)
+opment tools. The agent first analyzes the input          Asynchronous Pipelines use nowait for over-
+program to identify performance-critical loops or         lapping computation and communication; (C)
+kernels, then generates an OpenMP GPU version.            Global Device State allocates persistent de-
+It compiles and executes the code against the serial      vice memory (omp_target_alloc) for it-
+reference, using compilation errors and numerical         erative solvers to avoid repeated mapping. It
+mismatches as structured feedback to drive targeted       writes data_plan.md specifying array resi-
+fixes until correctness is achieved.                      dency and function offload status, prioritizing
+   The workflow then shifts to performance tuning.        CRITICAL loops (those with high computational
+The agent profiles execution with a profiler and          weight) for offload. This explicit planning step
+applies focused optimizations to further improve          reduces the chances of common “thrashing” pit-
+performance. In combination, correctness-driven           falls, where unmapped helper functions trigger
+repair and profile-guided tuning enable robust au-        implicit host-device transfers at every iteration.
+tomated optimization.                                  3. Performance tuning: Profile-guided optimiza-
+                                                          tion. After functional validation, the agent pro-
+3.1 Baseline Comparison System.
+                                                          files the program with NVIDIA Nsight Sys-
+Throughout this paper, we use the term baseline to        tems, extracting kernel times, transfer vol-
+refer to a zero-shot Codex CLI agent 3 that directly      umes, and API overheads. It generates an
+translates the input program into OpenMP GPU              optimization_plan.md that ranks bottle-
+    3
+   https://platform.openai.com/docs/                      necks and prescribes targeted fixes (e.g., fusing
+models/gpt-5.1-codex                                      adjacent kernels to reduce launch latency, col-
+                                                  16116
+
+===== PDF p.5 =====
+lapsing loops to increase occupancy, hoisting             retaining only those that improve performance.
+   transfers out of iterative loops). A strict revert-
+   on-regression policy is enforced: if GPU time         4     Experimental Evaluation
+   worsens by more than 10%, the change is auto-
+                                                         4.1    Experimental Setup
+   matically rolled back.
+4. Correctness gating. Between each stage, a             Environment and Protocol. We evaluate PARA -
+   correctness-gate agent is invoked. The agent in-      C ODEX on two NVIDIA GPU platforms: an
+   struments the code with gate.h – a lightweight        A100 (40GB, compute capability 8.0) and an
+   header that computes checksums and norms at           RTX 4060 Laptop GPU (8GB, compute capability
+   key program points – to localize the divergence       8.9) with NVIDIA HPC SDK 25.7 (nvc++). We
+   and drive the repairs. It then compiles and runs      report GPU time measured via NVIDIA Nsight
+   the candidate code against the input serial code      Systems, computed by summing CUDA kernel
+   using a manually-written Makefile-based har-          time (cuda_gpu_kern_sum) and device trans-
+   ness. Then, it corrects the code if the valida-       fer time (cuda_gpu_mem_time_sum), exclud-
+   tion fails (via exit code or numerical mismatch).     ing CUDA API and runtime overhead. All reported
+   (App. B.3).                                           results are averaged over 10 runs and reported as
+   For space purposes, a concrete example showing        mean ± standard deviation, see App. H. For NAS,
+the end-to-end workflow of hotspot analysis, data        we used Class C inputs on the RTX 4060 and Class
+plan, and optimization is kept in App. B.5.              D inputs on the A100, except for the FT kernel,
+                                                         which is memory-bound and therefore required
+3.3 Tooling Integration                                  Class C on both GPUs. For HeCBench and Ro-
+The pipeline uses external tools accessible to the       dinia, input sizes were scaled so that the slowest
+agent. Compiler diagnostics from NVIDIA HPC              variant runs for approximately 10–20 seconds, im-
+SDK surface issues; Makefile-based harnesses val-        proving measurement stability and making GPU-
+idate correctness; NVIDIA Nsight Systems pro-            side differences more meaningful.
+vides performance diagnosis; system metadata is
+read from system_info.txt. The design com-               GPU Time Metric. We define GPU time as the
+bines LLM-driven generation with deterministic           sum of CUDA kernel execution time and device
+tool feedback for iterative repair and tuning.           memory transfer time from NVIDIA Nsight Sys-
+                                                         tems, excluding CUDA API overhead. This cap-
+3.4 Prompt Engineering Strategy                          tures computational work and data movement on
+PARAC ODEX uses multi-stage prompting that               the device. The implications are that (i) GPU time
+structures the model’s reasoning across analysis,        represents device-side performance when offload
+translation, and optimization. Each stage is driven      is substantial; (ii) it can diverge from wall-clock
+by a specific template that constrains the output        time when API/host overhead dominates; (iii) CPU-
+space while retaining domain flexibility.                fallback cases yield misleadingly low GPU times as
+1. Analysis Phase. The model produces a struc-           detailed in §4.2; (iv) if there are no kernel launches
+   tured hotspot analysis (App. B.1) that character-     at all, the profiler automatically detects it.
+   izes loops using a taxonomy (Types A–G) cap-          Model Selection and Escalation. We use
+   turing parallelization constraints. This prompt       gpt-5.1-codex-mini as the primary model
+   converts qualitative reasoning into a discrete in-    for all kernels in both PARAC ODEX and the
+   termediate representation, revealing any hazards      baseline.   For the NAS FT kernel, which
+   before transformation.                                failed with the base model, we escalated to
+2. Translation Phase. Using the structured anal-         gpt-5.1-codex-max for both PARAC ODEX
+   ysis, the prompt maps each loop class to              and the baseline. In all experiments, the agent
+   a restricted set of valid OpenMP constructs           operated without internet access and did not use
+   (App. B.2), minimizing mapping errors like omit-      web search at any stage.
+   ted reductions.
+3. Optimization Phase. This stage implements             Benchmarks       and     Baselines. We         use
+   measurement-guided search (App. B.4). The             ParEval (Nichols et al., 2024a), HeCBench (Jin
+   prompt pairs Nsight Systems profiles with opti-       and Vetter, 2023), Rodinia (Che et al., 2009), and
+   mization levers to apply targeted modifications,      NAS (Bailey et al., 1991; Fridman et al., 2025).
+                                                    16117
+
+===== PDF p.6 =====
+Non-agentic                  Top-down             Baseline ParaCodex                               Non-agentic               Top-down           Baseline ParaCodex
+
+             nanoXOR     1 0.98 0.92 0.92 0.9        1 0.98 0.96 0.68 0.22         1     1                      nanoXOR     0 0.72 0.84 0.2 0.6      0 0.68 0.88 0.2 0.2        0.6   1
+Code-only
+
+
+            microXORH    0   1 0.56 0.88 0.4        0.24 0.24 0.12 0.36 0.36      0.8    1          1       microXORH       0 0.32 0.48 0.76 0.4    0.12 0.12 0.12 0.24 0.12    0.8   1       1
+             microXOR 0.01 0.3 0.52 0.76 0.46        0 0.08 0.2 0.3 0              1     1                      microXOR 0.06 0.26 0.48 0.36 0.38    0    0 0.2 0.12 0           1    1
+
+
+
+
+                                                                                                                                                                                                  passed
+                                                                                                        build
+              XSBench    0   0    0   0    0         0    0    0    0    0         1     1          0.5          XSBench    0    0   0    0   0      0    0    0    0    0       1    1       0.5
+
+
+             nanoXOR 0.58 0.46 0.76 0 0.64           0 0.02 0.8 0.02 0.04         0.6    1          0           nanoXOR     0 0.42 0.68 0 0.44       0 0.02 0.72 0 0.04         0.6   1       0
+Overall
+
+
+
+
+            microXORH    0 0.08 0.32 0 0.32          0    0 0.12 0 0.12           0.20   0.4                microXORH       0 0.08 0.24 0 0.32       0    0 0.12 0 0.04         0.2   0.4
+             microXOR    0 0.1 0.44 0 0.24           0 0.04 0.16 0.04 0           0.6    1                      microXOR    0 0.1 0.4 0.04 0.2       0    0 0.16 0       0      0.6   1
+              XSBench    0   0    0 0.04 0.24        0    0    0    0    0         1     0.8                     XSBench    0    0   0    0   0      0    0    0    0    0      0.8   0.8
+                             t-4 1.5
+
+                               o4 ini
+
+                                m i
+                               en .3
+                                         b
+
+                             t-4 1.5
+
+                               o4 ini
+
+                                m i
+                               en .3
+                                         b
+
+
+
+                                          i
+
+                                          i
+
+
+
+
+                                                                                                                               t-4 1.5
+
+                                                                                                                                 o4 ini
+
+                                                                                                                                  m i
+                                                                                                                                 en .3
+                                                                                                                                         b
+
+                                                                                                                               t-4 .5
+
+                                                                                                                                 o4 ini
+
+                                                                                                                                  m i
+                                                                                                                                 en .3
+                                                                                                                                         b
+
+
+
+                                                                                                                                          i
+
+                                                                                                                                          i
+                             lla in
+
+
+
+
+                             lla min
+
+
+
+
+                                       in
+
+                                       in
+
+
+
+
+                                                                                                                               lla in
+
+
+
+
+                                                                                                                               lla min
+
+
+
+
+                                                                                                                                       in
+
+                                                                                                                                       in
+                                      32
+
+
+
+
+                                      32
+
+
+
+
+                                                                                                                                      32
+
+
+
+
+                                                                                                                                      32
+                           qw a-3
+
+
+
+
+                           qw a-3
+
+
+
+
+                                                                                                                             qw a-3
+
+
+
+
+                                                                                                                                       1
+
+
+
+
+                                                                                                                             qw a-3
+                                     m
+                                   -m
+
+
+
+
+                                     m
+
+
+
+
+                                     m
+
+                                   -m
+
+
+
+
+                                                                                                                                     m
+                                                                                                                                    -m
+
+
+
+
+                                                                                                                                     m
+
+
+
+
+                                                                                                                                     m
+
+                                                                                                                                    -m
+                          gp ini-
+
+
+
+
+                          gp i-
+
+
+
+
+                                                                                                                            gp ini-
+
+
+
+
+                                                                                                                            gp ini-
+                                   2-
+
+
+
+
+                                   2-
+
+
+
+
+                                                                                                                                   2-
+
+
+
+
+                                                                                                                                   2-
+                                o-
+
+
+
+
+                                o-
+
+                                   -
+
+
+
+
+                                x-
+
+
+
+
+                                                                                                                                  o-
+
+
+
+
+                                                                                                                                  o-
+
+                                                                                                                                    -
+
+
+
+
+                                                                                                                                  x-
+                                   n
+
+
+
+
+                               ex
+
+
+
+
+                                                                                                                                 ex
+                                 i
+                              m
+
+
+
+
+                              m
+
+
+
+
+                                                                                                                                m
+
+
+
+
+                                                                                                                                m
+                              de
+
+
+
+
+                                                                                                                                de
+                            od
+
+
+
+
+                                                                                                                              od
+                           ge
+
+
+
+
+                           ge
+
+
+
+
+                                                                                                                             ge
+
+
+
+
+                                                                                                                             ge
+                            o
+
+
+
+
+                                                                                                                              o
+                          -c
+
+                          -c
+
+
+
+
+                                                                                                                            -c
+
+                                                                                                                           -c
+                       .1
+
+                       .1
+
+
+
+
+                                                                                                                         .1
+
+                                                                                                                         .1
+                   t-5
+
+                   t-5
+
+
+
+
+                                                                                                                      t-5
+
+                                                                                                                     t-5
+                gp
+
+                gp
+
+
+
+
+                                                                                                                   gp
+
+                                                                                                                   gp
+Figure 2: CUDA→OpenMP translation quality on ParEval across scoring regimes. Compilation (blue) and
+validation (green) success rates (higher is better) are shown for both the baseline Codex model and PARAC ODEX
+under the ParEval protocol. Kernels are scored under (i) a fixed build environment (code-only) and (ii) a setting
+where the system must also construct the build flow (overall). The heatmap layout mirrors the original ParEval
+presentation. PARAC ODEX matches or slightly exceeds the baseline, indicating that the agentic workflow generalizes
+to cross-API translation.
+
+    Suite                             Attempted                 Valid           Improved                    speedup relative to reference as Tref /Tpc , where
+    HeCBench                                   23                  21          19/21 (90%)                  values greater than one indicate lower execution
+    Rodinia                                     7                   6           5/6 (83%)                   time.
+    NAS                                         6                   4           3/4 (75%)
+    ParEval                                     4                   4                –
+                                                                                                            4.2         Success Rate and Bypass Detection
+    serial→OpenMP                              36                  31          27/31 (87%)
+                                                                                                            Table 1 provides a comprehensive accounting
+Table 1: Result accounting across suites. Attempted:                                                        of kernel counts, exclusions, and success rates.
+kernels tried; Valid GPU: compile + pass correctness                                                        We evaluate 36 serial→OpenMP translation tasks
+with substantial device execution; Improved: PARA -                                                         (HeCBench: 23, Rodinia: 7, NAS: 6). We ex-
+C ODEX improves GPU time among valid GPU kernels.                                                           clude 5 kernels from the final performance set: two
+Per-suite counts reflect A100 measurements; the aggre-                                                      from NAS (BT, LU) due to multi-file complexity;
+gate 27/31 total holds independently on both the A100                                                       one from Rodinia (srad) due to CPU-only refer-
+and RTX 4060 (on RTX 4060: Rodinia 4/6, NAS 4/4).
+                                                                                                            ence implementation; and two from HeCBench
+ParEval reports CUDA→OpenMP separately. Detailed
+per-kernel results in App. H.                                                                               (pathfinder, particlefilter) due to GPU-offload by-
+                                                                                                            pass (see App. D.2). This leaves 31 valid GPU-
+                                                                                                            offload kernels.
+                                                                                                               Bypass was observed in 2/23 HeCBench kernels
+From HeCBench, our evaluation considers 23
+                                                                                                            for PARAC ODEX, where implementations compile
+kernels that have been previously benchmarked
+                                                                                                            and pass correctness checks but execute the pri-
+in prior work. These consist of the 10 kernels
+                                                                                                            mary computation on the host CPU. We exclude
+analyzed in LASSI (Dearing et al., 2025) together
+                                                                                                            bypass kernels from GPU-time statistics and pro-
+with 13 kernels from the ParaTrans dataset
+                                                                                                            vide detailed analysis in App. D.2.
+utilized in UniPar (Bitan et al., 2025). Reference
+implementations: For all suites, the reference                                                              Token Budget and Reproducibility. PARA -
+code is the provided OpenMP GPU-offload im-                                                                 C ODEX averages 837,701 tokens per kernel (1.11×
+plementation from each benchmark; we compare                                                                baseline). This cost reflects a deliberate prioritiza-
+PARAC ODEX’s generated OpenMP against those                                                                 tion of reproducibility over efficiency. Rather than
+OpenMP baselines. Baseline for PARAC ODEX:                                                                  brute-force sampling, we operate the agent in a
+We compare PARAC ODEX against a zero-shot                                                                   non-interactive automation mode where full build
+Codex baseline that receives the input code and                                                             logs and profiler traces are fed back to verify ev-
+a single prompt, as further detailed in §3.1. Both                                                          ery step deterministically. This ensures the entire
+systems use the same constraints: identical build                                                           engineering loop is auditable and replayable with-
+harness, correctness checks, profiling tools, and                                                           out human intervention. To further support repro-
+GPU/compiler environment. The key difference                                                                ducibility, almost all experiments were run using
+is the workflow. For each benchmark, we report                                                              gpt-5.1-codex-mini with the lowest reason-
+                                                                                               16118
+
+===== PDF p.7 =====
+Reference               PARAC ODEX                     Baseline
+                                                                            HeCBench – RTX 4060
+                  1000s
+  Time (log10 )
+
+
+
+                    10s
+                  100ms
+                   1ms
+
+
+
+
+                                                     py
+                            e
+
+
+
+
+                                                      g.
+
+
+
+
+                                                      ic
+
+
+
+
+                                                                                        bi
+
+
+                                                                                                 h
+
+                                                                                                          ut
+
+
+
+
+                                                                                                                                              ol
+
+
+
+
+                                                                                                                                                                                  n
+
+
+                                                                                                                                                                                  d
+                                                       t
+
+                                                       h
+
+                                                     el
+
+
+                                                     D
+
+
+
+
+                                                                             at
+
+
+
+
+                                                                                                                          te
+
+
+                                                                                                                           z
+
+
+                                                                                                                           h
+
+
+
+
+                                                                                                                                               s
+
+                                                                                                                                             ev
+
+                                                                                                                                                                              1D
+                                                    os
+                          ac
+
+
+
+
+                                                                                                                                            es
+                                                                                               og
+
+
+
+
+                                                                                                                                                                               te
+
+
+                                                                                                                                                                               ra
+                                                                                                                        ic
+                                                    rc
+
+
+
+
+                                                                                                                       nc
+                                                   es
+                                                   in
+
+
+
+
+                                                                                     co
+
+
+
+
+                                                                                                        yo
+
+
+
+
+                                                                                                                                           po
+                                                  he
+
+
+                                                  -1
+
+
+
+
+                                                                           he
+
+
+
+
+                                                                                                                       ta
+                                                 tro
+
+
+
+
+                                                                                                                                          -d
+
+
+
+
+                                                                                                                                                                           ch
+                                                 -c
+
+
+
+
+                                                                                                                     ew
+
+
+
+
+                                                                                                                                                                           og
+                                                                                                                                         cc
+
+
+
+
+                                                                                                                                                                           il-
+                                                ea
+
+
+
+
+                                                                                             ke
+                                               dd
+
+
+
+
+                                                                                                               -ro
+
+
+
+
+                                                                                                                    be
+                                               od
+                                               nv
+
+
+
+
+                                                                                  ja
+                                              rw
+
+
+
+
+                                                                                                     la
+
+
+
+
+                                                                                                                                       std
+                                             en
+                                              ic
+
+
+
+
+                                                                                                                                                                       nu
+                                                                                                                                       -a
+
+
+
+
+                                                                                                                                                                        nc
+                                             bs
+
+
+
+
+                                                                                                                                                                        in
+                                                                                                                  al
+
+                                                                                                                  ix
+                                            be
+
+
+
+
+                                            ge
+                                            co
+
+
+
+
+                                                                                                           rix
+                              om
+
+
+
+
+                                           lo
+
+
+
+
+                                                                                                                                          om
+
+
+
+
+                                                                                                                                                                      w
+                                                                                                                        h
+
+
+
+
+                                                                                                                                                                    ste
+
+
+                                                                                                                                                                     ge
+                                                                                                                m
+                                        em
+                                         co
+
+
+
+
+                                                                                                                     ic
+                                                                                                         at
+                           at
+
+
+
+
+                                                                                                                                                                  n-
+                                                                                                                                         nd
+                                                                                                                 m
+                                                                                                        m
+                                      e-
+
+
+
+
+                                                                                                                                                                va
+                                                                                                                                       ra
+                                    ns
+                                 de
+
+
+
+
+                                                                                  HeCBench – A100
+                  1000s
+  Time (log10 )
+
+
+
+
+                    10s
+                  100ms
+                   1ms
+                                                                     py
+                             e
+
+
+
+
+                                                                     g.
+
+
+
+
+                                                                      ic
+
+
+
+
+                                                                                      bi
+
+
+                                                                                                 h
+
+                                                                                                                    ut
+
+
+
+
+                                                                                                                                         ol
+
+
+
+
+                                                                                                                                                                           n
+
+
+                                                                                                                                                                            d
+                                     t
+
+                                           h
+
+                                                                     el
+
+
+                                                                     D
+
+
+
+
+                                                                             at
+
+
+
+
+                                                                                                                   te
+
+
+                                                                                                                    z
+
+
+                                                                                                                    h
+
+
+
+
+                                                                                                                                                    s
+
+                                                                                                                                                                           v
+
+                                                                                                                                                                          D
+                                   os
+                          ac
+
+
+
+
+                                                                                                                                                  es
+                                                                                               og
+
+
+
+
+                                                                                                                                                                         te
+
+
+                                                                                                                                                                         ra
+                                                                                                                  ic
+
+
+
+
+                                                                                                                                                                        de
+                                           rc
+
+
+
+
+                                                                                                                 nc
+                                                                   es
+                                                                   in
+
+
+
+
+                                                                                    co
+
+
+
+
+                                                                                                                yo
+
+
+
+
+                                                                                                                                       po
+                                                 he
+
+
+                                                                  -1
+
+
+
+
+                                                                           he
+
+
+
+
+                                                                                                                 ta
+
+
+
+
+                                                                                                                                                                       l-1
+                                                                 tro
+
+
+
+
+                                                                                                                                                                     ch
+                                 -c
+
+
+
+
+                                                                                                             lew
+
+
+
+
+                                                                                                                                                                     og
+                                                                                                                                                cc
+                                         ea
+
+
+
+
+                                                                                             ke
+
+
+
+
+                                                                                                                                                            -
+                                                                dd
+
+
+
+
+                                                                                                             -ro
+
+
+
+
+                                                                                                              be
+                                                               od
+                                                               nv
+
+
+
+
+                                                                                  ja
+                                                rw
+
+
+
+
+                                                                                                              la
+
+
+
+
+                                                                                                                                                        std
+
+
+                                                                                                                                                                     i
+                                                              en
+                              ic
+
+
+
+
+                                                                                                                                                                 nu
+                                                                                                                                           -a
+
+
+
+
+                                                                                                                                                                  nc
+                                      bs
+
+
+
+
+                                                                                                                                                                  in
+                                                                                                           ix
+                                                             be
+
+
+
+
+                                                            ge
+                                                            co
+
+
+
+
+                                                                                                          ha
+                                                                                                         rix
+                            om
+
+
+
+
+                                             lo
+
+
+
+
+                                                                                                                                          m
+
+
+
+
+                                                                                                                                                                w
+                                                                                                                                                                ste
+
+
+                                                                                                                                                               ge
+                                                                                                        m
+                                                          em
+                                           co
+
+
+
+
+                                                                                                       ic
+
+
+
+
+                                                                                                                                            o
+                                                                                                      at
+                           at
+
+
+
+
+                                                                                                                                                            n-
+                                                                                                                                         nd
+                                                                                                     m
+                                                                                                        m
+                                                       e-
+
+
+
+
+                                                                                                                                                          va
+                                                                                                                                       ra
+                                                    ns
+                                                  de
+
+
+
+
+Figure 3: GPU-time performance of PARAC ODEX and baseline Codex on HeCBench. Results are shown for
+both the A100 (bottom) and RTX 4060 (top). GPU time (log scale; lower is better) is reported relative to the
+HeCBench references. Each kernel reports baseline Codex and PARAC ODEX performance; missing baseline bars
+indicate failures to produce a correct/compilable implementation. Both systems generally outperform the references,
+while PARAC ODEX achieves higher geometric-mean and median gains across the suite.
+
+
+ing effort, ensuring that independent researchers                                            tial: HeCBench shows 3.1× (A100) and 3.6×
+can replicate the outputs under the same configu-                                            (RTX 4060) geometric-mean GPU-time speedup
+ration. Notably, the zero-shot baseline consumes                                             (19/21 improved), while Rodinia achieves 1.5×
+comparable tokens (755,417) under the same har-                                              (A100) and 1.1× (RTX 4060) geometric-mean
+ness, confirming that the cost stems from the ro-                                            speedup. Further comparison with related literature
+bust tool-verified environment – which accumu-                                               is presented in App. F.1 and F.2.
+lates context – rather than the multi-stage logic                                               To assess whether PARAC ODEX’s gains transfer
+itself (App. D.1).                                                                           across architectures, we evaluate the final imple-
+                                                                                             mentations on both an RTX 4060 and an NVIDIA
+4.3 Performance Analysis of PARAC ODEX                                                       A100. Across benchmark suites, PARAC ODEX pre-
+Benchmark Suite Evaluation. We evaluate                                                      serves its improvements relative to the reference
+PARAC ODEX across four diverse benchmark                                                     implementations on both systems, indicating that
+suites: ParEval (CUDA→OpenMP translation                                                     the generated optimizations are not narrowly tied
+fidelity (App. C details the Serial→OpenMP                                                   to a single device class.
+to CUDA→OpenMP migration), Figure 2),                                                           On NAS (A100), PARAC ODEX achieves parity
+HeCBench (23 diverse micro-kernels, Figure 3),                                               with the highly optimized reference on CG (1.00×)
+Rodinia (application-level benchmarks, Figure 4-                                             and FT (1.00×), delivers a large speedup on EP
+left), and NAS (expert-optimized codes, Figure 4-                                            (29.7×), while MG regresses modestly (0.87× on
+right). PARAC ODEX demonstrates strong trans-                                                A100, 1.41× on RTX 4060). Reporting mean
+lation reliability: ParEval shows perfect code-                                              ± standard deviation over 10 runs helps distin-
+only validation (4/4 kernels at 100%) with strong                                            guish genuine regressions from run-to-run noise;
+overall-regime performance (2/4 at 1.0, 1/4 at                                               for several NAS benchmarks, the gap between
+0.8); HeCBench achieves 100% compilation suc-                                                PARAC ODEX and the reference is small relative
+cess (21/21 valid kernels after excluding 2 by-                                              to the observed variance. The baseline exhibits
+pass cases). Performance gains are substan-                                                  lower robustness, failing to compile 2 HeCBench
+                                                                              16119
+
+===== PDF p.8 =====
+Reference   PARAC ODEX                    Baseline
+                                          Rodinia – RTX 4060                                                                        NAS – RTX 4060
+                100s                                                                                             1000s
+Time (log10 )
+
+
+
+
+                                                                                            Time (log10 )
+                                                                                                                   10s
+                   1s
+                                                                                                                100ms
+                10ms                                                                                              1ms
+                                          t                                                                                 CG        EP      FT     MG
+                           tre
+                              e
+                                      spo          nw    bfs    lud          rop
+                         b+        hot                                    kp
+                                                                      bac
+
+
+                                                  Rodinia – A100                                                                      NAS – A100
+                  100s                                                                                           1000s
+Time (log10 )
+
+
+
+
+                                                                                                Time (log10 )
+                    1s                                                                                             10s
+                 10ms                                                                                           100ms
+                100µs                                                                                             1ms
+                                              t                                                                              CG       EP      FT     MG
+                            tre
+                               e
+                                         spo        nw    bfs      lud         rop
+                          b+        hot                                      kp
+                                                                         bac
+
+Figure 4: Performance of PARAC ODEX and baseline on NAS and Rodinia reference implementations. GPU
+time for the OpenMP reference, PARAC ODEX, and baseline OpenMP translation across the RTX 4060 (top) and
+A100 (bottom) GPUs. Bars show mean execution time over 10 runs on a log scale; lower is better. Input sizes are
+scaled so that the slowest variant runs for 10–20 s, making device-level differences measurable.
+
+
+kernels (keogh, mixbench) on both GPUs and 1                                               4.5                  Behavioral Analysis: Structured
+NAS kernel (FT), achieving only 2.0× (HeCBench)                                                                 Reasoning Under Agentic Control
+and 0.30× (Rodinia) geometric-mean speedups                                                We further examine how PARAC ODEX shapes the
+on A100. Detailed per-suite results are provided                                           model’s reasoning during parallelization. Figure 6
+in App. E, and a code comparison for NAS MG                                                compares baseline and PARAC ODEX timelines for
+demonstrating 1.57× improvement over the base-                                             the NAS EP kernel. Under PARAC ODEX, traces
+line through profiling-driven kernel fusion are pro-                                       more often decompose the task into paralleliza-
+vided in App. G. Full benchmark results across                                             tion planning and performance-oriented refinement
+all kernels and both GPUs are provided in Ap-                                              (e.g., parallel region selection, data movement, syn-
+pendix H.                                                                                  chronization), whereas the baseline tends to emit
+                                                                                           code directly. The bottom-right panel shows similar
+                                                                                           behavior: for EP, most gains arise in Initial Transla-
+4.4 Robustness to Anonymization
+                                                                                           tion through correct offload and data strategy, while
+                                                                                           CG improves more gradually across both stages.
+To assess whether PARAC ODEX depends on mem-
+orized identifier patterns, we evaluate anonymized                                         5                Discussion
+variants of Rodinia and NAS, where all variable
+and function names are replaced with synthetic to-                                         We revisit our research questions:
+kens and function order is randomized. Figure 5                                            RQ1 (Feasibility): Contemporary agents demon-
+shows that performance is largely unchanged. On                                            strate strong capability for translating serial code to
+anonymized Rodinia, PARAC ODEX outperforms                                                 OpenMP GPU offload. The baseline produces cor-
+the baseline in one variant, and achieves compa-                                           rect and reasonably performant implementations.
+rable results on the other. On NAS, we evaluated                                           However, robustness degrades on more complex
+the staged workflow, which also remains effective:                                         benchmarks: the baseline fails on NAS FT, ex-
+Initial Translation (Stage 2: GPU offload + data                                           hibits lower compilation success rates overall, and
+plan) establishes strong baselines, and Targeted                                           produces less optimized code compared to PARA -
+Optimizations (Stage 3: profiling-driven tuning)                                           C ODEX in all suites. While one-pass generation is
+extract further gains (e.g., CG improves to 1.41×).                                        often sufficient for simpler kernels, complex sci-
+These results indicate that performance stems from                                         entific codebases with intricate data movement,
+structural reasoning and profiler feedback rather                                          multi-stage algorithms, and tight synchronization
+than lexical memorization.                                                                 constraints benefit substantially from structured,
+                                                                                     16120
+
+===== PDF p.9 =====
+Reference ParaCodex baseline                                                                            Ref.   Initial Trans. Targeted Opt.                   Base.
+                                           Anonymized Rodinia                                                                                       Anonymized NAS Class D
+                      1s
+Time (log10 )
+
+
+                                                                                                                                600
+
+
+
+
+                                                                                                                     Time (s)
+                10ms                                                                                                            400
+                                                                                                                                200
+                100µs                                                                                                            0
+                                        nw                                             lud                                                         CG                                   EP
+
+
+
+Figure 5: Performance breakdown and generalization (RTX 4060). (Left) Anonymized Rodinia GPU execution
+time (log scale) comparing Reference, PARAC ODEX, and Baseline on representative kernels. (Right) Anonymized
+NAS Class D performance showing the impact of PARAC ODEX’s staged refinement (Initial Translation vs. Targeted
+Optimizations) compared to Reference. Lower is better.
+
+                                                                                                          Thinking Step Sequence
+    Baseline
+  ParaCodex
+                                    0     10             20           30         40            50         60    70              80          90     100 110 120 130 140 150
+                                                              Baseline         ParaCodex                                                           Ref.        Initial Trans.   Targeted Opt.     Base.
+                                                Thinking Steps Categories                                                                                            NAS Class C
+                                          40
+                               40                        36
+                 Total Steps
+
+
+
+
+                                               27                                                    26                                     10
+                                                                                                                                 Time (s)
+
+                                                                                                           20
+                               20 15 16             13                            13            15
+                                                                                                                                             5
+                                                                                       9
+                                                                  4      3 4               5
+
+                             0 iles nup ode pt. eck llel fer ion ess                                                                         0
+                                                  O           a    s       t  s
+                            nv F /Clea rify C hine ax Ch y Par Tran eliza k As                                                                            CG                                 EP
+                      e
+                          E
+                        ad g Fi
+                                x    Ve Mac Synt entif Data arall lenec
+                     R B   u                        I d         P      t t
+                                                                    Bo
+
+Figure 6: Agent reasoning traces for the EP kernel (NAS), categorized into nine step types and compared
+between the zero-shot Codex baseline and PARAC ODEX. The per-step timeline (top) and the total number of
+steps per category (bottom left) show how the staged workflow shifts attention toward task-relevant analysis rather
+than surface-level output. Bottom right compares staged refinement in PARAC ODEX on EP and CG (NAS Class C,
+RTX 4060; lower is better).
+
+iterative refinement.                                                                                           where performance-driven optimization violates
+RQ2 (Specialization): Expert-seeded workflows                                                                   parallelization intent.
+improve results. PARAC ODEX consistently boosts                                                                 RQ4 (Generalization): The methodology gener-
+compilation rates and speedups by decomposing                                                                   alizes. On ParEval (CUDA→OpenMP), PARA -
+tasks into analysis, planning, and refinement. As                                                               C ODEX maintains high validity with minimal
+evidenced by reasoning traces, this structure forces                                                            prompt adjustment. This indicates that the core
+the model to externalize its plan before coding,                                                                agentic pattern – analysis, gated translation, and
+shifting focus from surface-level syntax to perfor-                                                             feedback-driven repair – is agnostic to the source
+mance diagnosis. This allows it to catch logic er-                                                              language, applicable to broader parallel translation
+rors and optimize data transfers that the baseline                                                              tasks beyond the primary serial→OpenMP setting.
+misses.
+                                                                                                                6          Limitations
+RQ3 (Performance): Crafted agents can match ex-
+perts. PARAC ODEX achieves substantial geometric-                                                               Single-GPU scope. Our evaluation focuses on
+mean speedups on HeCBench and Rodinia, outper-                                                                  single-GPU execution on two platforms (A100 and
+forming the majority of reference implementations.                                                              RTX 4060). Extending PARAC ODEX to multi-GPU
+On the highly optimized NAS suite, it matches                                                                   offloading and distributed coordination is a natural
+expert performance, demonstrating that profiling-                                                               next step, but would require new pipeline stages
+guided refinement can recover substantial head-                                                                 for collective-communication analysis, device-to-
+room. The GPU-offload bypass behavior observed                                                                  device transfer planning, and correctness gating
+on 2 HeCBench kernels represents a failure mode                                                                 under non-deterministic parallel execution across
+                                                                                                           16121
+
+===== PDF p.10 =====
+devices. We leave this as an important direction for         Weeratunga. 1991. The NAS parallel benchmarks.
+future work.                                                 The International Journal of Supercomputing Appli-
+                                                             cations, 5(3):63–73.
+GPU-offload bypass. The bypass cases (2/36
+                                                          Tomer Bitan, Tal Kadosh, Erel Kaplan, Shira Meiri,
+kernels, both in HeCBench) represent a failure              Le Chen, Peter Morales, Niranjan Hasabnis, and Gal
+mode where the agent generates code that com-               Oren. 2025. Unipar: A unified llm-based framework
+piles with OpenMP target directives and passes              for parallel and accelerated code translation in hpc.
+correctness checks, yet executes the primary com-           In 2025 IEEE High Performance Extreme Computing
+                                                            Conference (HPEC), pages 1–9. IEEE.
+putation on the host CPU. In both cases (pathfinder,
+particlefilter), agent transcripts suggest the model      Gregory Bolet, Giorgis Georgakoudis, Harshitha
+judged data-transfer overheads prohibitive and im-          Menon, Konstantinos Parasyris, Niranjan Hasabnis,
+plicitly reverted to host execution. Future work            Hayden Estes, Kirk Cameron, and Gal Oren. 2025.
+                                                            Can large language models predict parallel code per-
+should enforce device-execution as a hard harness           formance? In Proceedings of the 34th International
+requirement - for example, asserting minimum                Symposium on High-Performance Parallel and Dis-
+kernel-launch counts or device-memory allocation            tributed Computing, pages 1–6.
+thresholds - rather than relying on agent judgment
+                                                          Uday Bondhugula, Albert Hartono, J. Ramanujam, and
+alone (App. D.2).                                           P. Sadayappan. 2008. A practical automatic polyhe-
+                                                            dral parallelizer and locality optimizer. ACM SIG-
+Computational cost. PARAC ODEX’s iterative                  PLAN Notices, 43(6):101–113.
+workflow - analysis, transformation, compilation,
+validation, and profiling - yields a higher token         Shuai Che, Michael Boyer, Jiayuan Meng, David Tar-
+and wall-clock cost than zero-shot generation.              jan, Jeremy W. Sheaffer, Sang-Ha Lee, and Kevin
+                                                            Skadron. 2009. Rodinia: A benchmark suite for het-
+Across NAS benchmarks (representative of the full           erogeneous computing. In 2009 IEEE International
+pipeline), PARAC ODEX averages 837,701 tokens               Symposium on Workload Characterization (IISWC),
+per kernel versus 755,417 for the zero-shot base-           pages 44–54.
+line (a 1.11× overhead). The high absolute token
+                                                          Le Chen, Nesreen K. Ahmed, Akash Dutta, Arijit Bhat-
+count is primarily an artifact of how coding agents         tacharjee, Sixing Yu, Quazi Ishtiaque Mahmud, Waq-
+work: source code context, build logs, and profiler         woya Abebe, Hung Phan, Aishwarya Sarkar, Bran-
+traces are included verbatim in each agent turn to          den Butler, Niranjan Hasabnis, Gal Oren, Vy A.
+support reproducibility and deterministic diagno-           Vo, Juan Pablo Muñoz, Theodore L. Willke, Tim
+                                                            Mattson, and Ali Jannesari. 2024a. The landscape
+sis. The small overhead of the staged workflow              and challenges of HPC research and llms. CoRR,
+over the baseline confirms that the cost reflects           abs/2402.02018.
+the environment rather than the scaffolding itself.
+                                                          Le Chen, Arijit Bhattacharjee, Nesreen Ahmed, Niran-
+Reducing this overhead - for example via context
+                                                            jan Hasabnis, Gal Oren, Vy Vo, and Ali Jannesari.
+compression or learned cost models for early-exit           2024b. Ompgpt: A generative pre-trained trans-
+decisions - is an important direction for future work       former model for openmp. In European Conference
+(App. D.1).                                                 on Parallel Processing, pages 121–134. Springer Na-
+                                                            ture Switzerland Cham.
+Acknowledgments                                           Le Chen, Quazi Ishtiaque Mahmud, Hung Phan, Nes-
+                                                            reen K. Ahmed, and Ali Jannesari. 2023. Learning
+Computational support was provided by Code                  to parallelize with openmp by augmented heteroge-
+Metal.                                                      neous AST representation. In Proceedings of the
+                                                            Sixth Conference on Machine Learning and Systems,
+                                                            MLSys 2023, Miami, FL, USA, June 4-8, 2023. ml-
+References                                                  sys.org.
+
+Byung Hoon Ahn, Prannoy Pilligundla, and Hadi Es-         Le Chen, Nuo Xu, Winson Chen, Bin Lei, Pei-Hung
+  maeilzadeh. 2019. Reinforcement learning and              Lin, Dunzhi Zhou, Rajeev Thakur, Caiwen Ding, Ali
+  adaptive sampling for optimized dnn compilation.          Jannesari, and Chunhua Liao. 2025. Beyond code
+  Preprint, arXiv:1905.12799.                               pairs: Dialogue-based data generation for llm code
+                                                            translation. arXiv preprint arXiv:2512.03086.
+David H. Bailey, Eric Barszcz, John T. Barton, David S.
+  Browning, Russell L. Carter, Leonardo Dagum,            Tianqi Chen, Lianmin Zheng, Eddie Yan, Ziheng Jiang,
+  Rod A. Fatoohi, Paul O. Frederickson, Thomas A.           Thierry Moreau, Luis Ceze, Carlos Guestrin, and
+  Lasinski, Robert S. Schreiber, Horst D. Simon,            Arvind Krishnamurthy. 2019. Learning to optimize
+  Venkatakrishnan Venkatakrishnan, and Sisira K.             tensor programs. Preprint, arXiv:1805.08166.
+                                                     16122
+
+===== PDF p.11 =====
+Bowen Cui, Tejas Ramesh, Oscar Hernandez, and                  SIGPLAN annual symposium on principles and prac-
+  Keren Zhou. 2025. Do large language models                   tice of parallel programming, pages 450–452.
+  understand performance optimization? Preprint,
+  arXiv:2503.13772.                                         Kosei Horikawa, Hao Li, Yutaro Kashiwa, Bram Adams,
+                                                              Hajimu Iida, and Ahmed E. Hassan. 2025. Agentic
+Chris Cummins, Volker Seeker, Dejan Grubisic, Bap-            refactoring: An empirical study of AI coding agents.
+  tiste Roziere, Jonas Gehring, Gabriel Synnaeve, and         CoRR, abs/2511.04824.
+  Hugh Leather. 2024. Meta large language model
+  compiler: Foundation models of compiler optimiza-         Carlos E. Jimenez, John Yang, Alexander Wettig,
+  tion. Preprint, arXiv:2407.02524.                           Shunyu Yao, Kexin Pei, Ofir Press, and Karthik
+                                                              Narasimhan. 2024. Swe-bench: Can language mod-
+Tom Deakin and Timothy G Mattson. 2023. Program-              els resolve real-world github issues? Preprint,
+  ming Your GPU with OpenMP: Performance Porta-               arXiv:2310.06770.
+  bility for GPUs. MIT Press.
+                                                            Zheming Jin and Jeffrey S. Vetter. 2023. A benchmark
+Matthew T. Dearing, Yiheng Tao, Xingfu Wu, Zhiling            suite for improving performance portability of the
+ Lan, and Valerie Taylor. 2025. Lassi: An LLM-based           sycl programming model. In Proceedings of the
+ automated self-correcting pipeline for translating par-      2023 IEEE International Symposium on Performance
+ allel scientific codes. Preprint, arXiv:2407.01638.          Analysis of Systems and Software (ISPASS), pages
+                                                              325–327.
+Yaoyao Ding, Cody Hao Yu, Bojian Zheng, Yizhi Liu,
+  Yida Wang, and Gennady Pekhimenko. 2023. Hidet:           Tal Kadosh, Niranjan Hasabnis, Timothy Mattson,
+  Task-mapping programming paradigm for deep learn-           Yuval Pinter, and Gal Oren. 2023a. Quantifying
+  ing tensor programs. Preprint, arXiv:2210.09603.            openmp: Statistical insights into usage and adoption.
+                                                              In 2023 IEEE High Performance Extreme Computing
+Johannes Doerfert, Kevin Streit, Sebastian Hack, and          Conference (HPEC), pages 1–7. IEEE.
+  Zino Benaissa. 2015. Polly’s polyhedral schedul-
+  ing in the presence of reductions.        Preprint,       Tal Kadosh, Niranjan Hasabnis, Prema Soundararajan,
+  arXiv:1505.07716.                                           Vy A. Vo, Mihai Capota, Nesreen K. Ahmed, Yuval
+                                                              Pinter, and Gal Oren. 2024a. Ompar: Automatic
+Yehonatan Fridman, Yosef Goren, and Gal Oren. 2025.           parallelization with ai-driven source-to-source com-
+  From openacc to openmp5 gpu offloading: Perfor-             pilation. CoRR, abs/2409.14771.
+  mance evaluation on nas parallel benchmarks. In
+  Proceedings of the 2025 4th International Workshop        Tal Kadosh, Niranjan Hasabnis, Vy A Vo, Nadav Schnei-
+  on Extreme Heterogeneity Solutions, pages 10–18.             der, Neva Krien, Mihai Capotă, Abdul Wasay, Guy
+                                                              Tamir, Ted Willke, Nesreen Ahmed, and 1 others.
+William F. Godoy, Pedro Valero-Lara, Keita Teran-              2024b. Monocoder: Domain-specific code language
+  ishi, Prasanna Balaprakash, and Jeffrey S. Vetter.           model for hpc codes and tasks. In 2024 IEEE
+  2023. Evaluation of OpenAI codex for HPC parallel           High Performance Extreme Computing Conference
+  programming models kernel generation. Preprint,             (HPEC), pages 1–7. IEEE.
+  arXiv:2306.15121.
+                                                            Tal Kadosh, Niranjan Hasabnis, Vy A Vo, Nadav Schnei-
+Justin Gottschlich, Armando Solar-Lezama, Nesime               der, Neva Krien, Abdul Wasay, Nesreen Ahmed, Ted
+  Tatbul, Michael Carbin, Martin Rinard, Regina Barzi-        Willke, Guy Tamir, Yuval Pinter, and 1 others. 2023b.
+  lay, Saman Amarasinghe, Joshua B Tenenbaum, and              Scope is all you need: Transforming llms for hpc
+  Tim Mattson. 2018. The three pillars of machine              code. arXiv preprint arXiv:2308.09440.
+  programming. In Proceedings of the 2nd ACM SIG-
+  PLAN International Workshop on Machine Learning           Tal Kadosh, Nadav Schneider, Niranjan Hasabnis, Tim-
+  and Programming Languages, pages 69–80.                     othy Mattson, Yuval Pinter, and Gal Oren. 2023c.
+                                                              Advising openmp parallelization via A graph-based
+Re’em Harel, Tal Kadosh, Niranjan Hasabnis, Timo-             approach with transformers. In OpenMP: Advanced
+  thy G. Mattson, Yuval Pinter, and Gal Oren. 2025.           Task-Based, Device and Compiler Programming -
+  Pragformer: Data-driven parallel source code classi-        19th International Workshop on OpenMP, IWOMP
+  fication with transformers. Int. J. Parallel Program.,      2023, Bristol, UK, September 13-15, 2023, Proceed-
+  53(1):2.                                                    ings, volume 14114 of Lecture Notes in Computer
+                                                              Science, pages 3–17. Springer Nature Switzerland
+Re’em Harel, Idan Mosseri, Harel Levin, Lee-or Alon,          Cham, Springer.
+  Matan Rusanovsky, and Gal Oren. 2020. Source-to-
+  source parallelization compilers for scientific shared-   Hao Li, Haoxiang Zhang, and Ahmed E. Hassan. 2025.
+  memory multi-core and accelerated multiprocessing:          The rise of AI teammates in software engineering
+  Analysis, pitfalls, enhancement and potential. Int. J.      (SE) 3.0: How autonomous coding agents are reshap-
+  Parallel Program., 48(1):1–31.                              ing software engineering. CoRR, abs/2507.15003.
+Re’em Harel, Yuval Pinter, and Gal Oren. 2023. Learn-       Aman Madaan, Niket Tandon, Prakhar Gupta, Skyler
+  ing to parallelize in a shared-memory environment          Hallinan, Luyu Gao, Sarah Wiegreffe, Uri Alon,
+  with transformers. In Proceedings of the 28th ACM          Nouha Dziri, Shrimai Prabhumoye, Yiming Yang,
+                                                       16123
+
+===== PDF p.12 =====
+Shashank Gupta, Bodhisattwa Prasad Majumder,                 2023. Reflexion: Language agents with verbal rein-
+  Katherine Hermann, Sean Welleck, Amir Yazdan-                forcement learning. Preprint, arXiv:2303.11366.
+  bakhsh, and Peter Clark. 2023. Self-refine: It-
+  erative refinement with self-feedback. Preprint,          Shivam Singhal, Eran Malach, Tomaso Poggio, and
+  arXiv:2303.17651.                                           Tomer Galanti. 2025. LLM-ERM: Sample-efficient
+                                                              program learning via LLM-guided search. Preprint,
+Aleksandr     Maramzin,        Christos     Vasiladiotis,     arXiv:2510.14331.
+  Roberto Castaneda Lozano, Murray Cole, and
+  Bjorn Franke. 2019. “it looks like you’re writing a       TOP500. 2025. TOP500 List - November 2025.
+  parallel loop”: Assisting developers in parallelization     https://top500.org/lists/top500/
+  decisions. In Proceedings of the AISEPS Workshop.           list/2025/11/. 66th TOP500 list published
+                                                              Nov. 18, 2025 (St. Louis, MO). Accessed 2026-01-
+Massinissa Merouani, Khaled Afif Boudaoud, Iheb Nas-          04.
+  sim Aouadj, Nassim Tchoulak, Islem Kara Bernou,
+  Hamza Benyamina, Fatima Benbouzid-Si Tayeb,               Pedro Valero-Lara, Alexis Huante, Mustafa Al Lail,
+  Karima Benatchba, Hugh Leather, and Riyadh                  William F. Godoy, Keita Teranishi, Prasanna Bal-
+  Baghdadi. 2025. Looper: A learned automatic                 aprakash, and Jeffrey S. Vetter. 2023. Comparing
+  code optimizer for polyhedral compilers. Preprint,          Llama-2 and GPT-3 LLMs for HPC kernels genera-
+  arXiv:2403.11522.                                           tion. Preprint, arXiv:2309.07103.
+Sean Mondesire, Emmanuel Nsiye, Bulent Soykan, and
+  Glenn Martin. 2025. Automating hpc software com-          Pedro Valero Lara, Aaron Young, Jeffrey S Vetter,
+  pilation, deployment, and error resolution through          Zheming Jin, Swaroop Pophale, Mohammad Alaul
+  an llm-based multi-agent system. In Practice and            Haque Monil, Keita Teranishi, and William F Godoy.
+  Experience in Advanced Research Computing 2025:             2025. Chathpc: Building the foundations for a pro-
+  The Power of Collaboration, pages 1–8.                      ductive and trustworthy ai-assisted hpc ecosystem.
+                                                              In Proceedings of the International Conference for
+Idan Mosseri, Lee or Alon, Re’em Harel, and Gal Oren.         High Performance Computing, Networking, Storage
+   2020. Compar: Optimized multi-compiler for auto-           and Analysis, pages 458–474.
+   matic openmp s2s parallelization. In International
+  Workshop on OpenMP, pages 247–262. Springer In-           Bhanu Prakash Vangala, Ali Adibifar, Tanu Malik, and
+   ternational Publishing.                                    Ashish Gehani. 2025. Ai-generated code is not re-
+                                                              producible (yet): An empirical study of dependency
+Daniel Nichols, Joshua H. Davis, Zhaojun Xie, Arjun           gaps in llm-based coding agents. arXiv preprint
+  Rajaram, and Abhinav Bhatele. 2024a. Can large              arXiv:2512.22387.
+  language models write parallel code?
+                                                            Xingfu Wu, Praveen Paramasivam, and Valerie Tay-
+Daniel Nichols, Aniruddha Marathe, Harshitha Menon,           lor. 2023. Autotuning apache tvm-based scientific
+  Todd Gamblin, and Abhinav Bhatele. 2024b. HPC-              applications using bayesian optimization. Preprint,
+  coder: Modeling parallel programs using large lan-          arXiv:2309.07235.
+  guage models. Preprint, arXiv:2306.17281.
+                                                            John Yang, Carlos E Jimenez, Alexander Wettig, Kilian
+Yun Peng, Akhilesh Deepak Gotmare, Michael Lyu,               Lieret, Shunyu Yao, Karthik Narasimhan, and Ofir
+  Caiming Xiong, Silvio Savarese, and Doyen Sahoo.            Press. 2024. Swe-agent: Agent-computer interfaces
+  2024. Perfcodegen: Improving performance of LLM             enable automated software engineering. Advances in
+  generated code with execution feedback. Preprint,           Neural Information Processing Systems, 37:50528–
+  arXiv:2412.03578.                                           50652.
+Nadav Schneider, Niranjan Hasabnis, Vy A Vo, Tal
+  Kadosh, Neva Krien, Mihai Capota, Guy Tamir,              Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran,
+  Theodore L Willke, Nesreen Ahmed, Yuval Pinter,             Thomas L. Griffiths, Yuan Cao, and Karthik
+  and 1 others. 2024. Mpirigen: Mpi code generation           Narasimhan. 2023. Tree of thoughts: Deliber-
+  through domain-specific language models. In Pro-            ate problem solving with large language models.
+  ceedings of the 2024 Workshop on AI For Systems,            Preprint, arXiv:2305.10601.
+  pages 1–6.
+                                                            Eric Zelikman, Eliana Lorch, Lester Mackey, and
+Nadav Schneider, Tal Kadosh, Niranjan Hasabnis, Tim-          Adam Tauman Kalai. 2023. Self-taught optimizer
+  othy Mattson, Yuval Pinter, and Gal Oren. 2023.             (STOP): Recursively self-improving code generation.
+  Mpi-rical: Data-driven mpi distributed parallelism          Microsoft Research.
+  assistance with transformers. In Proceedings of the
+  SC’23 Workshops of the International Conference           Qinkai Zheng, Xiao Xia, Xu Zou, Yuxiao Dong, Shan
+  on High Performance Computing, Network, Storage,            Wang, Yufei Xue, Zihan Wang, Lei Shen, Andi Wang,
+  and Analysis, pages 2–10.                                   Yang Li, Teng Su, Zhilin Yang, and Jie Tang. 2024.
+                                                              Codegeex: A pre-trained model for code genera-
+Noah Shinn, Federico Cassano, Edward Berman, Ash-             tion with multilingual benchmarking on humaneval-x.
+  win Gopinath, Karthik Narasimhan, and Shunyu Yao.           Preprint, arXiv:2303.17568.
+                                                       16124
+
+===== PDF p.13 =====
+A    Pipeline Stage Restructuring for NAS               A.3   NAS/Rodinia Workflow: Consolidated
+     and Rodinia                                              Three-Stage Pipeline
+                                                        For NAS and Rodinia, PARAC ODEX uses a re-
+A.1 Rationale
+                                                        fined three-stage pipeline that consolidates opti-
+When moving from HeCBench micro-kernels to              mization into broader, more comprehensive stages.
+larger NAS and Rodinia benchmarks, we re-               This redesign was motivated by the character-
+designed the optimization workflow to better re-        istics of full-application benchmarks, which re-
+flect full-application performance drivers. Micro-      quire holistic reasoning over loop structure, data
+kernels typically expose a small number of local-       lifetime, and launch overhead rather than iso-
+ized hotspots, making a sequence of narrowly-           lated passes. The three stages are: (i) analysis
+scoped optimization stages effective. In con-           with loop taxonomy, (ii) GPU offload with ex-
+trast, NAS and Rodinia kernels frequently re-           plicit data-planning artifact (data_plan.md),
+quire holistic reasoning over loop structure, data      and (iii) profiling-driven tuning with optimization
+lifetime, launch overhead, and correctness con-         planning artifact (optimization_plan.md).
+straints at scale. Early prototypes decomposed          Unlike the four-stage HeCBench pipeline, this
+optimization into multiple narrowly scoped stages       workflow uses longer, more detailed prompts that
+(e.g., separate concurrency and memory/locality         integrate concurrency and memory optimizations
+passes). The current pipeline consolidates these        into a single profiling-driven refinement stage, re-
+into two optimization steps that are applied            ducing token costs while improving reasoning
+across suites: (i) GPU offload with an explicit         depth. Each prompt is parameterized with profiler
+data_plan.md and baseline capture, and (ii)             output, system metadata, and summaries of prior
+profiling-driven performance tuning with an ex-         actions, enabling measurement-driven iteration un-
+plicit optimization_plan.md. In both cases,             der a fixed hardware/software stack.
+each stage is augmented with (i) profiler output
+from the prior stage, (ii) a short summary of pre-      Stage 1 (Analysis Phase): Loop Classification
+viously applied actions, and (iii) system details       and Data Characterization. The analysis phase
+(GPU/CPU/memory), enabling profiling-driven it-         enumerates and prioritizes loops across the bench-
+erative refinement under a fixed hardware/software      mark source files, emphasizing code executed in
+stack.                                                  the main timed region. Each loop is classified us-
+                                                        ing a loop taxonomy that encodes parallelization
+A.2 HeCBench Workflow                                   constraints (e.g., dense, sparse/CSR, multi-stage
+                                                        FFT/butterfly, multigrid, histogram/indirect writes,
+For HeCBench, PARAC ODEX uses a four-stage              recurrence, reductions, and stencil patterns). The
+pipeline developed during our initial experimenta-      phase also records loop nesting, dependency struc-
+tion phase. The workflow consists of: (i) analysis,     ture (reductions, stage dependencies, loop-carried
+(ii) initial GPU offload with basic correctness vali-   recurrences), and data properties (array roles, ac-
+dation, (iii) concurrency tuning (e.g., collapse di-    cess patterns, globals, scratch usage), and flags
+rectives, thread mapping), and (iv) memory/locality     hazards such as atomics, variable bounds, or in-
+optimization (e.g., data movement, transfer reduc-      sufficient iteration counts. This phase produces
+tion). Unlike the consolidated three-stage workflow     a structured analysis.md artifact and copies
+later developed for NAS and Rodinia, this approach      source files into the kernel working directory with-
+used shorter, less comprehensive prompts for each       out semantic modifications.
+stage and decomposed optimization into separate,
+narrower passes. While this resulted in higher to-      Stage 2 (GPU Offload + Data Strategy): Correct-
+ken costs due to the additional stage and context       ness with an Explicit Data Plan. Instead of a
+accumulation, it reflected our earlier development      minimal correctness-first offload step, this stage
+methodology and was retained for HeCBench to            couples correctness with explicit data-lifetime
+maintain consistency with completed experiments.        reasoning. The workflow (i) captures a base-
+The micro-kernel nature of HeCBench benchmarks          line output for subsequent verification, (ii) se-
+— often dominated by a single hot loop — made           lects a data-management strategy using a rule-
+the staged decomposition effective despite the in-      based decision process (e.g., target data re-
+creased overhead.                                       gions, asynchronous overlap, or global device-
+                                                   16125
+
+===== PDF p.14 =====
+state allocation via omp_target_alloc and                reduces token overhead while substantially im-
+is_device_ptr), and (iii) requires the pipeline          proving reasoning depth and optimization effec-
+to author a data_plan.md artifact before modi-           tiveness for full-application benchmarks. Both
+fying code. The data plan enumerates arrays used         workflows share the core philosophy of correct-
+in the timed region, identifies functions that must      ness gating and profiler-driven refinement, and
+execute on the device, specifies host-to-device and      critically, the correctness gate mechanism itself
+device-to-host transfer timing and expected vol-         remained unchanged across both approaches —
+umes, and includes strategy-specific correctness         all implementations are validated against golden
+checks to prevent common mapping errors. The             serial output using the same Makefile-based har-
+implementation then follows this plan to offload the     ness and supervisor-driven repair loop. The three-
+required loops/functions while preserving bench-         stage pipeline is strictly superior in terms of cost-
+mark semantics and passing the golden-serial cor-        effectiveness and reasoning quality; the four-stage
+rectness check.                                          approach was retained for HeCBench solely to
+                                                         maintain consistency with completed experiments.
+Stage 3 (Performance Tuning): Profile-Guided             Across suites, bottleneck profiles differ: HeCBench
+Plan with Early Exit. This stage consolidates            micro-kernels tend to be kernel-bound with local-
+concurrency tuning, memory/locality tuning, and          ized hotspots, whereas NAS/Rodinia benchmarks
+launch-overhead reduction into a single profiling-       frequently expose transfer overhead, launch costs,
+driven refinement stage. It first re-verifies correct-   and complex data lifetime patterns that benefit from
+ness against the recorded baseline output. It then       the holistic data-management planning enabled by
+reads profiling summaries (kernel time, API time,        the improved workflow.
+and transfer time) and records key metrics (domi-
+nant kernels, launch counts, and transfer volumes).      B     Analysis, Data Transfer, and
+Before applying changes, the pipeline writes an                Optimization Mechanics
+optimization_plan.md artifact that priori-
+tizes bottlenecks and proposes specific actions (e.g.,   PARAC ODEX operationalizes (i) loop-level analy-
+hoisting data regions, eliminating redundant trans-      sis, (ii) data-movement planning and enforcement,
+fers, inlining helper functions to reduce launch         and (iii) profiling-driven optimization during serial-
+overhead, loop fusion where safe, increasing col-        to-OpenMP target-offload translation through three
+lapse depth, introducing reductions for sparse           prompt templates: an analysis prompt used prior to
+inner loops only when beneficial, enforcing se-          translation, an offload + data-strategy prompt that
+rial stage loops for multi-stage algorithms, and         implements a correct GPU version under an explicit
+micro-optimizations such as const/restrict               data plan, and a performance tuning prompt that re-
+and caching locals). The stage supports early ter-       fines the implementation using profiling feedback.
+mination: if the current runtime is within a small       Throughout, prompts are parameterized using run-
+tolerance of the estimated optimum inferred from         time template variables (e.g., {kernel_dir},
+profiling, the pipeline records metrics and restricts    {file_listing}, and build/run commands)
+changes to low-risk micro-optimizations.                 filled by the pipeline scripts.
+
+                                                         B.1    Loop Analysis and Offload Target
+A.4 Summary of Differences
+                                                                Identification
+PARAC ODEX employs two distinct workflows
+                                                         The analysis phase produces a structured
+tailored to benchmark characteristics and devel-
+                                                         analysis.md artifact while keeping the original
+opment timeline. The four-stage HeCBench
+                                                         source files unmodified. It is designed to (1)
+pipeline reflects our initial experimental design
+                                                         identify loops in the main timed region, (2) charac-
+with focused, shorter prompts decomposing op-
+                                                         terize dependence structure to determine offload
+timization into separate concurrency and mem-
+                                                         feasibility, and (3) surface hazards (reductions,
+ory passes, resulting in higher token costs. The
+                                                         atomics, stage dependencies) that must be handled
+three-stage NAS/Rodinia pipeline represents an
+                                                         explicitly during translation.
+improved, consolidated approach that integrates
+optimization into comprehensive stages with ex-          Loop discovery and prioritization. The prompt
+plicit artifact-driven planning (data_plan.md,           enumerates loop constructs using lightweight
+optimization_plan.md). This refinement                   source inspection (e.g., searching for for, while,
+                                                    16126
+
+===== PDF p.15 =====
+and main compute-loop patterns). Loops are              vs. pointer-based), allocation style (static vs. dy-
+prioritized by their position in the call path:         namic), accessed struct members, and global vari-
+loops executed every iteration of the main com-         ables used in the timed region. It flags hazards that
+pute loop are treated as CRITICAL/IMPORTANT,            must be handled during translation, including vari-
+while one-time setup loops are treated as SEC-          able bounds, required reductions, atomic updates,
+ONDARY/AVOID.                                           stage dependencies, RNG usage in timed regions,
+                                                        and small trip counts.
+Priority classification by estimated work. For
+each loop, the prompt applies a coarse work model       B.2   Data Movement and Transfer Strategy
+(iterations × operations per iteration) and assigns
+one of four priority levels: CRITICAL (dominant         Correct and efficient target offload depends
+or per-iteration O(N ) work), IMPORTANT, SEC-           strongly on data-lifetime decisions. The first
+ONDARY, or AVOID (setup/IO or trivially small           optimization step therefore requires the pipeline
+loops). The primary objective is to focus subse-        to select a data strategy and to produce a
+quent offload effort on the loops that plausibly dom-   data_plan.md before implementing pragmas.
+inate runtime.                                          This plan serves as an executable specification of
+                                                        which data reside on the device, when transfers
+Loop-type taxonomy and dependence character-            occur, and which functions must execute on the
+ization. Each loop is assigned a type from a small      device to avoid implicit host-device thrashing.
+taxonomy that encodes parallelization constraints:
+• Type A (Dense): constant bounds, data-parallel        Strategy selection rules. The prompt selects one
+  structure.                                            of three strategies using the loop taxonomy and
+• Type B (Sparse/CSR): inner bound depends on           program structure:
+  outer index; typically parallelize outer loop, with   1. Strategy A (Scoped target data re-
+  optional inner parallelism.                              gions): use target data with explicit
+• Type C1 (Multi-stage/Iterative):             stage-      map(to|from|tofrom|alloc) clauses;
+  dependent computations (e.g., butterfly-like             default for most dense/stencil/reduction kernels
+  patterns); outer loops parallel, stage loop serial.      and multigrid-like cases.
+• Type C2 (Multigrid/Hierarchical): level-wise          2. Strategy B (Asynchronous overlap): use
+  traversal with dependent stages; outer parallelism       nowait and depend to overlap independent
+  with stage ordering preserved.                           transfers and kernels when the computation per-
+• Type D (Histogram/Indirect writes): paralleliz-          mits pipelining.
+  able with atomic updates (or structured privatiza-    3. Strategy C (Global device state):            al-
+  tion + merge).                                           locate persistent device arrays with
+• Type E (Recurrence): loop-carried dependen-              omp_target_alloc and pass them via
+  cies or block-level synchronization patterns (e.g.,      is_device_ptr to eliminate repeated
+  __syncthreads() in CUDA); not offload-                   mapping in iterative solvers and multi-stage
+  parallelizable without algorithmic restructuring.        kernels.
+• Type F (Reduction): scalar accumulation; paral-
+  lelizable via reductions.                             The data_plan.md artifact. The data plan
+• Type G (Stencil): neighbor access; parallelizable     enumerates all arrays used in the timed region
+  with careful indexing.                                and classifies them as working, scratch, const,
+    A special case is handled explicitly: when an       or index. It also lists functions executed in the
+outer loop iterates over independent samples while      timed region and assigns each to host or device
+an inner loop contains sequential RNG/state up-         execution. The plan explicitly specifies (i) one-
+dates, the analysis marks the outer loop as par-        time device allocations, (ii) host-to-device trans-
+allelizable with per-thread RNG replication and         fers (timing and volume), (iii) device-to-host trans-
+marks the inner RNG loop as sequential within           fers (timing and volume), and (iv) whether any
+each thread.                                            transfers occur inside the iteration loop. The plan
+                                                        includes strategy-specific checklists intended to
+Data analysis and hazard flags. In addition to          prevent common errors, such as: missing device
+loop structure, the analysis records data proper-       versions of helper functions (triggering implicit
+ties needed for correct mapping: array shapes (flat     copies), scratch buffers remaining on the host when
+                                                   16127
+
+===== PDF p.16 =====
+using persistent device pointers, or accidental rein-    by more than 10%. In either case, further modifi-
+troduction of map clauses into a Strategy C hot          cations are limited to low-risk micro-optimizations
+path.                                                    (such as const, restrict, and caching locals).
+                                                         This reduces unnecessary refactoring when the im-
+Transfer-volume sanity checks. The plan
+                                                         plementation is already near a profiler-implied ceil-
+records an expected transfer volume for the whole
+                                                         ing.
+execution and marks large deviations as a red flag.
+Concretely, if measured transfers exceed the plan        The optimization_plan.md artifact. Be-
+by more than a small constant factor (e.g., > 2×),       fore applying changes, the pipeline produces an
+the pipeline treats this as evidence of incorrect data   optimization_plan.md report containing:
+scoping (e.g., missing offloaded helpers causing         runtime, dominant kernel(s), GPU-time breakdown,
+repeated transfers) and prioritizes correcting data      transfer fraction and volume, and kernel launch
+lifetime before applying kernel-level tuning.            counts. The plan also identifies candidate loop fu-
+                                                         sions (producer–consumer or adjacent loops with
+B.3   Correctness Gating and Baseline
+                                                         identical bounds) and characterizes iteration struc-
+      Equivalence
+                                                         ture (e.g., iterative solver loops with repeated
+Each kernel translation is anchored to a reference       SpMV/update patterns).
+baseline captured before modification. The first
+optimization step requires recording baseline out-       Prioritized bottleneck checklist. The tuning
+put and verifying the translated output against it       prompt encodes a priority-ordered checklist of bot-
+(e.g., via textual diff on the benchmark’s verifica-     tlenecks and corresponding remedies. Table 2
+tion markers). Only configurations that satisfy the      summarizes the pipeline artifacts and enforcement
+golden-serial correctness check are retained for per-    points:
+formance reporting. This gating is enforced before       • Data-management issues: hoist data regions,
+profiling-driven tuning, ensuring that subsequent          move scratch to device allocations, ensure all
+optimizations operate on a semantically valid can-         timed-region helpers run on device.
+didate.                                                  • Launch overhead: inline helper functions called
+   When validation fails, the system invokes a             inside iteration loops; fuse adjacent loops with
+supervisor agent that: (i) instruments code with           identical bounds where safe.
+gate.h macros to trace execution state, (ii) diag-       • Hot-kernel inefficiency: adjust parallel decom-
+noses discrepancies hierarchically (checking host-         position (e.g., collapse), add simd to inner-
+device memory consistency then kernel logic),              most loops, and cache index/array values to re-
+and (iii) applies minimal repairs while preserving         duce redundant loads.
+GPU offload. The supervisor iterates until make          • Sparse inner-loop decision: keep CSR inner
+check-correctness passes. The prompt for-                  loops serial when average nonzeros per row is
+bids CPU-only fallback and performance changes             small; introduce inner-loop parallelism with re-
+during this phase — its sole objective is numerical        duction only when nonzeros are sufficiently large
+correctness.                                               to amortize overhead.
+                                                         • Stage-dependent algorithms (Type C): enforce
+B.4 Profiling-Driven Optimization and Action               serial stage loops; parallelize only outer dimen-
+    Library                                                sions to avoid barrier overhead and correctness
+The second optimization step performs profiling-           failures.
+driven refinement while holding the selected data        • Over-parallelization: remove inner parallelism
+strategy fixed. The prompt explicitly forbids chang-       when outer-loop parallelism already saturates the
+ing the data strategy at this stage to avoid confound-     GPU, as indicated by profiling and problem ge-
+ing performance gains from data-lifetime restruc-          ometry.
+turing with kernel-level optimizations.
+                                                         Summary and provenance of changes. Finally,
+Early exit criterion. The pipeline exits early if        the prompt requires a structured end-of-step sum-
+the current runtime is within a small tolerance (5%)     mary that records baseline and final metrics, enu-
+of the profiler-implied optimum (e.g., kernel-time       merates applied optimizations (including reverted
+dominance with low transfer overhead), or reverts        changes that regress performance), and states the
+any proposed change that regresses performance           primary insight and remaining bottlenecks. This re-
+                                                    16128
+
+===== PDF p.17 =====
+Phase       Key Outputs and Enforcement                        (ii) Data Plan (data_plan.md). Strategy
+ Analysis    analysis.md: loop taxonomy, priorities, de-        A (persistent target data): establish de-
+             pendencies, data hazards; source copied unmod-     vice residency before benchmark loop with
+             ified.
+ Offload +   data_plan.md: array inventory, function
+                                                                #pragma omp target enter data
+ Data Plan   placement, explicit transfers, expected transfer   map(to: a[0:NZ], colidx[0:NZ],
+             volume; implementation must follow plan; base-     rowstr[0:NA+1])             and       map(alloc:
+             line captured and correctness verified.
+ Tuning      optimization_plan.md: profiler-driven              x[0:NA+2], z[0:NA+2], p[0:NA+2],
+             diagnosis, prioritized actions, early-exit rule;   q[0:NA+2], r[0:NA+2]). Working vectors
+             data strategy fixed; final summary with ap-        are initialized on-device to avoid host-device
+             plied/reverted changes.
+                                                                transfers. Expected transfers: 461MB H→D
+Table 2: Artifacts and enforcement points used by               (CSR data) at entry, negligible D→H (scalar
+PARAC ODEX to structure analysis, data movement, and            reduction results only), zero array transfers during
+profiling-driven optimization.                                  15×25 iteration loops. Correctness check: passes
+                                                                validation with VERIFICATION SUCCESSFUL
+                                                                after initial offload.
+porting discipline supports reproducibility and pro-
+vides provenance for performance improvements                   (iii)    Optimization         +     Gate    Result
+reported in the evaluation.                                     (optimization_plan.md). Profiling
+                                                                shows runtime dominated by 9,883 kernel launches
+B.5   Running Example: NAS CG Conjugate
+                                                                (400 SpMV passes plus separate reduction/update
+      Gradient Solver Workflow
+                                                                kernels) with 94% GPU time in conj_grad and
+To make the pipeline concrete, consider the CG                  91.7% API overhead from launch/synchronization
+(Conjugate Gradient) kernel from NAS Parallel                   costs. Bottleneck: repeated small kernels for
+Benchmarks Class C, a sparse linear solver us-                  norm reductions and residual computation inflate
+ing iterative conjugate gradient with sparse matrix-            launch overhead; each operation spawns separate
+vector multiplication (SpMV) in CSR format.                     device kernels. Optimization: (i) fuse dual norm
+(i) Hotspot Summary (analysis.md). The                          reductions (norm_temp1/norm_temp2) into
+analysis phase identifies the main benchmark loop               single kernel, (ii) combine final SpMV and residual
+(15 iterations, each invoking conj_grad with                    norm loop to reuse rowstr/colidx loads and
+25 internal cgit iterations) and classifies nested              eliminate one kernel per conj_grad call, (iii)
+loops:                                                          cache intermediate scalars in registers to avoid
+• Type E (Sequential): outer benchmark itera-                   redundant global memory access. Result: kernel
+  tion (it = 1..NITER) and inner cgit loop                      launches reduced by ∼25%, runtime improved to
+  (25 iterations) with loop-carried dependencies on             2.04s (estimated ∼20% speedup over baseline).
+  rho/beta – must execute serially.                             Correctness gate: output validates against serial
+• Type B (Sparse SpMV): two SpMV kernels                        reference; optimization retained.
+  computing q = A*p and r = A*z with irreg-                     B.6    Baseline Prompt Structure
+  ular CSR indexing via rowstr/colidx – data-
+  parallel across rows, CRITICAL priority.                      For comparison, the baseline system uses a single
+• Type F (Reductions):                dot products              unstructured prompt that combines all objectives
+  (norm_temp1/norm_temp2,                 rho,   d)             into one request. The baseline prompt template is:
+  and final residual norm – global reductions,
+  CRITICAL priority.                                                  Your Task:
+• Type A (Dense SAXPY): vector updates (z/r/p                         1. Translate the code to an OpenMP
+  axpy operations) – embarrassingly parallel,                            GPU-offloaded version.
+  memory-bound.                                                       2. Apply GPU offloading pragmas as
+Data: CSR matrix (a[NZ], colidx[NZ],                                     needed.
+rowstr[NA+1], ∼461MB total) plus five work-                           3. Optimize the code for performance
+ing vectors (x, z, p, q, r, each NA+2 doubles).                          while preserving functionality.
+Hazards: sequential cgit iterations prevent outer                     4. Ensure the code compiles and runs.
+parallelism; irregular gather pattern in SpMV limits                  5. Deliver the modified code to
+inner parallelism.                                                      {kernel_dir}.
+                                                          16129
+
+===== PDF p.18 =====
+Deliverable: The complete, modified                C.2     Extended Analysis for CUDA Kernels
+      source code in {kernel_dir}                        The original analysis focused on CPU loops and
+                                                         their computational cost. For CUDA input, the
+   This single-pass approach combines analy-             analysis phase additionally:
+sis, translation, and optimization into one un-          • detects __global__ kernels and host launch
+differentiated request, contrasting with PARA -            sites,
+C ODEX’s staged workflow that emits intermedi-           • reconstructs grid and block structure,
+ate artifacts (analysis.md, data_plan.md,                • identifies grid-stride loop patterns,
+optimization_plan.md) and enforces cor-                  • analyzes atomicAdd, shared memory usage,
+rectness gates between stages. The baseline agent          and __syncthreads(),
+has access to the same tools (compiler, profiler, test   • estimates total device work as grid × block × it-
+harness) as PARAC ODEX but receives no explicit            erations.
+guidance on when or how to use them. In practice,           This allows the system to reason about CUDA
+the baseline agent may compile and test the code,        execution semantics that must be preserved under
+but it does not systematically analyze loops, se-        OpenMP.
+lect data strategies, or iteratively optimize based on
+profiling feedback, as these steps are not prompted.     C.3    Data Residency and Memory Model
+                                                               Mapping
+C     From Serial→OpenMP to                              In Serial→OpenMP translation, device-residence
+      CUDA→OpenMP Translation                            is introduced incrementally and only when bene-
+                                                         ficial. However, CUDA programs already assume
+Our system originally targeted CPU programs              GPU-resident data and explicit control over alloca-
+and introduced GPU acceleration by automatically         tion and transfer (cudaMalloc, cudaMemcpy,
+translating serial code to OpenMP target offload.        cudaFree).
+This required analysis of loop nests, classification        The migration pipeline therefore first recon-
+of parallelization patterns, and the construction of     structs the CUDA memory model and maps it to
+an explicit device-residency and data-movement           OpenMP constructs.
+plan.                                                       A central design goal is to avoid unintentionally
+   We later extended this framework to support mi-       moving data back to the host during migration.
+gration from CUDA code to OpenMP target offload.
+                                                         C.4     Execution Model and Synchronization
+Although the overall workflow remained struc-
+                                                               Differences
+turally similar, the design goals and constraints
+changed substantially. This appendix summarizes          CUDA exposes block-local shared memory
+the key differences.                                     and synchronization via __shared__ and
+                                                         __syncthreads(). OpenMP target offload
+C.1      Change in Problem Setting                       does not provide an exact analogue. The migra-
+                                                         tion workflow therefore performs:
+In the Serial→OpenMP case, the input code is             • conversion of shared memory buffers to thread-
+CPU-bound and parallelism must be introduced.              private or local arrays,
+In contrast, CUDA code is already GPU-parallel.          • replacement of atomicAdd with OpenMP atom-
+The migration task therefore becomes:                      ics or reductions,
+1. preserving the program’s existing GPU execu-          • splitting or restructuring kernels that rely on
+   tion semantics,                                         __syncthreads().
+2. translating CUDA runtime constructs into                 This represents one of the major conceptual ex-
+   OpenMP equivalents, and                               tensions relative to the serial workflow.
+3. avoiding accidental reintroduction of host-device
+   transfers or loss of data residency.                  C.5     Kernel Body and Index Mapping
+   Thus the analysis stage was extended to iden-         CUDA kernels are converted into device func-
+tify not only computational loops, but also CUDA         tions invoked under target teams loop.
+kernels, launch sites, and device-side execution         Thread indexing logic involving threadIdx,
+structure.                                               blockIdx, and gridDim is replaced by loop
+                                                    16130
+
+===== PDF p.19 =====
+induction variables. Grid-stride loops become con-     (analysis → offload+data plan → optimization)
+ventional bounded loops.                               compared to the baseline’s single-pass translation.
+   All CUDA API calls and CUDA-specific syntax            Why token usage is high: Both PARAC ODEX
+are eliminated to ensure pure OpenMP execution.        and the baseline operate Codex CLI in non-
+                                                       interactive automation mode, which is designed
+C.6      Correctness and Baseline Outputs              for scripting and CI/CD workflows where the agent
+Both workflows enforce diff-based correctness.         executes all required actions in a single session
+For CUDA migration, the system first records the       without human interaction. This mode consumes
+original CUDA program output. The OpenMP-              significantly more tokens than interactive develop-
+offloaded version must match this baseline, pre-       ment because: (i) the full codebase context, build
+venting partial-migration or semantic drift.           environment, and tool outputs must be provided in
+                                                       each agent turn, (ii) the agent maintains complete
+C.7      Performance Considerations                    execution traces for reproducibility, and (iii) com-
+                                                       pilation errors, test outputs, and profiler reports are
+The CUDA→OpenMP tuning stage introduces
+                                                       included verbatim to enable deterministic diagnosis.
+migration-specific bottlenecks, including:
+                                                       This design prioritizes reproducibility and deter-
+• unintended data transfers after migration,           minism – ensuring that each parallelization attempt
+• excessive kernel launch counts after barrier re-     is fully auditable and replayable – over raw token
+  moval,                                               efficiency. Crucially, the baseline exhibits com-
+• loss of original CUDA grid dimensionality, and       parable token consumption (755k tokens/kernel)
+• reduced locality after removing shared memory.       despite its simpler single-pass structure, confirm-
+   Optimizations therefore focus on restoring          ing that the high token count is primarily an artifact
+CUDA-like execution patterns where possible (e.g.,     of the non-interactive automation mode rather than
+persistent device allocations and loop fusion),        PARAC ODEX’s staged workflow. Full prompt tem-
+while remaining within the OpenMP execution            plates are available in our repository.
+model.
+                                                       D.2   GPU-Offload Bypass: Detailed Analysis
+C.8      Summary of Conceptual Shift
+                                                       In the two HeCBench bypass cases (pathfinder,
+In summary, the Serial→OpenMP pipeline teaches         particlefilter), PARAC ODEX produced implemen-
+the system how to introduce GPU execution. The         tations that compile with OpenMP target direc-
+CUDA→OpenMP pipeline teaches it how to pre-            tives and pass correctness checks, yet effectively
+serve an existing GPU execution model in a differ-     bypass GPU computation by executing the primary
+ent runtime environment. This required extending       computation on the host CPU. The zero-shot Codex
+the analysis phase, formalizing CUDA-to-OMP            baseline exhibits the same behavior on pathfinder.
+semantics, and preventing regression in device resi-
+                                                       Bypass Definition and Detection. We classify a
+dency or synchronization behavior.
+                                                       run as a bypass when inspection of the generated
+                                                       code together with the corresponding profiler report
+D     Reproducibility and Experimental
+                                                       indicates that the dominant computational loop re-
+      Details
+                                                       mains on the host, while the device executes only a
+D.1 Technical Details and Token Counts                 minimal or identity kernel that does not account for
+                                                       the kernel’s substantive work. Because this behav-
+The primary model used for all kernels is
+                                                       ior contradicts the stated objective of GPU paral-
+gpt-5.1-codex-mini. For the NAS FT ker-
+                                                       lelization, including such runs would misrepresent
+nel, we escalated to gpt-5.1-codex-max for
+                                                       success and can inflate performance comparisons
+both PARAC ODEX and baseline to maintain fair-
+                                                       without reflecting genuine offload. We therefore
+ness. Token usage (NAS benchmarks, represen-
+                                                       exclude bypass kernels from GPU-time statistics,
+tative of current pipeline): PARAC ODEX aver-
+                                                       while reporting their occurrence explicitly.
+ages 837,701 tokens per kernel (cg: 776,036; ep:
+967,774; ft: 1,031,208; mg: 575,786), while the        Bypass Occurrence. Bypass was observed in
+baseline averages 755,417 tokens (cg: 286,118; ep:     2/23 HeCBench kernels for PARAC ODEX. No
+1,379,682; ft: 880,104; mg: 475,765). The 1.11×        bypass cases were observed in Rodinia, NAS, or
+ratio reflects PARAC ODEX’s multi-stage workflow       ParEval under our evaluation protocol.
+                                                  16131
+
+===== PDF p.20 =====
+Root Cause Analysis. We analyzed the two by-           execution-semantics preservation — generalizes
+pass cases by examining agent transcripts and pro-     effectively to cross-API translation.
+filing logs. In both cases, the agent generated code
+that compiles and passes correctness checks but        E.2   HeCBench: Broad Performance Gains
+executes the primary computation on the host CPU             Across Diverse Workloads
+with minimal/identity GPU kernels. Our reading         HeCBench spans regular stencil and dynamic-
+of the transcripts is that the agent judged trans-     programming kernels through irregular memory-
+fer overheads to dominate computation and kept         and graph-oriented workloads. We evaluate 23
+the work on the host despite emitting syntactically    benchmarks (Figure 3); 2 exhibit GPU-offload
+valid offload constructs, violating the GPU-offload    bypass and are excluded from performance met-
+intent.                                                rics. We report GPU time for the remaining 21
+                                                       valid kernels. Parallel-friendly kernels exhibit
+Mitigation Strategies. Looking forward, a har-
+                                                       large gains. For jacobi (∼177× on A100, ∼467×
+ness could mitigate bypass by enforcing evidence
+                                                       on RTX 4060), this stems from reducing redun-
+of device-side work, for example by requiring
+                                                       dant transfers via persistent device data regions.
+non-trivial kernel-launch activity, checking device-
+                                                       Bandwidth-limited kernels improve modestly (e.g.,
+memory allocation sizes (> 1MB), or thresholding
+                                                       geodesic: 1.00×, pool: 1.01×). Across the 21
+the fraction of runtime spent in GPU kernels as
+                                                       valid kernels, PARAC ODEX achieves 3.1× (A100)
+measured by profiling (e.g., requiring > 50% of
+                                                       and 3.6× (RTX 4060) geometric-mean GPU-time
+time in device kernels). Preliminary testing with
+                                                       speedup (median 1.34× on A100). The baseline
+minimum device memory allocation and kernel
+                                                       demonstrates lower robustness, failing on 2 bench-
+launch count (> 10) constraints recovers GPU of-
+                                                       marks (keogh, mixbench) on both GPUs, achiev-
+fload for pathfinder but requires algorithmic re-
+                                                       ing 90% success (19/21) with geometric-mean
+structuring for particlefilter.
+                                                       speedups of 2.0× (A100) and 2.4× (RTX 4060)
+E     Detailed Benchmark Suite Results                 and a median of 1.39× (A100). PARAC ODEX
+                                                       achieves 100% compilation success (21/21) and
+Per-suite analysis of PARAC ODEX’s performance         either matches or improves runtime on 19/21 (90%)
+across ParEval, HeCBench, and Rodinia follows          kernels.
+below.
+                                                       E.3   Rodinia: Translation Reliability and
+E.1    ParEval: Robust CUDA→OpenMP                           Systematic Performance Gains
+       Translation and Correctness                     PARAC ODEX successfully translates all Rodinia
+ParEval emphasizes translation fidelity for            kernels and attains geometric-mean GPU-time
+CUDA→OpenMP migration (App. C details                  speedups of 1.46× (A100) and 1.08× (RTX 4060)
+the CUDA-specific workflow extensions). Each           (Figure 4-left). The median speedup on A100
+kernel is assessed under a fixed build environment     is 1.40×. Because many Rodinia programs con-
+(code-only) and in a setting where the agent           tain correct but non-fully-optimized OpenMP code,
+must also construct the build flow (overall). As       PARAC ODEX frequently improves performance
+shown in Figure 2, PARAC ODEX attains perfect          by restructuring parallel regions, reducing syn-
+compilation and validation in the code-only regime     chronization, and lowering data-movement over-
+(4/4 kernels at 100%), and remains strong in the       head. The baseline also produces running im-
+more demanding overall regime: it compiles and         plementations for all kernels but achieves only a
+validates nanoXOR and microXOR in all trials           0.30× geometric-mean speedup on A100 (median
+(1.0), achieves 0.8 on XSBench, and the remaining      0.96×).
+errors are concentrated in microXORH (0.4).
+The baseline exhibits consistently lower overall       E.4   NAS: Handling Complex, Expert-Level
+success, with the largest drop on microXORH. The             Codebases
+heatmap further shows that non-agentic approaches      Figure 4 summarizes NAS results (right). PARA -
+struggle significantly, while top-down agentic         C ODEX achieves a 1.00× median and geometric-
+methods improve but remain inconsistent. Overall,      mean of 2.95× (A100) and 1.22× (RTX 4060) rel-
+PARAC ODEX’s structured workflow — CUDA                ative to the highly optimized reference implemen-
+kernel analysis, memory model reconstruction, and      tations. EP shows the largest headroom (29.7×
+                                                  16132
+
+===== PDF p.21 =====
+on A100), while MG is sensitive to end-to-end
+                                                                                                                 UniPar HeCBench Validation Rate
+transfer overhead and FT matches the reference.
+These results indicate PARAC ODEX can match ex-                                         1
+
+
+
+
+                                                          Validation Rate
+pert references on several kernels while remaining                                   0.75
+competitive on highly tuned codes. The baseline                                       0.5
+achieves a 1.00× median and 1.03× geometric-                                         0.25
+mean GPU-time speedup and fails to compile FT.                                          0
+                                                                                                           ini                       ini                     nt              lin
+                                                                                                                                                                                 e            ex
+                                                                                                                                                          ge                                 d
+                                                                                                        M                      M                       a-a                 se             Co
+App. G shows a detailed comparison of baseline vs                                               GP
+                                                                                                   T-5
+                                                                                                       -
+                                                                                                                       PT
+                                                                                                                         -5-
+                                                                                                                                                Ll
+                                                                                                                                                  am                    Ba
+                                                                                                                                                                                     Pa
+                                                                                                                                                                                        ra
+                                                                                                                    r-G                    d-
+PARAC ODEX outputs on NAS MG, where PARA -                                                                    iPa                      ne
+                                                                                                           Un                    netu
+                                                                                                                            r-fi
+C ODEX achieves 1.57× better GPU time through                                                                            iPa
+                                                                                                                    Un
+kernel fusion driven by profiling feedback.
+                                                         Figure 7: Percentage of translated code passing vali-
+F   Comparison with Prior Work                           dation across different UniPar models Comparing the
+                                                         Codex baseline and PARAC ODEX against the UniPar
+F.1 UniPar                                               methodology with a GPT-5-mini base model and the
+Figure 7 illustrates the substantial gains achieved      fine-tuned LLaMA model reported in prior work. The
+                                                         results highlight the substantial validation gains enabled
+by a continuously-iterating agent in the serial-to-
+                                                         by newer sophisticated agentic models.
+OpenMP translation task, particularly when guided
+by an explicit execution plan. The figure reports the
+fraction of HeCBench OpenMP translations that                                                                             LASSI                   ParaCodex                  Baseline
+
+pass validation across the 13 UniPar (Bitan et al.,                                                                                         HeCBench
+                                                                                          6
+2025) kernels that also appear in our evaluation set.
+                                                                      Time rel. to ref.
+
+
+
+
+These are kernels whose core computation resides                                          4
+within a single source file.                                                              2
+F.2 LASSI                                                                                 0
+                                                                                                                 py
+                                                                                                                 st
+
+
+                                                                                                                  h
+
+
+                                                                                                                  l
+
+                                                                                                                  g
+
+
+
+
+                                                                                                                                                                    i
+
+                                                                                                                                                                                       ut
+
+
+                                                                                                                                                                                         e
+
+                                                                                                                                                                                         s
+                                                                                                                ee
+
+
+
+
+                                                                                                                                                                  ob
+
+
+
+
+                                                                                                                                                                                      es
+                                                                                                                                                                                      at
+                                                                                                               rc
+
+
+
+
+                                                                                                               in
+                                                                                                              Co
+
+
+
+
+                                                                                                                                                                                    yo
+                                                                                                             tro
+                                                                                                              h
+
+
+
+
+                                                                                                                                                                                     t
+Dearing et al. (2025) proposed a successful pipeline
+
+
+
+
+                                                                                                                                                                                   cc
+                                                                                                            ea
+
+
+
+
+                                                                                                            dd
+
+
+
+
+                                                                                                                                                                  c
+
+
+
+
+                                                                                                                                                                                 -ro
+                                                                                                           rw
+
+
+
+
+                                                                                                                                                               ja
+
+                                                                                                                                                                        la
+                                                                                                           ic
+
+
+
+
+                                                                                                          en
+
+
+
+
+                                                                                                                                                                                 A
+                                                                                                         bs
+
+
+
+
+                                                                                                         be
+                                                                                           om
+
+
+
+
+                                                                                                                                                                              rix
+                                                                                                        lo
+
+
+
+
+                                                                                                                                                                             om
+                                                                                                     em
+                                                                                                      co
+
+
+
+
+                                                                                                                                                                           at
+                                                                                           at
+
+
+
+
+                                                                                                                                                                          nd
+for a related—but distinct—task: translating
+                                                                                                   e-
+
+
+
+
+                                                                                                                                                                          m
+
+                                                                                                                                                                        ra
+                                                                                                ns
+                                                                                              de
+
+
+
+
+CUDA to OpenMP. Their system achieved an 85%             Figure 8: Reference time / translated kernel run time.
+valid translation rate across ten HeCBench kernels       ParaCodex and Baseline for Jacobi are clipped at 6.0 for
+when averaged across several base models. Be-            visualization (actual values: 489.6 – PARAC ODEX and
+                                                         326.1 – baseline).
+cause their work reports performance relative to
+the original reference implementation, we evaluate
+our approach using the same metric on this sub-
+                                                         the 489× Ratio achieved by the jacobi kernel—
+set of kernels to enable approximate comparison,
+                                                         together with the consistently higher mean Ratio,
+despite the differing translation objective.
+                                                         suggest that a carefully designed, agentic workflow
+   Figure 8 reports the Ratio metric introduced by
+                                                         such as PARAC ODEX can deliver substantial perfor-
+Dearing et al. (2025), defined as the reference ex-
+                                                         mance advantages over both out-of-the-box Codex
+ecution time divided by the execution time of the
+                                                         and prior automated pipelines.
+translated kernel. We present the Ratio for ker-
+nels translated by the baseline Codex agent and by
+PARAC ODEX, alongside the average Ratio reported         G                                Example Code Transformation: NAS
+by LASSI across its models. Although LASSI eval-                                          MG vs Baseline
+uates on two A100 GPUs and PARAC ODEX runs on
+a single RTX 4060, reference times in each case are      To illustrate why PARAC ODEX outperforms the
+measured on the same hardware as the translated          zero-shot baseline, we compare their outputs on the
+kernels, mitigating most hardware-driven bias.           NAS MG multigrid solver’s resid stencil kernel.
+   It is important to emphasize that LASSI evalu-        The baseline produces a correct two-pass imple-
+ates CUDA→OpenMP translation whereas PARA -              mentation with device-allocated temporaries, while
+C ODEX performs serial→OpenMP translation;               PARAC ODEX’s staged workflow refines this pattern
+therefore, the comparison is not strictly direct. Nev-   into a fused single-pass structure through profiling
+ertheless, the large disparities observed—such as        feedback.
+                                                    16133
+
+===== PDF p.22 =====
+G.1 Baseline Output (Zero-Shot Codex)                  sum aggregates four neighbor values using ar-
+                                                       ray accesses with explicit index arithmetic (e.g.,
+The baseline generates a conservative two-pass
+                                                       I3D(i3,i2-1,i1) for the neighbor below).
+structure that separates neighbor computations
+                                                       Immediately after computing these register tem-
+from the residual update:
+                                                       poraries, the code uses them to update the residual
+   Structure: The baseline allocates two large
+                                                       array orr within the same loop iteration. The reg-
+temporary arrays (u1 and u2, each containing
+                                                       ister values are never written to global memory.
+19.7M doubles, totaling 316MB) on the host us-
+                                                          Performance improvements: This transforma-
+ing malloc, then maps them to the device using
+                                                       tion (1) eliminates 316MB device memory allo-
+OpenMP’s map(alloc:) clause.
+                                                       cation and host-side malloc overhead, (2) reduces
+   Pass 1 – Neighbor sum computation: A first
+                                                       kernel launches from 340 to 170 (50% reduction),
+OpenMP target kernel iterates over the 3D grid (ex-
+                                                       (3) removes the write-then-read global memory
+cluding boundary points) and computes 4-neighbor
+                                                       roundtrip for temporary values, and (4) eliminates
+sums along two different axes. For each grid point
+                                                       the implicit barrier between passes. Neighbor
+(i3,i2,i1), it reads four neighbors from the
+                                                       values remain in registers throughout, improving
+input array ou and writes the sums to the device-
+                                                       cache utilization. GPU time: 4569 ms, yielding a
+allocated temporary arrays u1 and u2. This pass
+                                                       1.57× speedup over baseline (Class C).
+launches 170 times during the solve (once per
+resid call).                                           G.3    Summary
+   Pass 2 – Residual computation: A second             Together, the two outputs show how PARA -
+OpenMP target kernel reads the precomputed sums        C ODEX’s profiling-guided workflow systematically
+from global memory temporaries u1 and u2, along        identifies and eliminates performance bottlenecks
+with the original array ou and the right-hand-side     that single-shot generation misses. The baseline’s
+ov, and computes the final residual values into out-   conservative strategy prioritizes correctness by ex-
+put array orr. This pass also launches 170 times.      plicitly materializing intermediate results, but this
+   Performance characteristics: This implemen-         incurs substantial overhead. PARAC ODEX’s staged
+tation incurs (1) host-side malloc/free over-          approach first establishes correctness, then uses
+head at each call, (2) 340 total kernel launches (2    profiling data to safely apply aggressive transfor-
+per resid call × 170 calls), (3) redundant global      mations (kernel fusion, register promotion, launch
+memory traffic (neighbor values written to device      reduction) that recover 57% of the baseline’s GPU
+memory in pass 1, then read back in pass 2), and (4)   time while maintaining bit-identical output.
+implicit synchronization barrier between the two
+passes. GPU time: 7152 ms (Class C).                   H     Full Benchmark Results
+
+G.2 ParaCodex Output (Staged Workflow)                 We provide the complete benchmark results for all
+                                                       evaluated kernels across all benchmark suites and
+PARAC ODEX’s analysis stage identifies the stencil     both hardware platforms. All values are reported
+pattern and flags it as a candidate for fusion. The    as mean ± standard deviation over 10 runs.
+initial translation stage produces a correct imple-
+mentation similar to the baseline. The optimization
+stage then profiles this code, observes high ker-
+nel launch counts (340 launches) and detects the
+memory traffic pattern (write-to-temps followed by
+read-from-temps), and applies kernel fusion.
+   Structure: The optimized code eliminates the
+u1 and u2 temporary arrays entirely. It uses a
+single OpenMP target kernel with collapse(2)
+to parallelize the outer two dimensions.
+   Fused pass – Register-based computation:
+Within the triply-nested loop, the code com-
+putes six register variables (u1_c, u1_L, u1_R,
+u2_c, u2_L, u2_R) that hold neighbor sums com-
+puted directly from the input array ou. Each
+                                                  16134
+
+===== PDF p.23 =====
+Benchmark         GPU            Reference (ms)        Baseline (ms)   PARAC ODEX (ms)       Para/Ref   Base/Ref
+ace               RTX 4060   24975.47 ± 5017.30    7628.00 ± 1179.02    6762.16 ± 1483.32       3.69x      3.27x
+                  A100         2432.34 ± 244.43     2948.95 ± 470.37      2048.05 ± 36.68       1.19x      0.82x
+atomicCost        RTX 4060     7339.33 ± 101.02   26334.07 ± 1811.09     9175.02 ± 986.64       0.80x      0.28x
+                  A100          1702.82 ± 28.76      8376.75 ± 17.35      1901.92 ± 25.39       0.90x      0.20x
+bsearch           RTX 4060    16378.49 ± 132.87    16936.13 ± 309.68         18.97 ± 1.29     863.46x      0.97x
+                  A100           754.64 ± 11.76       839.78 ± 20.38          7.53 ± 0.84     100.28x      0.90x
+colorwheel        RTX 4060       116.08 ± 12.96          5.30 ± 0.47         12.06 ± 0.95       9.63x     21.89x
+                  A100             26.20 ± 0.06          3.28 ± 0.43          8.67 ± 1.55       3.02x      7.99x
+convolution1D     RTX 4060       7690.94 ± 5.80       7899.75 ± 4.11       8890.83 ± 9.06       0.87x      0.97x
+                  A100          2645.43 ± 14.63       2787.36 ± 8.95      3213.02 ± 12.07       0.82x      0.95x
+dense-embedding   RTX 4060     2253.36 ± 405.50       710.69 ± 75.51      979.42 ± 116.23       2.30x      3.17x
+                  A100        6309.87 ± 1851.14    3365.64 ± 2000.29     5606.46 ± 348.73       1.13x      1.87x
+entropy           RTX 4060         49.68 ± 4.78         26.33 ± 0.63         39.46 ± 9.48       1.26x      1.89x
+                  A100             19.84 ± 0.17         13.33 ± 0.14         15.68 ± 0.41       1.27x      1.49x
+geodesic          RTX 4060        201.71 ± 7.63       207.04 ± 17.03        199.66 ± 7.85       1.01x      0.97x
+                  A100             93.73 ± 1.80         94.73 ± 2.14         93.45 ± 2.62       1.00x      0.99x
+heat              RTX 4060     9880.02 ± 105.64     10017.75 ± 97.68      9857.24 ± 99.57       1.00x      0.99x
+                  A100           1722.27 ± 3.35       1847.46 ± 4.32       1729.60 ± 9.05       1.00x      0.93x
+jacobi            RTX 4060      3713.60 ± 30.68         11.32 ± 0.56           7.95 ± 1.15    467.16x    328.01x
+                  A100           1444.95 ± 8.05          9.94 ± 0.23           8.17 ± 0.58    176.95x    145.42x
+keogh             RTX 4060    13132.75 ± 204.18                 N/A        508.80 ± 15.49      25.81x       N/A
+                  A100          4732.52 ± 16.72                 N/A        212.54 ± 10.79      22.27x       N/A
+layout            RTX 4060        770.77 ± 6.05       1123.06 ± 8.93        772.26 ± 8.40       1.00x      0.69x
+                  A100           500.48 ± 14.24        367.47 ± 6.74       500.50 ± 17.46       1.00x      1.36x
+matrix-rotate     RTX 4060        463.76 ± 5.20        481.44 ± 1.88        451.29 ± 6.49       1.03x      0.96x
+                  A100            717.30 ± 9.47        200.93 ± 5.39        159.27 ± 8.37       4.50x      3.57x
+michalewicz       RTX 4060        144.64 ± 2.60         77.14 ± 2.13         93.29 ± 2.39       1.55x      1.88x
+                  A100             79.53 ± 1.09         43.76 ± 1.47         48.47 ± 1.70       1.64x      1.82x
+mixbench          RTX 4060     92161.62 ± 79.69                 N/A    15736.51 ± 1299.34       5.86x       N/A
+                  A100        124244.45 ± 23.91                 N/A      27237.87 ± 15.06       4.56x       N/A
+pool              RTX 4060        182.06 ± 5.29       269.33 ± 24.57        173.02 ± 3.85       1.05x      0.68x
+                  A100            115.61 ± 4.41        143.67 ± 5.73        114.80 ± 1.76       1.01x      0.80x
+randomAccess      RTX 4060    24191.31 ± 114.48      5007.51 ± 28.45      5088.59 ± 20.33       4.75x      4.83x
+                  A100         42734.80 ± 13.69       1188.52 ± 8.97       1370.02 ± 6.39      31.19x     35.96x
+stddev            RTX 4060      1178.60 ± 26.32       816.89 ± 10.51       291.55 ± 13.41       4.04x      1.44x
+                  A100           766.35 ± 15.02       543.73 ± 13.16        201.90 ± 5.79       3.80x      1.41x
+stencil1d         RTX 4060      1418.69 ± 24.81       626.29 ± 16.92      1423.01 ± 30.04       1.00x      2.27x
+                  A100          754.63 ± 161.51      501.15 ± 181.58       718.01 ± 64.28       1.05x      1.51x
+vanGenuchten      RTX 4060     25394.62 ± 46.80   41714.44 ± 2814.44     15986.46 ± 27.71       1.59x      0.61x
+                  A100           738.73 ± 16.22    19193.48 ± 581.78       550.60 ± 13.13       1.34x      0.04x
+winograd          RTX 4060         14.09 ± 0.01          0.17 ± 0.00           5.60 ± 0.00      2.52x     80.82x
+                  A100              9.35 ± 1.66          0.10 ± 0.00           4.67 ± 0.67      2.00x     92.28x
+
+                               Table 3: Full results for the HECBench suite.
+
+
+
+
+                                                   16135
+
+===== PDF p.24 =====
+Benchmark   GPU            Reference (ms)         Baseline (ms)    PARAC ODEX (ms)        Para/Ref    Base/Ref
+b+tree      RTX 4060    11921.55 ± 625.50      7446.99 ± 83.76      8246.20 ± 787.64         1.45x       1.60x
+            A100              0.58 ± 0.02          0.39 ± 0.01           0.35 ± 0.02         1.65x       1.47x
+backprop    RTX 4060     2288.81 ± 429.78      1773.31 ± 66.98      2056.08 ± 133.46         1.11x       1.29x
+            A100         5356.22 ± 586.51     4813.65 ± 544.95      4670.80 ± 292.66         1.15x       1.11x
+bfs         RTX 4060         96.60 ± 2.30        101.08 ± 1.39         100.80 ± 7.96         0.96x       0.96x
+            A100         1825.96 ± 260.63     1667.75 ± 171.70      1669.62 ± 174.51         1.09x       1.09x
+hotspot     RTX 4060       1320.05 ± 1.23    11793.29 ± 181.74         1761.88 ± 0.13        0.75x       0.11x
+            A100           296.51 ± 12.88    10584.98 ± 789.00          104.55 ± 2.52        2.84x       0.03x
+lud         RTX 4060        347.44 ± 1.27    10862.94 ± 743.30          253.53 ± 2.18        1.37x       0.03x
+            A100           439.12 ± 12.50    27071.13 ± 698.61          257.92 ± 7.00        1.70x       0.02x
+nw          RTX 4060     7096.05 ± 516.37     8201.18 ± 199.32      6927.99 ± 338.62         1.02x       0.87x
+            A100         2156.66 ± 353.82     2598.07 ± 242.66      2236.57 ± 283.90         0.96x       0.83x
+
+                               Table 4: Full results for the Rodinia suite.
+
+
+
+
+Benchmark   GPU             Reference (ms)         Baseline (ms)     PARAC ODEX (ms)      Para/Ref    Base/Ref
+cg          RTX 4060      4544.32 ± 100.84     4343.48 ± 102.00       4439.33 ± 179.54        1.02x      1.05x
+            A100          25270.14 ± 87.73     25304.58 ± 48.05       25371.19 ± 33.62        1.00x      1.00x
+ep          RTX 4060       5985.12 ± 19.47      5979.38 ± 11.72          3962.72 ± 0.59       1.51x      1.00x
+            A100          39663.43 ± 19.82     24822.19 ± 13.94          1334.62 ± 1.19      29.72x      1.60x
+ft          RTX 4060   123926.81 ± 2055.12                  N/A    123525.64 ± 9686.44        1.00x       N/A
+            A100         14808.81 ± 168.88                  N/A      14834.23 ± 126.09        1.00x       N/A
+mg          RTX 4060       3869.68 ± 23.61      3370.77 ± 15.35         2748.69 ± 5.24        1.41x      1.15x
+            A100         16828.20 ± 140.30   24291.55 ± 3640.35     19324.83 ± 3115.36        0.87x      0.69x
+
+                                Table 5: Full results for the NAS suite.
+
+
+
+
+                                                 16136

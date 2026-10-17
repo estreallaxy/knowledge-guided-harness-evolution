@@ -1,0 +1,1109 @@
+===== PDF p.1 =====
+Textual Stochastic Gradient Descent: Discrete Optimization of External Memory
+                       for Reasoning Language Agents
+
+
+                                                   Jian Li 1 2 3 Hua Huang 1 2 3
+
+
+                          Abstract
+     While Large Language Models (LLMs) possess
+     strong reasoning capabilities, enabling them to
+     learn continuously from experience without para-
+     metric retraining remains an open challenge. Ex-
+     isting Retrieval-Augmented Generation (RAG)
+     approaches typically treat memory as a static or
+     append-only corpus, leading to “memory satura-
+     tion”, where accumulating noise and redundant in-
+     formation degrade performance over time. To ad-
+     dress this, we propose an Experience Library Op-
+     timization framework that treats the agent’s exter-
+     nal memory, which we call the experience library,
+     as a learnable parameter under an explicit capacity
+     budget. We introduce Textual Stochastic Gradient
+     Descent (TSGD), a discrete optimization algo-
+     rithm that refines this library via failure-driven
+     Add, Edit, and Delete operations. TSGD esti-
+     mates “textual gradients” through self-reflection
+                                                                         Figure 1. The evolution of agent learning paradigms. We transition
+     and uses a dual-verification mechanism to ensure
+                                                                         from implicit parameter updates (SFT/RL) and static retrieval
+     generalization, which prevents overfitting to local                 (RAG) to Experience Library Learning, where the memory itself
+     errors. Empirical results on MATH and AIME                          is actively optimized in text space under a strict capacity budget.
+     benchmarks show that TSGD achieves state-of-
+     the-art performance, improving accuracy by up to
+     18.7% over zero-shot baselines and substantially
+                                                                         (LLM) agents, this means not only reasoning within a fixed
+     outperforming static RAG, while keeping a com-
+                                                                         context but also accumulating and refining knowledge over
+     pact memory footprint (compressing hundreds of
+                                                                         time (Park et al., 2023; Wang et al., 2024a; Packer et al.,
+     experiences into ≈ 30 high-utility rules).
+                                                                         2023). Two paradigms currently dominate, and both have
+                                                                         clear limitations.
+                                                                         The first, parametric learning, updates the model’s weights
+1. Introduction                                                          through Supervised Fine-Tuning (SFT) (Ouyang et al., 2022)
+Learning from experience and adapting to new problems is                 or Reinforcement Learning (RL) (Schulman et al., 2017;
+a basic feature of intelligence. For Large Language Model                Shao et al., 2024). It works well for internalizing general
+                                                                         skills, but it is computationally expensive, slow to iterate,
+   1
+     School of Artificial Intelligence, Beijing Normal University,       and prone to catastrophic forgetting, where new knowledge
+Beijing, China 2 Beijing Key Laboratory of Artificial Intelligence       displaces what the model already knew in dynamic, multi-
+for Education, Beijing, China 3 Engineering Research Center of           domain settings.
+Intelligent Technology and Educational Application, Ministry
+of Education, Beijing, China. Correspondence to: Hua Huang               The second, non-parametric memory such as RAG (Lewis
+<huahuang@bnu.edu.cn>.                                                   et al., 2020; Guu et al., 2020; Sarthi et al., 2024; Asai et al.,
+Proceedings of the 43 rd International Conference on Machine             2024), moves knowledge into an external retrieval corpus.
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026             This avoids forgetting and supports fast updates. Most exist-
+by the author(s).                                                        ing systems, however, treat the memory as a static database
+
+                                                                     1
+
+===== PDF p.2 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+or an append-only cache with no quality control. Because              a discrete text-space optimizer that performs failure-driven
+they have no optimization mechanism, false positives accu-            Add, Edit, and Delete updates with dual verification and
+mulate, obsolete entries persist, and redundant items crowd           periodic regularization. Finally, we report consistent gains
+out the context window. As the library grows its signal-to-           on MATH and AIME, particularly under distribution shift,
+noise ratio drops, producing what we call “memory satura-             while keeping the library compact; the appendix adds cross-
+tion”, where more experience can actually hurt performance.           domain results on code generation (HumanEval/MBPP) and
+                                                                      tool use (ToolBench), as well as open-source backbones
+We argue that the missing piece is the optimization of non-
+                                                                      (Qwen-2.5-72B and Llama-3.1-70B).
+parametric memory. Just as we reduce loss by updating
+model parameters, we can reduce task error by updating
+the contents of the memory itself. Figure 1 summarizes                1.1. Related Work
+this progression, from parameter optimization (SFT/RL) to             We organize related work into four parts: retrieval-
+static retrieval (RAG) and then to experience library learning.       augmented       generation     and     external   memory,
+Here the learnable object is the agent’s own external mem-            example/trajectory-based       reasoning     augmentation,
+ory, a compact natural-language store of reusable strategies          self-reflection and correction, and the view of memory as
+that we call the experience library. We therefore ask:                an optimizable non-parametric object.
+
+     Under a frozen base model Mθ , can we treat a                    Retrieval-augmented generation and external memory.
+     natural-language experience library Φ as a learn-                RAG and external memory improve factuality and reason-
+     able object, optimizing it to maximize expected                  ing by retrieving relevant text or vectors as context for a
+     task utility under a strict capacity budget?                     frozen (or weakly updated) base model (Lewis et al., 2020;
+                                                                      Borgeaud et al., 2022). Recent advances focus on struc-
+Optimizing an experience library raises two difficulties.             tural understanding via graph-based retrieval (Edge et al.,
+The first is that the search space is discrete and non-               2024) or robustness against irrelevant contexts through cor-
+differentiable: unlike continuous weights, text experiences           rective mechanisms (Yan et al., 2024). However, many
+cannot be updated by backpropagation, so the “gradient”,              systems treat the memory as static data or a write-when-
+the direction of improvement, has to be inferred semanti-             needed cache whose quality is controlled by heuristics; as
+cally (Yuksekgonul et al., 2025). The second is the tension           the library grows, noise and topic drift degrade retrieval,
+between local repair and global capacity. Appending a cor-            matching our empirical observation of capacity saturation.
+rection for every error eventually causes memory saturation,
+so a good optimizer has to weigh immediate error correction           Example and trajectory based reasoning. In-context
+against the long-term health of the library, keeping entries          learning and chain-of-thought prompting treat curated
+that generalize rather than overfit.                                  demonstrations or reasoning traces as reusable experience
+We address these difficulties by formalizing the task as Ex-          (Wei et al., 2022; Wang et al., 2023). While scaling to
+perience Library Optimization under an explicit capacity              many-shot regimes shows promise (Agarwal et al., 2024),
+budget. We propose Textual Stochastic Gradient Descent                finding the optimal set of examples remains challenging. In
+(TSGD)1 , a framework that iteratively refines Φ through dis-         contrast, we treat experiences as editable atomic units and
+crete Add, Edit, and Delete operations. Each update follows           iteratively refine them under failure-driven updates, pushing
+a “textual gradient” that an LLM estimates by reflecting on           them from explaining one instance to transferable strategies
+a failure and identifying its root cause. A dual verification         or theorem application patterns.
+step then accepts an update only when it fixes the current
+error without hurting retrieval quality elsewhere, and a peri-        Reflection, correction, and verification. Recent methods
+odic regularization step compresses the library by merging            reduce reasoning errors by generating critiques or using
+redundant entries so that its signal-to-noise ratio stays high.       external tools for verification (Madaan et al., 2023; Shinn
+On MATH and AIME, TSGD clearly outperforms static                     et al., 2023; Gou et al., 2024). Textual-feedback optimizers
+RAG and prompt-based baselines, generalizing better while             such as TextGrad (Yuksekgonul et al., 2025) mainly opti-
+using a much smaller memory.                                          mize prompts or instructions, whereas TSGD optimizes a
+                                                                      structured experience library whose entries are retrieved,
+This paper makes three contributions. We cast experience
+                                                                      edited, and regularized under a capacity budget. However,
+library learning as Experience Library Optimization, treat-
+                                                                      the efficacy of intrinsic self-correction without external sig-
+ing a natural-language memory Φ as the object to optimize
+                                                                      nals is debated, with studies suggesting performance may
+under an explicit capacity budget. We then introduce TSGD,
+                                                                      degrade or hallucinate fixes (Huang et al., 2024). Our dual
+  1
+    Code is available         at   https://github.com/                verification explicitly decides whether an edit is written into
+superlj666/TSGD.                                                      Φ by combining local repair and global constraints, avoiding
+
+                                                                  2
+
+===== PDF p.3 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+
+
+
+Figure 2. Architecture overview of Textual Stochastic Gradient Descent (TSGD). The experience library Φ is a shared state across five
+agents: retrieval, solver, initializer, optimizer, and regularizer.
+
+
+the pitfalls of unverified self-correction.                           experience subset Φq = πretr (q, Φ):
+
+                                                                                            ŷ = Mθ (q, Φq ).                     (1)
+Optimizing non-parametric memory. Work on model
+editing, compressing memory stores, and risk minimization
+                                                                      The goal of experience library learning is to minimize the
+views of external storage suggests that deciding what to
+                                                                      expected risk:
+write, keep, and delete is a constrained selection problem
+(De Cao et al., 2021; Meng et al., 2023). A closely related
+                                                                                                                        
+                                                                         min R(Φ) = E(q,y)∼D ℓ Mθ (q, πretr (q, Φ)), y
+line of recent work also treats agent memory as an evolving             Φ∈FB
+                                                                                                                              (2)
+object: AgentKB (Tang et al., 2025) maintains a knowledge                               + λ Ω(Φ),
+base via heuristic add/edit/evict actions; ReasoningBank
+(Ouyang et al., 2026) appends and post-hoc filters experi-            where FB represents the hypothesis space of experience
+ences from self-evolving agents; and the contemporaneous              libraries subject to a capacity budget constraint (i.e., |Φ| ≤
+FLEX (Cai et al., 2025b) performs forward learning from               B). The term ℓ(·, ·) denotes a task-specific loss function
+experience without formal capacity guarantees. Other di-              (e.g., 0-1 loss for correctness or negative log-likelihood),
+rections include long-horizon reasoning agents (Gao et al.,           while Ω(Φ) serves as a regularization term penalizing library
+2025), training-free group optimization (Cai et al., 2025a),          complexity or redundancy, weighted by λ.
+and workflow memory (Wang et al., 2024b; Xu et al., 2025;
+Xiong et al., 2025). The key conceptual differences are that          Relation to prior memory-augmented agents. Experi-
+Experience Library Optimization formalizes the library as             ence Library Optimization offers a unified view of recent
+the optimization variable under a strict capacity budget B,           advances. Common practices such as manual prompt engi-
+and TSGD performs failure-driven editing with regression-             neering (Wei et al., 2022), Retrieval-Augmented Generation
+tested acceptance; a detailed point-by-point comparison is            (RAG) (Lewis et al., 2020; Guu et al., 2020), reflection-
+provided in Appendix E.                                               based memory (Shinn et al., 2023; Madaan et al., 2023), and
+                                                                      memory-augmented agents (e.g., MemGPT; Packer et al.,
+                                                                      2023) can all be viewed as approximate solutions to the
+2. Problem Formulation: Experience Library                            same objective R(Φ) under different parameterizations and
+   Optimization                                                       optimizer choices. While traditional methods often treat Φ
+                                                                      as static or manually curated, our approach directly opti-
+We view the experience library Φ as a controllable exter-
+                                                                      mizes Φ as a learnable object.
+nal conditional variable acting upon a fixed base model
+Mθ . This perspective enables the establishment of a unified
+Experience Library Optimization framework.                            2.1. Formal Definitions
+
+Consider a task distribution (q, y) ∼ D, where q is the query         To make the rest of the paper self-contained, we collect the
+(e.g., a math problem) and y is the target output. We employ          formal definitions used by TSGD.
+a fixed-parameter agent Mθ (where θ denotes the frozen                Definition 2.1 (Experience library). An experience library
+weights) and a retriever πretr . Given an experience library Φ,       is a finite set Φ = {e1 , . . . , en } where each ei ∈ V ∗ is a
+for each query q, the agent predicts based on the retrieved           natural-language string in some vocabulary V representing
+
+                                                                  3
+
+===== PDF p.4 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+a reusable, condition–strategy pair. The capacity-bounded                    difficulty) to ensure domain alignment when such metadata
+hypothesis class is FB = {Φ : |Φ| ≤ B}.                                      is available; 2) Dense Recall: computing semantic simi-
+Definition 2.2 (Textual gradient). Given a failed instance                   larity sim(ϕ(q), ϕ(e)) using an embedding model ϕ(·) to
+(q, y, ŷ) and retrieved subset Φq , the textual gradient is a               select the top-N candidates, yielding a task-specific subset
+triplet a = (OP, target, content) produced by an optimizer                   Φq ⊂ Φ. In open-domain settings without structured meta-
+agent πopt , where OP ∈ {A DD, E DIT, D ELETE}, target ∈                     data, hard filtering is bypassed and the agent relies solely
+Φ ∪ {∅}, and content ∈ V ∗ . The induced update is Φ′ =                      on dense recall (see Appendix F).
+Apply(a, Φ).
+                                                                             Solver Agent (πsolver ) The solver orchestrates task execu-
+Definition 2.3 (Dual verification). Given a candidate up-
+                                                                             tion by conditioning on the retrieved experiences. Taking
+date a with current and candidate libraries Φ, Φ′ , a tolerance
+                                                                             q and Φq as input, it generates a reasoning trajectory τ and
+ϵ ≥ 0, and a validation set Sval , local verification returns
+                                                                             the final prediction ŷ.
+Vlocal (a, qi ) = I[Mθ (qi , πretr (qi , Φ′ )) = yi ] and global veri-
+fication returns Vglobal = Score(Φ′ , Ssub ) − Score(Φ, Ssub )
+                                                                             Validator Agent (πvalidator ) The validator plays two roles.
+on a content-aware subset Ssub ⊆ Sval . The update is ac-
+                                                                             At inference time, it serves as a validity check on the solver’s
+cepted iff Vlocal = 1 and Vglobal > −ϵ.
+                                                                             output (verifying that the trajectory τ and prediction ŷ are
+Definition 2.4 (Regularization budget). A regularization                     well-formed and satisfy problem constraints). At optimiza-
+budget B is an upper bound on |Φ|. The regularizer agent                     tion time, it executes the Dual Verification protocol (Defini-
+πreg enforces |Φ| ≤ B via hierarchical clustering, semantic                  tion 2.3) that decides whether a proposed update is written
+merging, and global pruning.                                                 into Φ.
+Directly solving Eq. (2) is challenging due to (i) the dis-
+                                                                             Optimizer Agent (πopt ) The optimizer analyzes reason-
+crete and non-differentiable nature of Φ, which precludes
+                                                                             ing failures to derive a textual gradient—a semantic recom-
+standard gradient-based optimization, and (ii) the combi-
+                                                                             mendation for library modification. Given (q, y, ŷ, Φq ), it
+natorial search space involved in finding the optimal set of
+                                                                             diagnoses the failure as either “missing knowledge” (Add)
+experiences. To address these, we propose TSGD, which
+                                                                             or “erroneous experience” (Edit/Delete), outputting a dis-
+approximates gradient descent in the semantic space.
+                                                                             crete operation a ∈ {A DD, E DIT, D ELETE} together with
+                                                                             its associated textual content.
+3. The TSGD Framework
+                                                                             Regularizer Agent (πreg ) The regularizer maintains the
+We present Textual Stochastic Gradient Descent (TSGD), a
+                                                                             library’s signal-to-noise ratio and ensures compliance with
+framework that operationalizes experience learning through
+                                                                             the capacity constraint B. It performs hierarchical pruning:
+a collaborative multi-agent system. At the core of TSGD
+is the dynamic evolution of a discrete experience library
+Φ, functioning as a learnable, non-parametric memory. In                        • Subject-Level Clustering: partitioning Φ into domain-
+the following, we first delineate the functional roles of the                     specific clusters.
+constituent agents and then detail the TSGD algorithm.                          • Semantic Merging: consolidating redundant experi-
+                                                                                  ences within each cluster.
+3.1. Agent Roles and Collaborative Lifecycle
+                                                                                • Global Pruning: removing low-utility experiences
+Our framework employs six agents that collaborate to con-                         across clusters to optimize library size.
+struct, retrieve, and refine the experience library Φ.
+                                                                             3.2. Textual Stochastic Gradient Descent (TSGD)
+Initializer Agent (πinit ) The initializer distills atomic ex-
+periences from ground-truth (GT) trajectories. Given a                       We propose TSGD (Algorithm 1) to optimize Φ by mini-
+query-answer pair (q, y), it extracts an experience einit =                  mizing the empirical risk R̂D (Φ). TSGD bridges the gap
+{Condition → Strategy}. To ensure generalizability, πinit                    between discrete prompt optimization and traditional gra-
+is tasked with de-particularization—stripping problem-                       dient descent by utilizing LLM-generated feedback as a
+specific entities to transform concrete solutions into abstract,             surrogate for the gradient. Unlike standard SGD which op-
+high-level heuristics.                                                       erates in a continuous parameter space, TSGD performs
+                                                                             updates in a discrete textual space, where the “gradient” is a
+Retrieval Agent (πretr ) The retrieval agent identifies the                  semantic instruction for library refinement.
+k most relevant strategies from Φ for a query q. It im-
+plements a two-stage hybrid process: 1) Hard Filtering:                      Parallel Asynchronous Optimization To facilitate large-
+narrowing the search space based on metadata (e.g., subject,                 scale training, TSGD processes samples qi ∈ Strain via an
+
+                                                                         4
+
+===== PDF p.5 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+Algorithm 1 Textual Stochastic Gradient Descent (TSGD)                        −ϵ, allowing for minor regressions if they are compen-
+  Input: Training data Strain , Validation data Sval , Budget                 sated by broader improvements.
+  B, Tolerance ϵ
+  Output: Optimized experience library Φ∗                                The cost of global verification is therefore O(|Ssub |) per
+  Initialize: Φ ← πinit (Sseed )                                         accepted candidate (a few extra LLM calls), not O(|Sval |);
+  for each qi ∈ Strain in parallel do                                    a detailed cost decomposition is given in Appendix H.
+    {Step 1: Retrieval}
+    Φqi ← πretr (qi , Φ)
+    {Step 2: Forward Pass}                                               Periodic Regularization As Φ evolves, redundancy and
+    ŷi , τi ← πsolver (qi , Φqi )                                       noise may accumulate, potentially leading to “memory sat-
+    if ŷi ̸= yi then                                                    uration” and reduced retrieval efficiency. The regularizer
+         {Step 3: Backward Pass}                                         agent πreg is invoked periodically (e.g., after every N = 50
+         a ← πopt (qi , yi , ŷi , Φqi ) {Textual gradient estima-       samples) to maintain the library’s signal-to-noise ratio. By
+         tion}                                                           performing hierarchical clustering and merging (as detailed
+         {Step 4: Update with Dual Verification}                         in Section 3.1), πreg prunes Φ to respect the capacity con-
+         Φ′ ← Apply(a, Φ)                                                straint B, ensuring that only the most general and high-
+         Vlocal , Vglobal ← πvalidator (a, Φ, Φ′ , qi , Sval )           utility experiences are retained.
+         if Vlocal is True and Vglobal > −ϵ then
+            Φ ← Φ′ {Accept the update}                                   4. Theoretical Analysis
+         end if
+    end if                                                               We provide a theoretical characterization of TSGD, focusing
+    if periodic then Φ ← πreg (Φ) {Regularization}                       on its generalization properties, convergence stability, and
+  end for                                                                an idealized sample-efficiency model. We also provide a
+  return Φ                                                               representation-learning interpretation via the Information
+                                                                         Bottleneck principle. Detailed proofs for all theorems are
+                                                                         provided in the Appendix.
+asynchronous parallel workflow. While Algorithm 1 de-
+picts a sequential view, the implementation employs a con-               4.1. Generalization Bound via Capacity Control
+currency control mechanism to maintain library integrity.
+                                                                         We first analyze how the capacity constraint B on the expe-
+Specifically, threads acquire a Read Lock during retrieval
+                                                                         rience library Φ governs the generalization gap. We define
+and forward passes to ensure a consistent view of Φ, and
+                                                                         the hypothesis class induced by capacity-bounded libraries
+a Write Lock to perform atomic modifications when an up-
+                                                                         as HB = {hΦ : Φ ⊂ V ∗ , |Φ| ≤ B}, where each hΦ repre-
+date is accepted. This architecture enables Φ to evolve
+                                                                         sents the mapping from a query q to a prediction ŷ given the
+dynamically as it encounters diverse failure modes across
+                                                                         retrieved subset Φq .
+the training distribution.
+                                                                         Theorem 4.1 (Generalization Bound). For any distribution
+Dual Verification Mechanism A primary challenge in                       D, with probability at least 1 − δ over a training set of size
+discrete optimization is preventing overfitting to individual            m, the population risk R(Φ) satisfies
+samples. TSGD addresses this through the Validator Agent                                                             !
+                                                                                                  r                          r
+(πvalidator ), which enforces a two-stage verification process                                        B log |V ∗ |               log(1/δ)
+(Definition 2.3):                                                         R(Φ) ≤ R̂S (Φ) + O                             +                , (3)
+                                                                                                          m                         2m
+
+   • Local Verification: the agent confirms that the pro-
+     posed operation a successfully rectifies the failure on             where R̂S (Φ) is the empirical risk on the training set S.
+     the current query qi . This ensures the “textual gradient”
+     is locally valid.                                                   Theorem 4.1 provides a formal justification for the capac-
+                                                                         ity constraint B implemented by the regularizer agent πreg .
+   • Global Verification: to ensure generalization, the                  p bound shows that the generalization error scales with
+                                                                         The
+     agent constructs a content-aware validation set Ssub ⊂                 B/m. This implies that while a larger library might re-
+     Sval by retrieving validation samples semantically sim-             duce the empirical risk R̂S (Φ) by covering more edge cases,
+     ilar to qi (typically |Ssub | ≈ 5–10, avoiding the full-            it also increases the risk of overfitting (over-optimization)
+     validation-set overhead). It calculates the performance             to the training instances. The regularizer agent’s role in
+     gain ∆ = Score(Φ′ , Ssub ) − Score(Φ, Ssub ). An up-                maintaining Φ within the budget B is essential for bounding
+     date is accepted only if ∆ exceeds a tolerance threshold            the generalization gap, particularly in low-data regimes.
+
+                                                                     5
+
+===== PDF p.6 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+Table 1. Performance comparison on MATH sub-datasets (in-distribution; Mean@32) and AIME 2024/2025 (out-of-distribution). TSGD
+consistently outperforms baselines in both settings. Within each group of seven columns under MATH, the best per-row sub-dataset score
+is bolded for TSGD rows.
+
+                                                   MATH Level 5 (in-distribution)                                        OOD
+ Base Model     Method      Int. Alg.   Algebra   Prealg. Geometry Num. Theory        Precalc.   Prob.   Overall   AIME 24 AIME 25
+ Grok-4.1       LLM          16.73       75.26    84.51     15.43          83.40         33.20   52.24   49.30      41.46     31.77
+                ReAct         25.0        70.0     78.0      20.0           75.0          38.0    55.0   48.0        38.0      30.0
+                RAG           28.0        72.0     80.0      22.0           78.0          40.0    57.0   50.0        39.0      31.0
+                TF-GRPO       22.0        78.0     86.0      25.0           85.0          42.0    58.0   53.0        43.0      34.0
+                TSGD          35.0        88.0     92.0     31.25           90.0         56.42    65.0   68.0        55.0      45.0
+ GPT-4o mini    LLM          27.65       85.78    74.82     12.24          99.72         44.53   42.58   54.60      15.21     12.43
+                TSGD          45.0        95.0     85.0     21.65           99.9         62.31    55.0   68.0        30.0      25.0
+
+
+
+4.2. Convergence of Textual Stochastic Gradient                         Under Assumption 4.3, while learning a generic f : Q → Y
+     Descent                                                            without exploiting the compositional structure can require
+                                                                        sample complexity Ω(2K ) to distinguish among combina-
+Optimizing in a discrete textual space presents challenges
+                                                                        tions, the expected sample complexity for TSGD to cover
+for stability. We analyze the convergence of the TSGD up-
+                                                                        all K atomic skills via the optimizer is O(K log K), by
+date sequence {Φt } under the dual verification mechanism.
+                                                                        analogy to the coupon collector’s problem.
+Theorem 4.2 (Monotonic Improvement). Assume the utility
+function U (Φ) = 1 − R(Φ) is bounded. If the dual verifica-             Proposition 4.4 explains why TSGD can achieve strong re-
+tion protocol ensures that any accepted update at satisfies             sults with limited training data in benign regimes: once
+E[U (Φt+1 ) − U (Φt ) | accept] ≥ γ for some γ > 0, then                πinit or πopt identifies an atomic heuristic (e.g., a specific
+the expected utility E[U (Φt )] converges.                              geometric theorem), the solver can apply it to any future
+                                                                        combination. In practice, training experiences are partial
+This result highlights the necessity of the Validator Agent
+                                                                        and noisy (multiple skills may be implicated by a single
+(πvalidator ). In discrete optimization, a “textual gradient” a
+                                                                        failure), so Assumption 4.3 should be interpreted as an ide-
+derived from a single failure might be noisy or locally biased.
+                                                                        alized model rather than a tight account of practical sample
+The dual verification (local and global) acts as a stochas-
+                                                                        efficiency. Theorems 4.1 and 4.2 remain our primary load-
+tic filter that only admits updates with a high probability
+                                                                        bearing results.
+of providing a positive expected gain. By enforcing this
+monotonic property, TSGD avoids the oscillatory behavior
+often seen in prompt engineering and ensures that the library           4.4. Information Bottleneck Interpretation
+evolves toward a stable, high-utility state.                            We can further interpret the collaborative roles of the opti-
+                                                                        mizer (πopt ) and regularizer (πreg ) through the Information
+4.3. An Idealized Sample-Complexity Model for                           Bottleneck (IB) principle. The optimization of Φ can be
+     Compositional Reasoning                                            viewed as
+One of the conceptual advantages of experience learning
+over full-parameter fine-tuning is sample efficiency. We                            min LIB = −I(Y ; Φ) + βI(Q; Φ),                   (4)
+formalize a simple, idealized model of this phenomenon.                              Φ
+
+We state this as a proposition (rather than a theorem) under
+an explicit assumption that abstracts away the noise of real            where I(·; ·) denotes mutual information.
+training experiences.
+                                                                        This perspective clarifies the “textual gradient” dynamics.
+Assumption 4.3 (Idealized skill sampling). Suppose tasks                Maximizing I(Y ; Φ) corresponds to the Optimizer Agent’s
+are compositional over K atomic skills {s1 , . . . , sK } and           objective: adding predictive content to Φ to resolve rea-
+there exists a reusable atomic experience ei for each skill si          soning failures. Conversely, minimizing I(Q; Φ) corre-
+such that the solver can compose any subset of {e1 , . . . , eK }       sponds to the Regularizer Agent’s objective: abstracting
+in-context to solve unseen combinations. We further assume              away instance-specific details (nuisances) from the queries
+that (a) each training experience cleanly reveals one missing           to prevent the library from becoming a collection of “lookup
+skill (when the optimizer fires), and (b) repeated exposure             tables”. The budget B acts as a hard bottleneck that forces
+to the same revealed skill suffices for it to be acquired by            πreg to retain only the most informative, generalizable strate-
+the library.                                                            gies, approximating a minimal sufficient statistic for the
+Proposition 4.4 (Sample efficiency under Assumption 4.3).               reasoning task.
+
+                                                                    6
+
+===== PDF p.7 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+Table 2. Ablation results on MATH Precalculus (Level 5). Full                set, prompt budget, and evaluation harness) are reported
+TSGD achieves superior performance while maintaining the
+most compact experience library. All four pairwise comparisons
+                                                                             in Appendix H; AgentKB is discussed conceptually in Ap-
+against the LLM baseline have p < 10−4 under McNemar’s test                  pendix E.
+(n=1018); see Appendix J.
+                                                                             5.1.2. M AIN R ESULTS
+ Method             Pass@1   Pass@2    Pass@4   Pass@8   Exp. Cap. (B)
+ LLM (Baseline)     33.52    49.06      63.73   76.87               –        Table 1 summarizes the performance across different base
+ + Initialization   55.67    70.77      84.09   93.26             533        models and subjects. On Grok-4.1 Fast Non-Reasoning,
+ + Optimization     47.21    65.45      81.35   93.65             662
+ + Verification     53.61    73.40      90.06   98.08             204
+                                                                             TSGD achieves 68.0% overall accuracy on MATH Level
+ TSGD (Full)        58.33    76.88      90.68   97.22              27        5, a +18.7% improvement over the zero-shot baseline and
+                                                                             a gain over the reported retrieval and prompt-based base-
+                                                                             lines. The gains are particularly significant in Geometry
+                                                                             (+15.82%) and Intermediate Algebra (+18.27%), where
+                                                                             domain-specific heuristics are crucial. Notably, TSGD ex-
+                                                                             hibits strong OOD generalization on AIME, suggesting that
+                                                                             the learned textual gradients capture fundamental reasoning
+                                                                             patterns rather than memorizing training instances. Results
+                                                                             on GPT-4o mini further confirm the model-agnostic effec-
+                                                                             tiveness of TSGD relative to the zero-shot setting. Results
+                                                                             on open-source backbones (Qwen-2.5-72B and Llama-3.1-
+                                                                             70B) are reported in Appendix G.
+
+
+                                                                             Cost considerations. TSGD’s per-query retrieval latency
+  Figure 3. Ablation performance trends across configurations.               is identical to standard RAG (a CPU-side embedding
+                                                                             search). The prompt-token budget per query is also com-
+                                                                             parable to RAG in our setup, since TSGD retrieves a small
+5. Experiments                                                               set of distilled rules (k ≤ 16) rather than full raw trajecto-
+                                                                             ries. However, TSGD incurs a one-time offline construction
+We evaluate TSGD along two dimensions: (i) in-distribution                   cost: approximately 120–124 optimization calls excluding
+performance on high-difficulty MATH subsets, and (ii)                        seeding, or about 162 total calls including seeding and pe-
+OOD generalization on AIME 2024 and 2025. In the ap-                         riodic regularization in the 20-sample setting. This offline
+pendix we additionally report cross-domain results on Hu-                    cost amortizes after a few queries in sustained deployment.
+manEval, MBPP, and ToolBench (Appendix F), evaluation                        We do not claim that TSGD’s per-query inference cost is
+on open-source backbones Qwen-2.5-72B and Llama-3.1-                         identical to RAG in an absolute systems-level sense, and we
+70B (Appendix G), conceptual comparison with AgentKB                         provide a full token-level decomposition in Appendix H.
+and related editable-memory systems (Appendix E), empiri-
+cal comparisons with AWM, ACE, and FLEX (Appendix H),                        5.2. Ablation Study
+and significance tests for the ablation comparisons (Ap-
+pendix J).                                                                   We perform an ablation study on the MATH Precalculus
+                                                                             (Level 5) subset to quantify the contribution of each com-
+5.1. Performance Comparison                                                  ponent. We compare: (1) Zero-shot Baseline, (2) Init Only
+                                                                             (static library), (3) Optimization w/o Verification (local re-
+5.1.1. E XPERIMENTAL S ETUP                                                  pair only), (4) Verification w/o Regularization (unbounded
+                                                                             growth), and (5) Full TSGD. Table 2 reports the results.
+We evaluate TSGD on high-difficulty reasoning tasks: (i) in-
+                                                                             Full-MATH ablations (all seven subjects) are provided in
+distribution performance on MATH Level 5 subsets, and (ii)
+                                                                             Appendix I.
+Out-of-Distribution (OOD) generalization on AIME 2024
+and 2025. We use 2,097 MATH training samples (60%                            Component Analysis: (1) Initialization provides a strong
+of the original split) to construct the experience library.                  starting point, proving that searchable experience is inher-
+Baseline comparisons in the main table include zero-shot                     ently valuable. (2) Dual Verification is critical for sustain-
+LLM, ReAct-style reasoning, RAG (retrieving ground-truth                     ability. Optimization without verification leads to a drop in
+trajectories), and TF-GRPO (training-free GRPO) where                        Pass@1 due to “noisy gradients” that repair local errors but
+available. We report Mean@32 accuracy as the primary                         harm global consistency. The dual-verification mechanism
+metric. Empirical comparisons against AWM, ACE, and                          acts as a stochastic filter (as per Theorem 4.2), ensuring
+FLEX under matched conditions (same backbone, problem                        monotonic improvement. (3) Regularization transforms per-
+
+                                                                         7
+
+===== PDF p.8 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+                                                                        from being “poisoned” by local heuristics that do not gener-
+                                                                        alize.
+                                                                        Exploration vs. Exploitation: in the early stages of library
+                                                                        evolution, the optimizer favors A DD actions (> 60%) to ex-
+                                                                        pand knowledge coverage. As the library matures, it shifts
+                                                                        toward E DIT actions (> 70%) for refinement and abstrac-
+                                                                        tion (Figure 7). D ELETE is rarely triggered per-sample: it
+                                                                        activates primarily during the regularizer’s periodic com-
+                                                                        pression, and removing it would prevent the 533 → 27 prun-
+                                                                        ing observed in our main experiments (see Appendix K).
+
+ Figure 4. Effect of retrieval count k on accuracy (Mean@32).           5.3.3. R EGULARIZATION A NALYSIS (πREG )
+                                                                        Regularization maintains a high signal-to-noise ratio by
+                                                                        pruning and merging experiences. Without regularization,
+                                                                        the library’s unbounded growth introduces redundant and
+                                                                        noisy entries, leading to retrieval interference and perfor-
+                                                                        mance regression in late-stage training. Figure 8 demon-
+                                                                        strates that periodic regularization yields more stable and
+                                                                        sustained improvements compared to unregularized growth,
+                                                                        aligning with the generalization bounds in Theorem 4.1.
+
+                                                                        5.4. Qualitative Analysis
+                                                                        5.4.1. E XPERIENCE E VOLUTION
+ Figure 5. Dual verification filtering rates during optimization.
+                                                                        To better understand the optimization dynamics, we qualita-
+                                                                        tively examine the life cycle of experiences. Evolution typi-
+formance into efficient memory. TSGD (Full) compresses                  cally follows a seed–refine–integrate pattern: the initializer
+the library from hundreds of entries to just 27 while im-               produces concrete, instance-grounded tips; the optimizer
+proving Pass@1, showing that high-quality abstractions can              converts these into abstract strategies by removing problem-
+replace redundant data, reducing retrieval noise.                       specific noise; and the regularizer consolidates semantically
+                                                                        overlapping clusters into a compact set of core rules un-
+5.3. Component Analysis                                                 der the budget B. Figure 6 visualizes this consolidation
+                                                                        process, where a diffuse set of experiences is distilled into
+5.3.1. R ETRIEVAL A NALYSIS (πRETR )
+                                                                        transferable reasoning strategies. Representative learned ex-
+We analyze the retrieval agent’s sensitivity to domain drift            periences after regularization are provided in Appendix M.
+and the number of retrieved items (k). Domain Drift: we
+observe significant semantic overlap between subjects like              5.4.2. E XPERIENCE R ELEVANCE
+Precalculus and Algebra, leading to ≈ 15.0% retrieval er-
+                                                                        We investigate whether improvements stem from logical
+rors. Implementing Subject Filtering improves Mean@1
+                                                                        relevance or merely additional context. On MATH Precalcu-
+from 49.60% to 56.17%, confirming the need for hard do-
+                                                                        lus, we compare no experience, low-relevance (Geometry),
+main constraints to prevent “subject drift” (see Appendix D
+                                                                        and high-relevance (Precalculus) retrieval. Table 3 shows
+for detailed visualization).
+                                                                        that while low-relevance experiences offer some benefit
+Influence of k: performance saturates at k ≈ 14 (Figure 4).             (likely due to shared mathematical logic), high-relevance
+Further analysis of retrieval quality and its impact on accu-           experiences yield the strongest gains (Pass@1 +26.41%),
+racy is provided in Appendix D.                                         confirming the precision of learned gradients.
+
+5.3.2. O PTIMIZATION & V ERIFICATION A NALYSIS                          5.4.3. S EMANTIC OVERLAP AND R ETRIEVAL D RIFT
+       (πOPT )
+                                                                        To diagnose retrieval drift, we visualize question embed-
+Filtering Effect: Figure 5 shows that ≈ 28% of candidate                dings using t-SNE. As shown in Figure 12, although sub-
+updates are rejected by global verification despite passing             jects form clusters, heavy overlap near boundaries indicates
+local tests. This empirical finding confirms Theorem 4.2,               that embedding similarity alone is insufficient for precise
+where the dual-verification mechanism prevents the library              retrieval, justifying the inclusion of hard subject constraints
+
+                                                                    8
+
+===== PDF p.9 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+
+
+
+              (a) Raw experiences                      (b) Within-cluster refinement                       (c) Budgeted core set
+Figure 6. Visualization of the regularizer’s three-stage consolidation process. Regularization turns a diffuse, redundant set of experiences
+into a compact set of transferable strategies under |Φ| ≤ B.
+
+
+
+
+                                                                                Figure 8. Effect of regularization on training stability.
+
+                                                                           Table 3. Experience relevance study on MATH Precalculus (Level
+                                                                           5). High-relevance experiences yield the most significant perfor-
+                                                                           mance boost.
+
+                                                                            Configuration         Pass@1     Pass@2      Pass@4     Pass@8
+                                                                            No Exp                 33.35       49.02      64.15      76.87
+                                                                            Low-Rel (Geo)          49.80       68.79      86.14      93.63
+                                                                            High-Rel (Precalc)     59.76       76.78      88.37      95.21
+
+Figure 7. Optimizer action distribution with and w/o initialization.
+                                                                           model’s ability to estimate textual gradients, which can
+                                                                           be noisy for smaller models. The discrete nature of the
+in our framework.                                                          optimization also makes convergence guarantees harder to
+                                                                           derive than for continuous SGD. Our main experiments
+6. Conclusion                                                              use proprietary backbones (Grok-4.1 and GPT-4o mini);
+                                                                           we provide open-source backbone results in Appendix G,
+In this work, we presented Textual Stochastic Gradient De-                 but acknowledge that further open-source validation across
+scent (TSGD), a framework for optimizing non-parametric                    heterogeneous tasks would strengthen the practical case.
+memory in reasoning agents. By formulating library con-
+                                                                           Future Work. Promising directions include extend-
+struction as Experience Library Optimization, we connect
+                                                                           ing TSGD to multi-modal domains, exploring theoretical
+static retrieval with active learning. We show that a compact,
+                                                                           bounds for discrete memory optimization, and applying this
+actively optimized experience library can improve reasoning
+                                                                           framework to lifelong learning scenarios where agents must
+performance and generalization, outperforming traditional
+                                                                           adapt to non-stationary task distributions. More broadly,
+append-only RAG systems.
+                                                                           TSGD points toward agents that not only reason but also
+Limitations. Our current implementation relies on the base                 learn how to learn from their own mistakes.
+
+                                                                       9
+
+===== PDF p.10 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+Acknowledgements                                                         Cai, Z., Guo, X., Pei, Y., Feng, J., Su, J., Chen, J., Zhang, Y.-
+                                                                           Q., Ma, W.-Y., Wang, M., and Zhou, H. FLEX: Continu-
+The work is supported partially by the National Natural                    ous agent evolution via forward learning from experience.
+Science Foundation of China (No. 62576041, 62106257,                       arXiv preprint arXiv:2511.06449, 2025b.
+62437001) and by the Fundamental Research Funds for the
+Central Universities (No. 2253500001, No. 2251200169).                   De Cao, N., Aziz, W., and Titov, I. Editing factual knowl-
+We thank the anonymous ICML reviewers and the area                         edge in language models. In Proceedings of the Confer-
+chair for their constructive feedback, which substantially                 ence on Empirical Methods in Natural Language Pro-
+improved the camera-ready version of this paper.                           cessing (EMNLP), 2021.
+
+Impact Statement                                                         Edge, D., Trinh, H., Cheng, N., Bradley, J., Chao, A., Mody,
+                                                                           A., Truitt, S., and Larson, J. From local to global: A
+This paper presents work whose goal is to advance the                      graph RAG approach to query-focused summarization.
+field of machine learning. TSGD provides a mechanism                       arXiv preprint arXiv:2404.16130, 2024.
+for compressing accumulated reasoning experience into a
+compact, capacity-bounded library, which can improve the                 Gao, S., Gu, Y., Wu, Z., Kong, L., Zhang, W., Cai, Z.,
+reproducibility and resource efficiency of LLM-agent de-                   Zheng, F., Ma, T., Shen, J., Zhao, H., Zhang, D., Zhang,
+ployments by reducing reliance on parametric fine-tuning.                  H., Liu, K., Lyu, C., Duan, Y., Chen, C., Ma, N., Gao, J.,
+As with any system that distills and reuses past reasoning                 Lyu, H., Lin, D., and Chen, K. Long-horizon reasoning
+trajectories, there is a possibility that erroneous or biased ex-          agent for olympiad-level mathematical problem solving.
+periences, if not caught by the dual-verification step, persist            arXiv preprint arXiv:2512.10739, 2025.
+in the library and influence future predictions. The capacity
+budget and periodic regularization in TSGD are intended to               Gou, Z., Shao, Z., Gong, Y., Shen, Y., Yang, Y., Duan, N.,
+mitigate, but do not eliminate, this risk; practitioners deploy-           and Chen, W. CRITIC: Large language models can self-
+ing TSGD-style memories in higher-stakes settings should                   correct with tool-interactive critiquing. In Proceedings
+pair the framework with domain-appropriate auditing of                     of the International Conference on Learning Representa-
+the learned experiences. We do not introduce new datasets,                 tions (ICLR), 2024.
+models, or capabilities that we believe warrant additional
+                                                                         Guu, K., Lee, K., Tung, Z., Pasupat, P., and Chang, M.-
+ethical discussion beyond the standard considerations of
+                                                                          W. Retrieval augmented language model pre-training.
+LLM-based reasoning agents.
+                                                                           In Proceedings of the 37th International Conference on
+                                                                          Machine Learning (ICML), 2020.
+References
+                                                                         Huang, J., Chen, X., Mishra, S., Zheng, H. S., Yu, A. W.,
+Agarwal, R., Singh, A., Zhang, L. M., Bohnet, B., Rosias, L.,              Song, X., and Zhou, D. Large language models cannot
+  Chan, S. C. Y., Anand, A., Abbas, Z., Nova, A., Co-Reyes,                self-correct reasoning yet. In Proceedings of the Interna-
+  J. D., Chu, E., Behbahani, F., Faust, A., and Larochelle,                tional Conference on Learning Representations (ICLR),
+  H. Many-shot in-context learning. In Advances in Neural                  2024.
+  Information Processing Systems, 2024.
+                                                                         Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V.,
+Asai, A., Wu, Z., Wang, Y., Sil, A., and Hajishirzi, H. Self-              Goyal, N., Küttler, H., Lewis, M., Yih, W.-t., Rocktäschel,
+  RAG: Learning to retrieve, generate, and critique through                T., Riedel, S., and Kiela, D. Retrieval-augmented genera-
+  self-reflection. In Proceedings of the International Con-                tion for knowledge-intensive NLP tasks. In Advances in
+  ference on Learning Representations (ICLR), 2024.                        Neural Information Processing Systems, 2020.
+
+Borgeaud, S., Mensch, A., Hoffmann, J., Cai, T., Rutherford,             Madaan, A., Tandon, N., Gupta, P., Hallinan, S., Gao, L.,
+  E., Millican, K., van den Driessche, G. B., Lespiau, J.-B.,             Wiegreffe, S., Alon, U., Dziri, N., Prabhumoye, S., Yang,
+  Damoc, B., Clark, A., et al. Improving language models                  Y., Gupta, S., Majumder, B. P., Hermann, K., Welleck,
+  by retrieving from trillions of tokens. In Proceedings of               S., Yazdanbakhsh, A., and Clark, P. Self-refine: Iterative
+  the 39th International Conference on Machine Learning                   refinement with self-feedback. In Advances in Neural
+  (ICML), pp. 2206–2240. PMLR, 2022.                                      Information Processing Systems, 2023.
+
+Cai, Y., Cai, S., Shi, Y., Xu, Z., Chen, L., Qin, Y., Tan,               Meng, K., Sen Sharma, A., Andonian, A., Belinkov, Y.,
+  X., Li, G., Li, Z., Lin, H., Mao, Y., Li, K., and Sun, X.               and Bau, D. MEMIT: Mass-editing memory in a trans-
+  Training-free group relative policy optimization. arXiv                 former. In Proceedings of the International Conference
+  preprint arXiv:2510.08191, 2025a.                                       on Learning Representations (ICLR), 2023.
+
+                                                                    10
+
+===== PDF p.11 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+Ouyang, L., Wu, J., Jiang, X., Almeida, D., Wainwright,               Wang, X., Wei, J., Schuurmans, D., Le, Q. V., Chi,
+  C. L., Mishkin, P., Zhang, C., Agarwal, S., Slama, K.,               E. H., Narang, S., Chowdhery, A., and Zhou, D. Self-
+  Ray, A., et al. Training language models to follow in-               consistency improves chain of thought reasoning in lan-
+  structions with human feedback. Advances in Neural                   guage models. In Proceedings of the International Con-
+ Information Processing Systems, 2022.                                 ference on Learning Representations (ICLR), 2023.
+
+Ouyang, S., Yan, J., Hsu, I.-H., Chen, Y., Jiang, K., Wang,           Wang, Z. Z., Mao, J., Fried, D., and Neubig, G. Agent
+  Z., Han, R., Le, L. T., Daruki, S., Tang, X., Tiru-                  workflow memory. arXiv preprint arXiv:2409.07429,
+  malashetty, V., Lee, G., Rofouei, M., Lin, H., Han, J.,              2024b.
+  Lee, C.-Y., and Pfister, T. ReasoningBank: Scaling agent
+                                                                      Wei, J., Wang, X., Schuurmans, D., Bosma, M., Ichter, B.,
+  self-evolving with reasoning memory. In Proceedings
+                                                                       Xia, F., Chi, E., Le, Q. V., and Zhou, D. Chain-of-thought
+  of the International Conference on Learning Representa-
+                                                                       prompting elicits reasoning in large language models.
+  tions (ICLR), 2026.
+                                                                       In Advances in Neural Information Processing Systems,
+Packer, C., Fang, V., Patil, S. G., Lin, K., Wooders, S.,              2022.
+  Stoica, I., and Gonzalez, J. E. MemGPT: Towards LLMs                Xiong, Z., Lin, Y., Xie, W., He, P., Liu, Z., Tang, J.,
+  as operating systems. arXiv preprint arXiv:2310.08560,                Lakkaraju, H., and Xiang, Z. How memory management
+  2023.                                                                 impacts LLM agents: An empirical study of experience-
+                                                                        following behavior. arXiv preprint arXiv:2505.16067,
+Park, J. S., O’Brien, J. C., Cai, C. J., Morris, M. R., Liang,
+                                                                        2025.
+  P., and Bernstein, M. S. Generative agents: Interactive
+  simulacra of human behavior. In Proceedings of the 36th             Xu, W., Liang, Z., Mei, K., Gao, H., Tan, J., and Zhang, Y.
+  Annual ACM Symposium on User Interface Software and                  A-Mem: Agentic memory for LLM agents. In Advances
+  Technology (UIST), 2023.                                              in Neural Information Processing Systems, 2025.
+Sarthi, P., Abdullah, S., Tuli, A., Khanna, S., Goldie, A.,           Yan, S.-Q., Gu, J.-C., Zhu, Y., and Ling, Z.-H. Cor-
+  and Manning, C. D. RAPTOR: Recursive abstractive pro-                 rective retrieval augmented generation. arXiv preprint
+  cessing for tree-organized retrieval. In Proceedings of the           arXiv:2401.15884, 2024.
+  International Conference on Learning Representations
+  (ICLR), 2024.                                                       Yuksekgonul, M., Bianchi, F., Boen, J., Liu, S., Lu, P.,
+                                                                        Huang, Z., Guestrin, C., and Zou, J. Optimizing gen-
+Schulman, J., Wolski, F., Dhariwal, P., Radford, A., and                erative AI by backpropagating language model feed-
+  Klimov, O. Proximal policy optimization algorithms.                   back. Nature, 639:609–616, 2025. Earlier version:
+  arXiv preprint arXiv:1707.06347, 2017.                                arXiv:2406.07496.
+
+Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Zhang, M.,
+  Li, Y. K., Wu, Y., and Guo, D. DeepSeekMath: Pushing
+  the limits of mathematical reasoning in open language
+  models, 2024.
+
+Shinn, N., Cassano, F., Berman, E., Gopinath, A.,
+  Narasimhan, K., and Yao, S. Reflexion: Language agents
+  with verbal reinforcement learning. In Advances in Neu-
+  ral Information Processing Systems, 2023.
+
+Tang, X., Qin, T., Peng, T., Zhou, Z., Shao, D., Du, T., Wei,
+  X., Xia, P., Wu, F., Zhu, H., Zhang, G., Liu, J., Wang, X.,
+  Hong, S., Wu, C., Cheng, H., Wang, C., and Zhou, W.
+  AgentKB: Leveraging cross-domain experience for agen-
+  tic problem solving. arXiv preprint arXiv:2507.06229,
+  2025.
+
+Wang, G., Xie, Y., Jiang, Y., Mandlekar, A., Xiao, C., Zhu,
+ Y., Fan, L., and Anandkumar, A. Voyager: An open-ended
+ embodied agent with large language models. Transac-
+ tions on Machine Learning Research (TMLR), 2024a.
+
+                                                                 11
+
+===== PDF p.12 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+A. Notation Table
+
+                                   Symbol       Meaning
+                                   D            Data distribution, (q, y) ∼ D
+                                   q, y, ŷ     Query, target output, predicted output
+                                   Mθ           Frozen base model
+                                   Φ            Experience library, Φ ⊂ V ∗
+                                   Φq           Retrieved subset for q, Φq = πretr (q, Φ)
+                                   k            Retrieval count at inference (Top-k)
+                                   B            Capacity budget, |Φ| ≤ B
+                                   πretr        Retrieval agent
+                                   πsolver      Solver agent
+                                   πinit        Initializer agent
+                                   πvalidator   Validator agent
+                                   πopt         Optimizer agent (textual gradient)
+                                   πreg         Regularizer agent
+                                   ℓ            Loss function
+                                   λ            Regularization coefficient
+                                   Ω(Φ)         Regularizer term
+                                   a            Atomic edit, a ∈ {A DD, E DIT, D ELETE}
+                                   τ            Reasoning trajectory
+                                   U (Φ)        Library utility (e.g., accuracy)
+                                   m            Number of training samples
+                                   N            Regularization period (every N steps)
+                                   R(Φ)         Population risk
+                                   R̂S (Φ)      Empirical risk on training set S
+                                   Rm           Rademacher complexity
+                                          Table 4. Notation used throughout the paper.
+
+
+
+B. Detailed Proofs
+B.1. Generalization Bound via Rademacher Complexity (Theorem 4.1)
+Theorem B.1 (Generalization Bound, Restated). Let HB = {hΦ : Φ ⊂ V ∗ , |Φ| ≤ B} be the hypothesis class induced by
+capacity-bounded experience libraries. For any distribution D, with probability at least 1 − δ,
+                                                        r                 r
+                                                           2B ln |V ∗ |     ln(1/δ)
+                                    R(Φ) ≤ R̂S (Φ) +                    +           .                          (5)
+                                                               m              2m
+
+Proof. Fix a training set S = {(qi , yi )}m
+                                          i=1 . Let R̂S (Φ) be the empirical risk on S and R(Φ) be the population risk under
+D. Since |Φ| ≤ B, the number of admissible libraries is bounded by
+                                                        B  ∗ 
+                                                       X     |V |
+                                             |HB | ≤                ≤ (|V ∗ | + 1)B ,                                    (6)
+                                                       j=0
+                                                               j
+
+so ln |HB | ≤ B ln(|V ∗ | + 1) = O(B ln |V ∗ |). For a finite hypothesis class, Massart’s lemma yields
+                                                       r               r
+                                                          2 ln |HB |      2B ln |V ∗ |
+                                       Rm (HB ) ≤                    ≤                 .                                  (7)
+                                                              m                m
+Applying the standard Rademacher generalization inequality for losses bounded in [0, 1] gives that, with probability at least
+1 − δ, for all h ∈ HB ,                                                r
+                                                                         ln(1/δ)
+                                    R(h) ≤ R̂S (h) + 2Rm (HB ) +                 ,                                        (8)
+                                                                           2m
+
+                                                              12
+
+===== PDF p.13 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+which implies the stated bound.
+
+B.2. Convergence of Textual Gradient Descent (Theorem 4.2)
+Theorem B.2 (Monotonic Improvement, Restated). Assume U (Φ) is bounded and there exists γ > 0 such that any update
+accepted by dual verification satisfies E[U (Φt+1 ) − U (Φt ) | Φt , accept] ≥ γ. Then E[U (Φt )] converges, and TSGD reaches
+a stable state where the acceptance probability of improving updates vanishes.
+
+Proof. Let at be the candidate edit at iteration t and let At be the event that the edit is accepted by dual verification. We can
+write Φt+1 = Φt ⊕ at · I[At ]. Let pt = P(At | Φt ). Then
+                               E[U (Φt+1 ) − U (Φt ) | Φt ] = pt E[U (Φt+1 ) − U (Φt ) | Φt , At ]
+                                                            ≥ pt γ ≥ 0.                                                       (9)
+Thus E[U (Φt )] is monotone non-decreasing. Since U (Φ) is bounded above, the monotone convergence theorem implies
+limt→∞ E[U (Φt )] exists, and
+                                           lim E[U (Φt+1 ) − U (Φt )] = 0.                                    (10)
+                                               t→∞
+
+Combined with the lower bound E[U (Φt+1 ) − U (Φt ) | Φt ] ≥ pt γ, this implies pt → 0. Therefore the probability of finding
+an accepted improving update tends to zero, and the process reaches a stable point in discrete space.
+
+B.3. Sample Complexity of Compositional Reasoning (Proposition 4.4)
+Proposition B.3 (Sample Efficiency, Restated). Under Assumption 4.3, a generic mapping f : Q → Y that does not
+exploit compositional structure may require sample complexity Ω(2K ) to distinguish among the 2K skill combinations. In
+contrast, the expected number of training experiences needed by TSGD to acquire all K atomic skills via the optimizer is
+O(K log K).
+
+Proof. In a generic fine-tuning setting, learning a mapping f : Q → Y without structure must distinguish among behaviors
+across 2K skill combinations, yielding exponential dependence in standard PAC-style lower bounds. Under Assumption 4.3,
+prediction is ŷ = Solver(q, Φq ), where Φq retrieves experiences corresponding to skills in Sq . If the library contains
+reusable experiences {ei }Ki=1 , the solver can compose them for unseen combinations, reducing the coverage requirement
+from combinations to atomic skills. Observing failures reveals uncovered skills (or variants), and collecting coverage of all
+K skills is analogous to the coupon collector problem, with expected complexity O(K log K).
+
+Caveat. In real training experiences, a single failure may implicate multiple skills, and repeated exposure may yield only
+partial credit toward acquiring a skill. Proposition 4.4 should therefore be read as an idealized model that motivates the
+design (small libraries can cover large combinatorial task spaces) rather than as a tight account of practical sample efficiency.
+
+C. Information Bottleneck Interpretation
+We can interpret regularization via the Information Bottleneck (IB) principle. The goal is to learn Φ that maximizes mutual
+information with the answer Y while minimizing mutual information with the raw query Q:
+                                             min LIB = −I(Y ; Φ) + βI(Q; Φ).                                                (11)
+                                              Φ
+
+Maximizing I(Y ; Φ) corresponds to the optimizer agent πopt improving predictive usefulness via adding or editing expe-
+riences. Minimizing I(Q; Φ) corresponds to the regularizer πreg abstracting away instance-specific details and enforcing
+|Φ| ≤ B, retaining only high-utility, low-redundancy information. This view explains why regularized libraries exhibit
+clustered, abstract experiences: they approximate compact representations that preserve predictive content while discarding
+nuisance details.
+
+D. Additional Retrieval Analysis
+We provide further visualization of the retrieval agent’s behavior. Figure 9 shows the semantic overlap between different
+subjects in the MATH dataset’s embedding space, which explains the observed retrieval drift.
+
+                                                               13
+
+===== PDF p.14 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+
+
+
+                              Figure 9. Subject overlap in MATH embedding space; overlaps can induce retrieval drift.
+
+
+We also investigate why performance slightly degrades when the retrieval count k exceeds 20. While the solver agent is
+relatively noise-robust, k > 20 dilutes context with lower-quality experiences, as shown in Figures 10 and 11. Figure 10
+illustrates the correlation between retrieval similarity and accuracy, confirming that lower-similarity experiences contribute
+less to reasoning quality. Figure 11 shows the similarity distribution of retrieved experiences under different k, indicating
+that larger k values inevitably include more distant (and potentially less relevant) experiences.
+
+
+
+
+                                                Figure 10. Correlation between retrieval similarity and accuracy.
+
+
+E. Relation to Other Editable-Memory Methods
+Table 5 contrasts Experience Library Optimization/TSGD with two closely related editable-memory systems (AgentKB
+and ReasoningBank) and one contemporaneous experience-evolution method (FLEX). Appendix H then reports matched-
+condition empirical comparisons with AWM, ACE, and FLEX.
+
+                          Table 5. Comparison with closely related editable-memory and experience-evolution methods.
+
+ Dimension        AgentKB (Tang et al., 2025)    ReasoningBank (Ouyang et al., 2026)   FLEX (Cai et al., 2025b)       TSGD (Ours)
+ Optimization     Heuristic eviction             Append-only + filtering               Append-only failure feedback   Experience Library Optimization with formal capacity budget
+ Verification     None                           Post-hoc filtering                    None                           Dual verification (local + global)
+ Theory           None                           None                                  None                           Gen. bound (Thm. 4.1), Convergence (Thm. 4.2)
+ Update control   Rule-based conflict            No explicit control                   N/A                            Textual gradient + acceptance criterion
+ Compression      N/A                            Limited                               N/A                            20× (533 → 27) under retained accuracy
+
+
+In words: (i) AgentKB uses rule-based conflict resolution (keyword matching) for KB updates, while TSGD derives textual
+gradients through failure analysis and accepts updates only when dual verification confirms both local repair and global
+non-regression. AgentKB has no capacity budget or regularization mechanism. (ii) ReasoningBank is an append-only system
+with post-hoc filtering. It lacks iterative optimization—experiences are never edited or refined. TSGD’s Edit operation
+
+                                                                                       14
+
+===== PDF p.15 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+
+
+
+                             Figure 11. Similarity distribution of retrieved experiences under different k.
+
+
+
+
+               Figure 12. t-SNE visualization of MATH question embeddings; overlap indicates potential retrieval bias.
+
+
+allows experiences to evolve toward greater generality. (iii) FLEX is contemporaneous work; it learns from experience via
+forward transfer without formal optimization guarantees. TSGD uniquely provides provable convergence (Theorem 4.2) and
+generalization bounds (Theorem 4.1) for the library optimization process.
+
+F. Cross-Domain Validation
+To address the concern that the main paper evaluates only on mathematical reasoning, we validate TSGD on three additional
+benchmarks spanning code generation and tool use, using the same Grok-4.1 Fast Non-Reasoning backbone and the same
+TSGD pipeline (only the seed dataset differs).
+
+Table 6. Cross-domain validation (Pass@1). The metadata-based hard filtering used for MATH is bypassed in metadata-free domains; the
+retriever relies on dense recall only.
+
+                   Base Model        Method                 Full MATH        HumanEval        MBPP       ToolBench
+                   Grok-4.1-fast     LLM (zero-shot)           42.80            62.10         51.20           41.20
+                                     Few-shot                  50.20            70.50         59.80           50.30
+                                     RAG                       58.50            72.30         61.50           55.10
+                                     TSGD                      64.70            79.20         70.30           65.70
+
+TSGD achieves consistent gains across mathematical reasoning, code generation, and multi-step tool calling, demonstrating
+
+                                                                  15
+
+===== PDF p.16 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+that the Experience Library Optimization framework is domain-agnostic and that the +10.6 pp improvement over RAG on
+ToolBench validates compositional skill transfer.
+
+G. Open-Source Backbones
+We further evaluate TSGD on two open-weight backbones, Qwen-2.5-72B-Instruct and Llama-3.1-70B-Instruct, on MATH
+Precalculus (Level 5) at k=16. AWM, ACE, FLEX, and TSGD use the same 50-seed setup; RAG retrieves from the full
+177-example corpus under the same embedding model and top-k pipeline.
+
+ Table 7. Qwen-2.5-72B-Instruct on MATH Precalculus Level 5 (k=16). Lib. Size is the number of stored entries at evaluation time.
+
+                            Method        Pass@16      Mean@16        Lib. Size   Inference Tokens
+                            Zero-shot       66.7          44.3            0          ∼1,093,356
+                            RAG             76.4          53.7          177          ∼7,824,369
+                            AWM             75.6          55.0           15          ∼1,102,073
+                            ACE             76.3          57.3          165          ∼1,092,164
+                            FLEX            79.2          56.6          180          ∼1,108,122
+                            TSGD            79.2          58.4           27          ∼1,098,698
+
+
+                             Table 8. Llama-3.1-70B-Instruct on MATH Precalculus Level 5 (k=16).
+
+                            Method        Pass@16      Mean@16        Lib. Size   Inference Tokens
+                            Zero-shot       41.7          11.5            0          ∼872,082
+                            RAG             49.7          12.1          177          ∼7,431,121
+                            AWM             47.3          12.2           12          ∼865,166
+                            ACE             48.6          11.5          181          ∼866,247
+                            FLEX            49.1          12.3          222          ∼870,056
+                            TSGD            50.0          13.5           22          ∼863,979
+
+
+
+Interpretation. Pass@16 differences among TSGD/FLEX/ACE are small and should be interpreted cautiously in this
+controlled comparison; the more robust signal is that TSGD attains comparable accuracy with a much smaller library
+(e.g., 27 vs. 180–222 entries on Qwen). Relative to ACE and FLEX, the relevant advantage is storage rather than token
+cost; relative to RAG, TSGD uses only 12–14% of RAG’s inference tokens across both backbones while outperforming on
+accuracy metrics.
+
+H. Matched-Condition Comparison and Cost Decomposition
+Matched-cost online sampling. A subtle issue raised during review concerns matched-cost comparisons. At equal online
+sampling budget (k=8 samples per problem) on MATH Precalculus Level 5 with Grok-4.1 Fast Non-Reasoning,
+
+                                     Method                 Sampling budget       Accuracy
+                                     Zero-shot baseline       8 → Pass@8          76.87%
+                                     TSGD                     8 → Pass@8          97.22%
+
+i.e., +20.35pp at equal online budget. TSGD’s Pass@1 is 58.33% vs. baseline Pass@1 = 33.52% (+24.81pp at single-
+sample comparison). The earlier statement that “TSGD Pass@1 outperforms baseline Pass@8” was numerically inconsistent
+and has been corrected here.
+
+Cost breakdown. The following table decomposes the per-sampled-attempt cost for the same setting; a k-sample run uses
+k calls for all methods.
+
+                                                                 16
+
+===== PDF p.17 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+      Component                                           TSGD                       Zero-shot              RAG
+      Offline opt., excl. seeding          ∼ 120–124 calls / ∼ 290K tokens               0                  0
+      Offline total, incl. seeding/reg.             ∼ 162 calls                          0                  0
+      Per sampled attempt                      1 LLM call + retrieval               1 LLM call     1 LLM call + retrieval
+      Inference tokens (k=16, Qwen)                   ∼ 1.1M                          ∼ 1.1M            ∼ 7.8M
+      Library size                                     27/22                            —                  177
+
+Honest summary of inference cost. TSGD and RAG share the same per-query retrieval latency (CPU-side embedding
+lookup). The earlier claim that “TSGD’s inference cost is identical to RAG” was an oversimplification: while the per-query
+LLM call count matches RAG, the systems-level retrieval-latency picture depends on hardware and serving stack. Under our
+k=16 evaluation protocol on Qwen, TSGD saves 6.72M inference tokens over 56 queries against a one-time offline cost of
+287K tokens—break-even at roughly 3 queries. On Llama, the analogous break-even is also ∼ 3 queries (6.56M saved vs.
+296K offline). The benefit is therefore lower amortized prompt budget in sustained deployment, not lower retrieval latency.
+
+I. Full-MATH Ablation
+To address the concern that the main ablation (Table 2) is reported only on the Precalculus subset, Table 9 reports full-MATH
+leave-one-out ablations over the entire dataset, confirming the same qualitative pattern.
+
+Table 9. Full-MATH ablation. Initialization drives core performance; Optimization achieves extreme compression (229 → 32);
+Verification filters error chains and boosts high Pass@k metrics.
+
+                  Method                        Pass@1      Pass@2     Pass@4       Pass@8       Exp. Cap. (B)
+                  LLM (Baseline)                 42.80       58.20       72.50       85.30            —
+                  TSGD w/o Initialization        51.60       68.30       82.70       94.20           685
+                  TSGD w/o Optimization          59.70       77.80       92.40       98.60           229
+                  TSGD w/o Verification          56.30       71.40       85.20       95.80           587
+                  TSGD (Full)                    64.70       79.60       92.80       97.90            32
+
+
+
+J. Statistical Significance
+For the ablation comparisons, we report McNemar’s test on n=1018 paired comparisons against the LLM baseline. All four
+pairwise differences in Table 2 are statistically significant at p < 10−4 , with non-overlapping 95% confidence intervals.
+
+     Table 10. Statistical significance of the ablation comparisons. All components vs. LLM baseline have p < 10−4 ; n=1018.
+
+                      Method               Accuracy           95% CI             p-value vs. LLM baseline
+                      LLM (Baseline)       33.52%        [30.69%, 36.48%]                  —
+                      + Initialization     55.67%        [52.60%, 58.69%]               p < 10−4
+                      + Optimization       47.21%        [44.16%, 50.28%]               p < 10−4
+                      + Verification       53.61%        [50.54%, 56.65%]               p < 10−4
+                      TSGD (Full)          58.33%        [55.28%, 61.32%]               p < 10−4
+
+
+
+K. DELETE Operation Rarity
+The DELETE operation is rarely triggered per-sample (Figure 7) for two reasons. (i) The optimizer prefers Edit operations
+to refine existing experiences, since editing preserves the information content while sharpening abstraction (corresponding
+to the optimizer maximizing I(Y ; Φ) under the IB view). (ii) DELETE activates mainly during regularization (periodic
+compression), not per-sample optimization. Removing DELETE entirely would prevent the pruning of low-utility experi-
+ences and break the 533 → 27 compression observed in our main experiments; we therefore keep it as part of the action
+space even though its per-sample firing rate is low.
+
+                                                               17
+
+===== PDF p.18 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+L. Hyperparameter Sensitivity
+Our main experiments use one controlled protocol (B=27, top-k=10, 5 epochs). To probe robustness across hyperparameters,
+we conducted a preliminary sweep on MATH Precalculus Level 5 (Grok-4.1 Fast Non-Reasoning); we report indicative
+numbers rather than full grids due to compute constraints.
+
+Table 11. Indicative hyperparameter sensitivity. Single-seed runs; intended to characterize the rough operating range rather than provide
+tight estimates.
+
+                             Hyperparameter sweep         Setting        Pass@1 (Precalc. L5)    Lib. Size
+                             Budget B                        15                 52.1                 15
+                                                             27                 58.3                 27
+                                                             50                 57.8                 50
+                             Retrieval k                      4                 54.4                 27
+                                                             10                 58.3                 27
+                                                             16                 57.6                 27
+                             Training epochs                  1                 48.9                 27
+                                                              3                 55.2                 27
+                                                              5                 58.3                 27
+
+The performance plateau between B=27 and B=50 is consistent with the generalization bound (Theorem 4.1): once the
+capacity exceeds the number of underlying atomic skills, further enlargement yields diminishing returns and risks overfitting.
+Retrieval-k saturates near k=10–14, matching Figure 4.
+
+M. Representative Learned Experiences
+We list representative learned experiences after regularization on MATH Precalculus Level 5; each entry is a JSON triple of
+condition, strategy, and warning (the latter is a critical implementation pitfall captured by the optimizer).
+
+{
+    "condition": "Trig function as quadratic in bounded variable
+                  u=cos t or sin t in [-1, 1].",
+    "strategy": "Complete square A(u-h)ˆ2 + k; min/max by
+                  vertex position relative to [-1, 1].",
+    "warning":   "Verify algebra: expand back to match coefficients exactly."
+}
+
+{
+    "condition": "Sum-to-product identities for sin A +/- sin B, cos A +/- cos B.",
+    "strategy": "sin A - sin B = 2 cos((A+B)/2) sin((A-B)/2);
+                  cos A - cos B = -2 sin((A+B)/2) sin((A-B)/2).",
+    "warning":   "Correct signs: sin diff -> cos avg, cos diff -> -sin avg."
+}
+
+{
+    "condition": "Double-angle reduction for high-power trig
+                  integrands or simplifications.",
+    "strategy": "cosˆ2 t = (1+cos 2t)/2; sinˆ2 t = (1-cos 2t)/2;
+                  then reduce by linearity.",
+    "warning":   "Track the angle scaling: 2t, 4t, ...; do not forget the constant term."
+}
+
+{
+    "condition": "Bounded-domain optimization of a single-variable smooth function
+                  with a closed-form derivative.",
+    "strategy": "Find critical points by setting f’(x)=0 and
+                  compare with boundary values explicitly.",
+    "warning":   "Always check that interior critical points lie inside the domain."
+}
+
+
+                                                                    18
+
+===== PDF p.19 =====
+Textual Stochastic Gradient Descent for Experience Optimization
+
+{
+    "condition": "Polynomial inequality reducible to factoring/sign chart.",
+    "strategy": "Move everything to one side; factor; identify
+                  the sign-changing roots; tabulate sign on each interval.",
+    "warning":   "Distinguish strict vs.\\ non-strict; handle
+                  repeated roots without sign change carefully."
+}
+
+The full set of 27 learned experiences (this representative subset plus the remaining 22) is released alongside the code at
+https://github.com/superlj666/TSGD under learned libraries/.
+
+
+
+
+                                                            19

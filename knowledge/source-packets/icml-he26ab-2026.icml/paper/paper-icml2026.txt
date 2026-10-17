@@ -1,0 +1,1279 @@
+===== PDF p.1 =====
+Understand and Accelerate Memory Processing Pipeline for
+                           Large Language Model Inference
+
+
+                                   Zifan He 1 Rui Ma 2 Yizhou Sun 1 Jason Cong 1
+
+
+                        Abstract
+     Modern large language models (LLMs) increas-
+     ingly depend on efficient long-context processing
+     and generation mechanisms, including sparse at-
+     tention, retrieval-augmented generation (RAG),
+     and compressed contextual memory, to solve com-
+     plex tasks. We show that these optimizations can              Figure 1. The GPU-FPGA heterogeneous system (1 MI210 + 1
+     be unified into a four-stage memory processing                Alveo U55C) can provide 1.2 − 1.8× speedup and 1.3 − 4.7× en-
+     pipeline: Prepare Memory, Compute Relevancy,                  ergy cost reduction consistently over a wide range of long-context
+     Retrieval, and Apply to Inference. Through sys-               LLM inference optimizations. “SA-R” stands for SeerAttention-R
+     tematic profiling, we identify a 22%-97% mem-                 and “DSA” stands for DeepSeek Attention.
+     ory processing overhead in LLM inference and
+     strong computational heterogeneity across stages              Zhou, 2024), tool invocation (Yao et al., 2023b), and long-
+     in memory processing. Motivated by this insight,              horizon planning (Wang et al., 2023), which increasingly
+     we argue that heterogeneous systems are well-                 demands the ability to memorize and process long inputs.
+     suited to accelerate memory processing and thus               State-of-the-art models (Comanici et al., 2025; Shen et al.,
+     end-to-end inference. We demonstrate this ap-                 2025; Grattafiori et al., 2024) can process and generate 128k
+     proach on a GPU-FPGA system by offloading                     to 1 million tokens per request when prompted for paper
+     sparse, irregular, and memory-bounded opera-                  reading, deep reasoning, and creative writing. Standard
+     tions to FPGAs while retaining compute-intensive              LLMs maintain all contexts as key-value (KV) caches, in-
+     operations on GPUs. Evaluated on an AMD                       curring substantial hardware costs and runtime overhead.
+     MI210 GPU and an Alveo U55C FPGA, our sys-                    For example, storing KV cache for 1M tokens requires up
+     tem is up to 2.2× faster and 4.7× energy reduc-               to 69 GB of GPU memory for the GPT-OSS-120B model
+     tion across multiple LLM optimizations than the               (Agarwal et al., 2025), and repeatedly accessing the cache
+     GPU baseline (with similar results on NVIDIA                  further amplifies the pressure on memory access during
+     A100), establishing heterogeneous systems as a                auto-regressive decoding. To mitigate this issue, the latest
+     practical direction for efficient LLM inference and           LLMs have developed several algorithmic optimizations
+     informing future heterogeneous hardware design.               to improve LLM memory efficiency. Representative ap-
+                                                                   proaches include sparse attention (Beltagy et al., 2020; Liu
+                                                                   et al., 2025; Yang et al., 2025b) that selectively attends to
+                                                                   a subset of tokens, and contextual memory (Behrouz et al.,
+1. Introduction
+                                                                   2026; Sun et al., 2025) that compresses past tokens into
+In recent years, large language models (LLMs) have demon-          embeddings. Additionally, retrieval augmented generation
+strated capabilities beyond the simple question-answering          (RAG) (Lewis et al., 2020) can be used to offload static
+tasks. LLM-based agents can now solve complex tasks                knowledge to an external database and, thus, considered as
+through multi-step reasoning (Yao et al., 2023a; Wang &            an approach to expand the context.
+    1
+      Department of Computer Science, University of Cali-          While these LLM inference optimizations effectively reduce
+fornia, Los Angeles 2 Microsoft Research Asia. Correspon-          the end-to-end latency of long document processing, prior
+dence to: Zifan He <zifanhe1202@g.ucla.edu>, Rui Ma                work largely treats them as isolated techniques and lacks a
+<mrui@microsoft.com>.                                              systematic understanding of their computational character-
+Proceedings of the 43 rd International Conference on Machine       istics and hardware efficiency implications. This deficiency
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026       hinders further acceleration of LLM inference for both ex-
+by the author(s).                                                  isting and emerging methods. In this work, we make three
+
+                                                               1
+
+===== PDF p.2 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+insightful claims that will open a new way to understand               • 1.5 ∼ 5.7× speedup for the sparse attention (e.g.,
+and further accelerate the long document LLM inference.                DeepSeek Sparse Attention (Liu et al., 2025)), resulting
+                                                                       in up to 1.49× faster end-to-end inference.
+Claim 1: Modern LLM inference involves a memory
+                                                                       • 5.2 ∼ 7.7× speedup for RAG (e.g., DRAGIN (Su et al.,
+processing pipeline. (Section 3) Existing LLM inference
+                                                                       2024)), resulting in up to 2.2× end-to-end speedup.
+optimizations mostly address the challenge of efficient mem-
+ory processing. We formally define memory1 in LLMs and                 • 1.3 ∼ 1.6× end-to-end speedup for Memory as Context,
+unify diverse methods under a common four-step pipeline:               and 1.8× for synthesized memory (MemAgent).
+(1) Prepare Memory, which preprocesses raw memory into                 • 1.1 ∼ 4.7× lower geomean energy cost per request,
+a compact or structured format; (2) Compute Relevancy,                 which can significantly reduce the serving cost of LLMs
+which assigns importance scores to each memory entry;                  equipped with these methods. 2
+(3) Retrieval, which selects and extracts information based
+on these scores using specific heuristics; and (4) Apply to            Conflict of Interest Disclosure. The author Jason Cong
+Inference, which integrates the retrieved content into the             has a financial interest in AMD, which develops the AMD
+decoding process. Through profiling, we observe that mem-              MI210 GPU and U55C FPGA evaluated in this paper.
+ory processing accounts for 22% − 97% of the total latency.
+These findings not only reveal substantial opportunities for           2. Background
+accelerating LLM, but also highlight that a single system
+solution targeting memory processing can provide benefits              We review representative long context/document LLM infer-
+across existing and future LLM inference paradigms.                    ence optimizations, focusing on methods that fundamentally
+                                                                       change how memory is accessed and managed.
+Claim 2: Computations in memory processing are het-
+erogeneous. (Section 4) Quantitatively, each step exhibits             Sparse Attention. Standard transformers incur quadratic
+distinct arithmetic intensity, leading to different utilization        complexity during prefill (input processing) and linear com-
+of compute and memory resources. Qualitatively, their                  plexity during decoding (token generation) (Sheng et al.,
+memory access patterns and data dependencies also dif-                 2023), making attention increasingly expensive for long con-
+fer substantially. For example, generating compressed key              texts. Sparse attention mitigates this by selectively attending
+embeddings in sparse attention involves regular, consec-               to a subset of past tokens. Recent decode-stage methods in-
+utive accesses and is compute intensive when processing                clude DeepSeek Attention (Liu et al., 2025), which retrieves
+multiple attention heads, whereas score computation and                top-k important tokens with a lightweight indexer, LServe
+retrieval rely on skinny matrix-vector multiply and top-k              (Yang et al., 2025b), introducing a hierarchical paged KV
+search that are memory-bound, irregular in access pattern,             cache for fast retrieval, and SeerAttention-R (Gao et al.,
+and data-dependent across tokens. We observe that such                 2026a), which extends an auxiliary attention predictor to
+computational heterogeneity is pervasive in the memory                 the decoding phase. These approaches significantly reduce
+processing pipeline of LLM inference.                                  memory access overhead while preserving model quality.
+
+Claim 3: Heterogeneous systems can accelerate mem-                     Retrieval-Augmented Generation (RAG). For static
+ory processing. (Section 5) Motivated by the heterogeneity             knowledge sources, storing information as KV cache is in-
+in computational characteristics, we argue that mapping                efficient due to per-layer vector storage. RAG (Lewis et al.,
+LLM memory processing onto a heterogeneous system is                   2020) instead gets relevant documents from an external cor-
+preferred to achieve optimal acceleration. In this work, we            pus and concatenates them with the query. Representative
+present a solution based on off-the-shelf devices for demon-           dynamic RAG systems include FLARE (Jiang et al., 2023),
+stration. The paradigm can be used to inspire future hetero-           which triggers retrieval when model confidence drops, and
+geneous hardware designs. In particular, given the speed               DRAGIN (Su et al., 2024), which leverages attention statis-
+and energy advantages of Field Programmable Gate Array                 tics to detect uncertainty. Fixed-sentence RAG (Trivedi
+(FPGA) devices for sparse, irregular, and memory-bound                 et al., 2023) performs retrieval at every sentence boundary,
+workloads over GPUs and CPUs (Song et al., 2022; He                    enabling fine-grained context updates. Recently, more ad-
+et al., 2024), we propose executing the memory processing              vanced two-stage RAG with reranker (Moreira et al., 2024)
+pipeline of LLM inference on a GPU-FPGA heterogeneous                  improve the accuracy by sacrificing the retrieval overhead.
+system, with consideration of both computational hetero-               These methods enhance the precision of retrieving factual
+geneity and data locality. We evaluated a system with an               knowledge while reducing long-context storage overhead.
+AMD MI210 GPU and an Alveo U55C FPGA connected                         Compressed Contextual Memory. Compressed memory
+via PCIe, and it achieves:                                             stores information in a compact form (embeddings or sum-
+   1
+    In this work, “memory” refers to the processed data the LLMs       marized texts), enabling LLMs to handle extremely long
+used for generation in Definition 3.1 (not the device memory).            2
+                                                                              https://github.com/OswaldHe/HeteroLLM.
+
+                                                                   2
+
+===== PDF p.3 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+            Table 1. Summary of LLM inference optimizations and the computations in their memory processing pipeline.
+
+LLM Opt.                 Related Works                                Prepare Memory                 Compute Relevancy      Retrieval           Apply to Inference
+                         DeepSeek Attention (Liu et al., Linear Projections + Multi-headed Inner Prod- Top-k                                    Fine-grain Sparse At-
+Sparse Attention         2025)                           RoPE                 uct                                                               tention
+                         SeerAttention-R (Gao et al., Linear Projections + Inner Product               Top-k / Threshold                        Block Sparse Attention
+                         2026a)                          Pooling
+                         LServe (Yang et al., 2025b)     Page-wise Min/Max Inner Product + Max Re- Top-k                                        Block Sparse Attention
+                                                         Pooling              duction
+Retrieval   Aug- Two-stage RAG (Moreira et al., Embedding Model / Inner Product / BM25 + Top-k                                                  Append to query
+mented Generation 2024)                         Tokenization      Reranker
+(RAG)             Fixed-Sentence RAG (Trivedi Tokenization        BM25                   Top-k                                                  Append to query
+                  et al., 2023)
+                  Dynamic RAG (Su et al., 2024; Tokenization      BM25                   Top-k                                                  Append to query
+                  Jiang et al., 2023)
+Synthesized Mem- MemAgent (Yu et al., 2026; Model Decoding                                           N/A                    Nearest Retrieval   Model Prefilling
+ory              Shen et al., 2025)
+                         Titans (Behrouz et al., 2026), Forward pass                                 Linear Projection + Inner Top-k / Weighted Append to segment
+Memory as Context
+                         HMT (He et al., 2025a)                                                      Product                   Sum
+                         TTT, LaCT (Sun et al., 2025; Backward pass                                  Compute loss           N/A                 Forward pass
+Test-time Training
+                         Zhang et al., 2026b)
+
+
+
+inputs. Synthesized memory such as MemAgent (Yu et al.,                                             input sequence, xt and yt are current input and output, g
+2026) summarizes long inputs into textual memories condi-                                           is the memory generator, and f is the memory processor.
+tioned on the query. Recurrent models, including HMT (He                                            L starts with generated memory M<t = g({xi }i<t ). Then
+et al., 2025a) and Memory as Context in Titans (Behrouz                                             during inference, it initiates f (one-time or repeatedly) to
+et al., 2026), compress input segments into latent embed-                                           get intermediate output O<t = f (M<t , xt ) and utilize O<t
+dings and retrieve them based on relevancy. These methods                                           to generate final output yt .
+effectively trade computation for runtime data efficiency and
+assist far-distance information retrieval in the latent space.                                      For example, g can be the projections to produce KV cache
+                                                                                                    M<t , and f is the sparse attention mechanism to create
+Test-time Training (TTT). TTT treats model parameters                                               attention score O<t . Under this definition, the methods
+as internal memory and adapts them during inference. The                                            mentioned in Section 2 are all improving the memory pro-
+seminal work (Sun et al., 2025) formulates TTT as a recur-                                          cessing (f ) efficiency. This section describes the common
+rent update rule, alternating between backpropagation and                                           properties of the memory processing.
+generation. LaCT (Zhang et al., 2026b) extends this idea
+with batched updates to improve GPU utilization.
+                                                                                                    3.1. Memory Processing Pipeline
+Although these methods differ in their computations, they
+                                                                                                    To utilize models’ memory, LLM inference employs a four-
+all transform a processed input into an output through a com-
+                                                                                                    stage memory processing pipeline (Figure 2):
+mon sequence of steps referred to as memory processing.
+
+                   Memory                Relevancy               Retrieved                          • Prepare Memory (prep(M<t ) = I<t ): LLM first converts
+         Prepare    Index    Compute       Score                 Memory       Apply to
+Memory
+         Memory              Relevancy
+                                                     Retrieval
+                                                                             Inference
+                                                                                                    the memory into a memory index that facilitates memory re-
+                     Input                                                       Intermediate       trieval and usage. For instance, DeepSeek attention projects
+                                                                                    Output
+                                                                                                    latent KV vectors in MLA (multi-headed latent attention)
+Figure 2. Four-Step Memory Processing Pipeline in LLMs:                                             (Liu et al., 2024) into lightweight indexing vectors.
+Prepare Memory preprocesses and structures raw memory for
+efficient access; Compute Relevancy assigns relevance scores to                                     • Compute Relevancy (comp(I<t , xt ) = S): In this step,
+memory entries with respect to the input query; Retrieval extracts                                  the model utilizes the processed memory and current input,
+the most relevant memory based on these scores; and Apply to                                        or query, to identify which part of the memory is relevant
+Inference integrates retrieved content and input into intermediate                                  and should be extracted. The output is the relevancy scores
+outputs, used in the rest operations in LLMs to produce tokens.                                     where higher score indicates higher relevancy. For example,
+                                                                                                    DeepSeek attention computes the multi-head dot product
+                                                                                                    scores between the indexing vectors and the query vector.
+3. Memory Processing in LLM Inference                                                                                                 ′
+                                                                                                    • Retrieval (ret(M<t , S) = M<t      ): Given the relevancy
+Definition 3.1. Define the generative language model as                                             score and the original memory, the model selects a subset
+L(g(·), f (·, ·), {xi }i<t , xt ) = yt , where {xi }i<t is the past                                 of memory entries or constructs refined memory based on
+
+                                                                                                3
+
+===== PDF p.4 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+the score and certain heuristics. For example, DeepSeek               can process more than 1M tokens per sample, memory pro-
+attention applies top-k selection on each token.                      cessing can become the critical path when sparse attention is
+                                ′                                     applied. For RAG (Figure 4), our profiling reveals a similar
+• Apply to Inference (apply(M<t    , xt ) = O<t ): Finally, the
+retrieved memory is incorporated into subsequent computa-             phenomenon when processing 20M documents (40 − 61%).
+tions alongside the target inputs that the model transforms           In two-stage RAG, the reranker dominates memory pro-
+to generate the output. For instance, the KV latent embed-            cessing latency, leading to a high latency percentage with a
+dings corresponding to the top-k index scores are used in             slower increase as the document count grows. As depicted
+the MLA computations. For RAG, the selected documents                 in Figure 5, for parameterized memory and synthesized
+are concatenated with the query to augment the inference.             memory, memory processing is time-consuming even with
+                                                                      short contexts. The reasons are diverse: MemAgent em-
+Table 1 outlines the LLM inference method types with rep-             ploys the model to generate textual memory, and Titans and
+resentative works and the detailed computations involved in           HMT involve multiple linear layers to project segment and
+each step of the memory processing pipeline. Some methods             memory embeddings into the same latent space.
+skip a few steps: 1) MemAgent (Yu et al., 2026) skips rele-           Furthermore, we observe that the latency breakdown in the
+vancy computation since it always retrieves memory from               memory processing pipeline varies among methods. For
+the preceding segment. 2) TTT does not perform retrieval              example, sparse attention and RAG are dominated by the
+and incorporates parameterized memory through a direct                Compute Relevancy and Retrieval, whereas MemAgent in-
+forward pass. Moreover, the timing and execution frequency            curs up to 97% of latency in Prepare Memory (details in
+of each step in the end-to-end inference vary across differ-          Appendix B). Since memory processing constitutes a pri-
+ent memory types. RAG typically prepares memory once                  mary bottleneck in LLM, accelerating it delivers substantial
+and repeatedly executes retrieval, while sparse attention             gains in both end-to-end latency and energy efficiency.
+processes memory for every token.
+This unified abstraction for memory processing in LLMs
+serves as an analytical framework to characterize computa-
+tional properties and guide systematic accelerations. When
+a stage is not required, it introduces no overhead, as data
+can bypass the stage without additional computation or con-
+trol complexity. Furthermore, it supports reuse of kernels
+employed for each stage and scheduling in the pipeline,
+facilitating efficient deployments.
+
+3.2. Memory Processing is Time Critical                               Figure 4. Percentage of latency on memory processing for RAG
+                                                                      using the Wikipedia dump (Su et al., 2024). For two-stage RAG,
+                                                                      reranking is time consuming, leading to a high percentage at 500K
+                                                                      with a slow increment as the document count grows.
+
+
+
+
+Figure 3. Percentage of latency spent on memory processing for
+sparse attention methods. With 1M tokens, memory processing
+can take 22%–81% of the decoding time.
+                                                                      Figure 5. Left: Percentage of latency on memory processing for
+By profiling the latency breakdowns of LLM inference op-              parameterized memory (Titans/HMT, LaCT). Right: Percentage
+                                                                      of latency on memory processing for MemAgent.
+timizations based on the experimental settings illustrated
+in Section 6.1, we observe a large proportion of inference
+latency is spent on memory processing as the memory size              4. Computational Heterogeneity
+increases. For sparse attention (Figure 3), the percentage
+of decoding latency for memory processing grows from                  We further analyze the computational properties of the mem-
+1 − 11% for 4K-token sequences to 22 − 81% for 1M-token               ory processing pipeline and reveal its heterogeneity. Quanti-
+sequences. Given that modern LLMs (Comanici et al., 2025)             tatively, arithmetic intensity (FLOPs/byte) (Williams et al.,
+
+                                                                  4
+
+===== PDF p.5 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+Table 2. Summary of LLM inference optimizations and computational properties of their memory processing pipelines for single batch.
+We show arithmetic intensity (FLOPs/byte, higher means more compute-bound) with only orders of magnitude (details in Appendix B).
+“Local Memory” denotes independent computation across memory entries, and “Regular” indicates consecutive data access.
+    LLM Opt.                              Prepare Memory Compute Relevancy        Retrieval    Apply to Inference Rest Ops in LLM
+                       Arith. Intensity        10–100                1–10              1            10–100              1–10
+    Sparse Attention   Access Pattern          Regular             Regular         Irregular        Regular            Regular
+                       Data Requirement     Local Memory        Local Memory   Across Memories   Local Memory      Local Memory
+                       Arith. Intensity         1–100                1–10              1               0               > 100
+                       Access Pattern    Irregular (tokenizer)     Irregular       Irregular        Regular            Regular
+    RAG
+                                        Regular (embeddings)
+                       Data Requirement     Local Memory       Across Memories Across Memories  no calculations    Local Memory
+                       Arith. Intensity          1–10                  -               0            > 100              > 100
+    Synthesized Memory Access Pattern          Regular                 -           Regular          Regular            Regular
+                       Data Requirement    Across Memories             -        No Calculation   Local Memory      Local Memory
+                       Arith. Intensity         > 100                1–10              1               0               > 100
+    Memory as Context Access Pattern           Regular             Regular         Regular          Regular            Regular
+                       Data Requirement     Local Memory        Local Memory   Across Memories   Local Memory      Local Memory
+                       Arith. Intensity         > 100                1–10              -            > 100              > 100
+    Test-time Training Access Pattern          Regular             Regular             -            Regular            Regular
+                       Data Requirement     Local Memory        Local Memory           -         Local Memory      Local Memory
+
+
+
+2009) characterizes whether a step is memory-bound (fre-              the loss function (Compute Relevancy) is more memory-
+quent data access) or compute-bound (more arithmetics),               intensive than the other steps, the latency bottleneck of mem-
+while qualitatively, we examine data access patterns and              ory processing in LaCT is dominated by compute-bound
+dependencies. Table 2 summarizes these properties for each            operations (forward and backward pass). Thus, we do not
+LLM inference optimization, with a detailed arithmetic in-            deploy it on the heterogeneous system.
+tensity and latency breakdown provided in Appendix B.
+                                                                      This heterogeneity of memory processing pipeline in LLM
+Sparse Attention & RAG: Sparse attention and RAG exhibit              inference motivates the mapping of LLM onto a heteroge-
+similar heterogeneity across memory processing steps. Com-            neous system as discussed in the next section.
+pute Relevancy and Retrieval are memory-bound (skinny
+matrix-matrix and matrix-vector multiplication) and in-               5. GPU-FPGA Heterogeneous System
+volve irregular accesses and data dependencies, such as
+BM25 scoring, top-k selection, and max reduction. For                 5.1. GPU vs. FPGA
+instance, BM25 lookups token frequency histograms in
+                                                                      GPUs are well-known for their efficiency in accelerating
+a non-deterministic order across documents, while top-k
+                                                                      LLMs with abundant highly parallel compute cores and
+maintains running maximum scores with data dependencies
+                                                                      large HBM bandwidth. However, GPUs suffer from under-
+and irregular data eviction. In contrast, Prepare Memory
+                                                                      utilization of computational resources and off-chip mem-
+and Apply to Inference are primarily dense linear algebra
+                                                                      ory bandwidth when processing irregular data accesses and
+with consecutive and independent accesses, including linear
+                                                                      memory-bound operations (Boutros et al., 2020; Song et al.,
+projections and attention operations.
+                                                                      2022; Rajashekar et al., 2024; He et al., 2024). In contrast,
+Synthesized Memory: The memory processing of MemA-                    FPGAs allow users to customize the microarchitecture for
+gent is essentially a sequence of LLM inferences. At the              data control. The advantages of FPGAs over GPUs include:
+Prepare Memory step, the LLM decodes to generated textual             1) larger SRAM capacity with higher bandwidth, 2) flexible
+memory, which is a memory-bound operation. At the Apply               data control with minimized scheduling efforts, and 3) low
+to Inference step, the LLM performs prefilling to consume             power consumption with competitive performance. These
+the memory and the text from the current segment. This                features highlight the potential of FPGAs to accelerate the
+operation is compute-bound.                                           memory processing pipeline of LLM inference, especially
+                                                                      operations that are not hardware-friendly to GPUs.
+Memory as Context: Computations in Memory as Context
+are similar to sparse attention and RAG, except that there
+are extra calculations to generate the query from sequences           5.2. Heterogeneous System Overview
+in Compute Relevancy. These calculations are independent              As a demonstration, we consider a system with an FPGA
+of the model forward pass and can be parallelized and fused           and a GPU, both equipped with HBM and connected via
+with other kernels.                                                   PCIe. Our general mapping criteria for memory processing
+TTT: The heterogeneity is insufficient. Although computing            steps and data are: 1) deploying steps based on the strengths
+
+
+                                                                  5
+
+===== PDF p.6 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+  1 Prepare             GPU                               FPGA                      GPU                                         FPGA                1 Model Forward Pass      GPU              2            FPGA
+                                            2                                                                                                                                        Retrieved
+    Memory                                       Fused Compute   1                          Synthesized 2                                             (Prepare Memory)                           Cross Attention
+                3 Apply to                                                                                                                                                           Memory
+                                                  Relevancy &           LLM Prefilling        Memory      LLM Decoding
+                  Inference     Retrieved           Retrieval        (Apply to Inference)               (Prepare Memory)
+                                                                                                                                                               3 Concatenation      Embedding (Compute Relevancy
+                                                                                                                                                                (Apply to Infernce)               & Retrieval)
+                                 Index                                                      KV Cache
+              Interm.                           Memory                 Input Sequence                                                                                                                                             Memory      Input
+    Memory              Input                            Input                                HBM       Output Sequence                                      Input Segments
+              Output             HBM             Index                    Segments                                                                                                                                   HBM         Embeddings Segments
+
+          (a) General Setup (Sparse Attention & RAG)                          (b) Synthetized Memory (MemAgent)                                                          (a) Memory as Context (Titans, HMT)
+
+
+Figure 6. Kernel mapping and data communication on the GPU-FPGA system. (a) Sparse attention and RAG employ general setup, where
+the GPU prepares the memory and apply to the inference and the FPGA executes an efficient fused kernel for compute relevancy and
+retrieval. (b) For MemAgent, we utilize prefill-decode disaggregation where the FPGA operates LLM decoding and the GPU handles
+prefilling. (c) For Memory as Context, we update the data mapping for locality: memory on the FPGA, retrieved memory delivered from
+the FPGA to the GPU, and output is directly streamed to Prepare Memory.
+
+of the FPGA and GPU (i.e., compute-bounded and regular                                                 fusion on the FPGA for higher efficiency, while sparing
+data access on the GPU; irregular, data dependent, and                                                 GPU memory for model storage.
+memory-bound operations on the FPGA), and 2) balancing
+the trade-off between cross-device communication overhead                                              5.3. Kernel Design
+and kernel-level speedup. We prioritize criterion 2 over 1
+                                                                                                                          Compute Relevancy                                            Retrieval
+for minimal end-to-end latency. For example, although
+                                                                                                                              URAM                                    BRAM                                                 Top-K Retriver
+extracting the KV cache for top-k tokens is memory bound,                                                                                    token 16384-65535         token 0-16383
+
+
+
+
+                                                                                                                                                                                          Reduction + Weighted Sum
+                                                                                                                                                                                                                             Top-K Score/Index
+we do not fuse it with top-k selection on the FPGA because
+                                                                                                                                                                                                                                        Current
+the PCIe overhead outweighs the fusion benefit. Instead, we
+                                                                                                       HBM
+                                                                                                                                                                                                                                         Min
+                                                                                                                          460 GB/s     10.4 TB/s       21.8 TB/s
+                                                                                                                                                                                                                             >
+transfer only the top-k indices to minimize PCIe latency and                                             token >= 65536              Read Arbiter                  Write Arbiter                                                    >       update    Top-K
+                                                                                                                                                                                                                             >                       Indices
+run KV cache extraction on the GPU. Figure 6 illustrates an                                                                                                                                                                  >
+                                                                                                                                                                                                                                            >
+                                                                                                                             Query                                        Key
+                                                                                                                                           Inner Product Engine
+overview of the mapping for different cases.                                                                                 Loader                                      Loader
+                                                                                                                                                                                                                             >
+                                                                                                                                                                                                                                    >
+
+
+General Setup: This design applies for both sparse atten-
+tion and RAG. We execute the Prepare Memory and Apply                                                Figure 7. Architecture of the FPGA kernel for General Setup. A
+Memory steps on the GPU and deploy a fused Compute Rel-                                              streaming dataflow design connecting two modules: (a) Compute
+evancy and Retrieval kernel on the FPGA (Figure 6(a)). The                                           Relevancy uses fast SRAM (BRAM+URAM) and HBM to store
+                                                                                                     compressed keys, where an inner-product engine consumes queries
+GPU HBM stores the memory, target data, and output data,                                             and computes scores; (b) Retrieval performs partial and weighted
+while the FPGA saves the query and the processed memory                                              sum across query heads and feeds results to a top-k retriever that
+generated by the GPU. In sparse attention, the processed                                             continuously maintains a running top-k list.
+memory is a compressed KV cache. The GPU transfers                                                     For GPU kernels, we reuse existing optimized libraries,
+the compressed KV cache for the entire input sequence dur-                                             while our design effort focuses on FPGA kernels, which
+ing prefilling and only the next token during decoding. In                                             need substantially more development time. For MemAgent
+RAG, Prepare Memory is a one-time process and amortized                                                and Memory as Context, we adopt the design paradigm of
+across subsequent steps. After retrieval, the FPGA returns                                             prior FPGA-based LLM accelerators (Yang et al., 2024b;
+the retrieved indices to the GPU for memory access.                                                    Zeng et al., 2024; He et al., 2025b;c; Zhang et al., 2026a).
+Synthesized Memory: Similar to other works on prefill-                                                 This section presents the general kernel design. We include
+decode disaggregation between the GPU and the FPGA                                                     more technical detail in Appendix E.
+(Yang et al., 2024b), we deploy Prepare Memory (LLM                                                    Figure 7 illustrates the FPGA kernel architecture. Here, we
+decoding) to FPGA and Apply Memory (LLM prefilling) to                                                 present DeepSeek Attention as an example for illustrating
+GPU (Figure 6(b)). For each segment, the GPU delivers the                                              the computations. One advantage of FPGAs over GPUs is
+KV cache to the FPGA and the FPGA returns the token ids                                                that users can build streaming dataflow designs: executions
+for the synthesized memory to the GPU for concatenation.                                               are data driven, reducing explicit control overhead and time-
+Memory as Context: The kernel mapping follows the Gen-                                                 consuming off-chip memory accesses. In General Setup,
+eral Setup, but with a recurrent loop communication for                                                modules are connected in a dataflow manner. The Compute
+input segments. We revise data placement as follows: (1)                                               Relevancy module calculates inner product scores between
+the retrieved memory embedding is transferred to the GPU,                                              each query head and all key vectors. All past key vectors are
+which only incurs communication overhead comparable to                                                 stored in a three-level physical memory hierarchy: BRAM
+the retrieved index in the General Setup; (2) memory is                                                with 21.8 TB/s, URAM with 10.4 TB/s, and HBM with 460
+stored only on the FPGA, since GPU-side Prepare Memory                                                 GB/s. The BRAM and URAM can hold 40MB of data in
+only requires the retrieved memory and the next input seg-                                             total for U55C. Each memory tier has a different capacity,
+ment to generate new memory. This enables more kernel                                                  and the key loader writes through the memory hierarchy
+                                                                                                       with a write arbiter. Key vectors with smaller token IDs
+
+                                                                                                 6
+
+===== PDF p.7 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+are stored in faster memory to maintain high access speed.            • DeepSeek Attention (Liu et al., 2025): we use vLLM
+Vectors are streamed to inner product engine to calculate             (Kwon et al., 2023) and modify the codebase to only load
+the score. The resulting scores are streamed to the Retrieval         the first layer of DeepSeek V3.2 Exp due to the limited GPU
+module, which chains a reduction unit and a top-k retriever.          memory of MI210.
+The reduction unit aggregates partial sums and computes the           • SeerAttention-R (Gao et al., 2026a): we utilize TileLang
+final score per key. The top-k retriever maintains a running          (Wang et al., 2026) optimized kernel. The base model is
+top-k list by comparing incoming scores using a parallel              Qwen 3 8B (Yang et al., 2025a) and block size is 64.
+reduction tree. After scanning all keys, it outputs the indices       • LServe (Yang et al., 2025b): We use the LServe codebase
+of the top-k scores.                                                  and employ HIPIFY (AMD ROCm Software) to port custom
+                                                                      CUDA kernels to HIP kernel for the AMD GPU. The base
+5.4. Deployment                                                       model is Llama 3.1 8B (Grattafiori et al., 2024).
+Traversing the methods in Table 1, we implement each step             • RAG: For single-stage RAG (DRAGIN, FLARE, and
+(standalone or fused) as reusable kernels to form a library.          Fixed-sentence RAG), we follow the experiment setup in
+Users can further build new algorithm by recombining ker-             DRAGIN (Su et al., 2024) and utilize Llama 2 7B (Touvron
+nels and interfacing them through our GPU-FPGA com-                   et al., 2023) as the generator model. For two-stage RAG, we
+munication API (e.g., block-based RAG with BM25 and                   adhere the setup of RAG-EDA (Pu et al., 2024) with Llama
+max-reduction kernels). Arbitrary methods may require                 3.1 8B as the generator model.
+custom kernels. We plan to reduce this effort via design              • Memory as Context: Since there is no official Titans
+automation in our future work.                                        (Behrouz et al., 2026) implemenetation, we employ the
+                                                                      open-source implementation of HMT and update the sum-
+                                                                      marization step into a linear projection to replicate Titans.
+6. Evaluation
+                                                                      • MemAgent (Yu et al., 2026): We use Qwen 2.5 7B (Yang
+6.1. Experiment Setup                                                 et al., 2024a) as the base model and the default hyperparam-
+                                                                      eters defined in the codebase.
+Hardware. For the heterogeneous system, we run experi-
+ments on a node with an AMD Alveo U55C FPGA and an                    • TTT/LaCT (Zhang et al., 2026b; Sun et al., 2025): We
+AMD Instinct MI210 GPU, with AMD EPYC 7v13 as the                     employ the codebase for LaCT (Zhang et al., 2026b) for
+host CPU (detail in Appendix D). For the baseline, we use             profiling and benchmarking.
+the same GPU model for fair comparison. We do not have
+physical access to a system with both NVIDIA A100 and                 Details of Hyperparameters in Appendix D.
+U55C on the same node, but we provide estimations based               Tools. We utilize ROCm 6.3 for GPU kernel development.
+on the real-system profiling in Appendix H to demonstrate             FPGA kernels are designed using Xilinx Vitis HLS 2024.2
+the generalizability of our system. Notably, U55C is fabri-           and implemented with Vivado 2024.2. P2P mode is en-
+cated in an older process technology than the GPU (16 nm              abled to allow DMA for the FPGA. Details for cross-device
+vs. 6 nm) and costs half as much. A newer FPGA model                  communication is in Appendix C.
+(e.g., AMD Versal V80) can further improve performance.
+Baseline Measurement. For each workload in Table 1, we                6.2. Latency
+use the same datasets as in the original work. For sparse
+attention, we measure per-token latency under varying past-
+token lengths; for RAG, MemAgent, and Memory as Con-
+text, we measure total request latency (prefill and decode)
+under different input sequence lengths. We report both
+end-to-end latency and the fraction attributable to memory
+processing for the baselines, enabling quantitative evalua-
+tion of the acceleration achieved by heterogeneous system.
+Total latency is measured with Python performance counters,
+while PyTorch Profiler (Paszke et al., 2019) measures the
+time fraction spent on memory processing. This is used to
+derive the latency breakdown without interfered by tracing            Figure 8. End-to-end speedup of the GPU-FPGA heterogeneous
+                                                                      system over the baseline for sparse attention mechanisms.
+overhead. To ensure fairness, all methods utilize optimized
+implementations and identical experimental settings for la-
+tency measurement and profiling. Specifically,                        Each method benefits from the GPU-FPGA system in
+                                                                      three aspects: 1) the FPGA’s large, high-bandwidth on-
+                                                                      chip memory permits faster data access than the GPU; 2)
+
+                                                                  7
+
+===== PDF p.8 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+                                                                     baseline (Figure 10), while two-stage RAG is limited to 1.1–
+                                                                     2.1× due to reranker dominance, resulting in up to 1.47–
+                                                                     1.84× end-to-end speedup. For Memory as Context, fusing
+                                                                     query generation with cross attention produces a 3.1–4.0×
+                                                                     memory-processing speedup and a 1.3–1.6× end-to-end
+                                                                     speedup (Figure 11).
+                                                                     Case 3: Faster Decoding. LLM decoding is fundamen-
+                                                                     tally memory-bound, and FPGA architectures can precisely
+                                                                     control HBM transactions to sustain higher effective band-
+                                                                     width than GPUs, whose peak bandwidth is often underuti-
+Figure 9. Speedup for the memory processing steps deployed on        lized during decoding. Since MemAgent relies on decod-
+the GPU-FPGA heterogeneous system for sparse attentions.             ing to generate memory, this advantage directly improves
+                                                                     system performance. As shown in Figure 12, under prefill–
+                                                                     decode disaggregation, the GPU–FPGA system consistently
+                                                                     achieves a 1.8× speedup over a GPU-only baseline.
+                                                                     We contain detailed analysis on the source of improvement
+                                                                     from the FPGA in Appendix F.
+
+
+
+Figure 10. Left: End-to-end speedup of the GPU-FPGA system
+over the baseline for RAG. Right: Speedup of memory processing
+for the single stage RAG (DRAGIN/FLARE/FS-RAG) and two
+stage RAG. The reranker of the two stage RAG is executed on
+GPU.
+
+
+operations within or across memory processing steps are
+pipelined through a streaming dataflow, facilitating finer-          Figure 11. Left: End-to-end latency of the GPU-FPGA system vs.
+grained computation-communication overlap than on GPUs;              the baseline for Memory as Context method. Right: Latency for
+                                                                     memory processing in Memory as Context. Similar to Titans, we
+3) the flexible memory system design maximizes HBM                   use a linear projection on the current segment for query generation.
+bandwidth utilization, achieving higher decoding through-
+put even when GPUs offer higher peak bandwidth.
+Case 1: Large On-chip Memory. By storing compressed key
+vectors in FPGA on-chip memory (URAM and BRAM),
+the U55C provides about 5× more effective bandwidth
+than GPU SRAM for Compute Relevancy and Retrieval.
+This yields a 1.8–2.2× kernel speedup for SeerAttention-R
+(top-k), 2.6–4.9× with threshold, and 1.2–5.6× for LServe
+(Figure 9), translating to 1.04–1.49× faster end-to-end infer-
+ence. When the sequence length exceeds 1M tokens, LServe
+and DeepSeek Attention will experience a drop in speed               Figure 12. Left: End-to-end latency of the GPU-FPGA heteroge-
+on the FPGA due to accessing the HBM. Practically, the               neous system vs. the GPU-centric system for MemAgent. Right:
+system can dynamically fall back to GPU-only execution to            Latency for memory processing in MemAgent.
+avoid a performance loss.
+                                                                     Although the amount of data transferred between the GPU
+Case 2: Pipelined and Flexible Datapath. The FPGA ex-                and FPGA ranges from a few indices to long vectors, the
+ploits fine-grained pipelining and optimized random access           resulting communication overhead remains small relative to
+to overlap communication and computation in BM25, top-               the end-to-end latency. This is because, under our deploy-
+k, and dependent memory-processing steps. This benefit               ment strategy, methods that require larger data movement
+generalizes across sparse attention, RAG, and Memory as              also tend to incur substantially higher computation latency.
+Context. For DeepSeek Attention, we achieve a 1.3–2.2×               Across all evaluated methods, we observe roughly a three-
+speedup in memory processing and a 1.1–1.2× end-to-end               order-of-magnitude gap between PCIe transfer overhead
+speedup (Figure 9). For RAG, single-stage methods improve            and end-to-end latency. Detailed breakdowns are provided
+memory processing speeds by 5.1–6.6× over the BM25S                  in Appendix C.1.
+
+                                                                 8
+
+===== PDF p.9 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+Table 3. The energy efficiency and the improvement of the GPU-                                  et al., 2024). Thus, high batch size does not improve data
+FPGA system over the baseline. DSA stands for DeepSeek Atten-
+tion, and SA-R denotes for SeerAttention-R.
+                                                                                                reuse for score computations in sparse attention on GPUs.
+                                                                                                The GPU-FPGA system can still exploit the advantages of
+ Category       Method            GPU-FPGA
+                                (J/req. or J/tok)
+                                                        Baseline
+                                                    (J/req. or J/tok)
+                                                                          Max
+                                                                        Improve
+                                                                                  Geomean
+                                                                                  Improve
+                                                                                                high HBM bandwidth utilization. In contrast, dense com-
+                DSA                  15.86                 25.62        1.69×      1.61×        ponents such as linear projections and feedforward layers
+                SA-R (Thres.)        0.30                   0.34        1.26×      1.14×
+ Sparse Attn.
+                SA-R (Top-k)          0.32                  0.36        1.21×      1.11×
+                                                                                                benefit from weight reuse. As batch size grows, a larger frac-
+                LServe                0.29                  0.43        1.62×      1.43×        tion of latency is attributed to sparse attention, amplifying
+                DRAGIN               328.16              362.57         1.34×      1.10×
+ RAG
+                FLARE                241.99              275.53         1.45×      1.14×        the benefit of FPGA with increasing speedup.
+                FS-RAG               259.88              315.25         1.71×      1.21×
+                Two-stage            150.33              160.68         1.23×      1.07×
+ Synthesized
+                                                                                                • RAG. Methods such as DRAGIN, FLARE, and FS-RAG
+  Memory        MemAgent             3202                13662          4.66×      4.66×        rely on lexical retrieval with BM25 scoring, where both data
+ Memory-as
+  -Context      HMT / Titans         16.55                 27.31        1.74×      1.65×        access and computation are input-dependent and cannot be
+                                                                                                shared across batch samples. Similar to sparse attention,
+Table 4. Geomean speedup of the GPU-FPGA system over the                                        batching primarily improves GPU efficiency for dense com-
+GPU-centric baseline across batch sizes for various LLM optimiza-                               ponents but not retrieval. Consequently, the relative cost of
+tion approaches.                                                                                retrieval increases with batch size, leading to larger speedups
+   Category         Method              BS=1        BS=2      BS=4      BS=8      BS=32
+                                                                                                with GPU-FPGA systems. Two-stage RAG can obtain ben-
+                    SA-R (Thres.)      1.12×        1.21×     1.33×     1.47×     1.60×
+                                                                                                efits by batch inference through improved weight reuse in
+   Sparse Attn.
+                    DSA                1.02×        1.05×     1.09×     1.14×     1.15×         the reranker, enhancing GPU utilization and moderating the
+                    SA-R (Top-k)       1.07×        1.15×     1.24×     1.30×     1.32×
+                    LServe             1.19×        1.34×     1.51×     1.67×     1.83×         speedup gain.
+                    DRAGIN             1.14×        1.20×     1.29×     1.44×     1.92×
+   RAG
+                    FLARE              1.19×        1.26×     1.38×     1.55×     2.11×         • Memory as Context. We offloaded the cross attention to
+                    FS-RAG             1.26×        1.32×     1.42×     1.58×     2.10×
+                    2-Stage RAG        1.16×        1.22×     1.28×     1.32×     1.37×         the FPGA, which contains linear projections. With larger
+   Synthesized      MemAgent           1.85×        1.65×     0.93×     0.49×     0.13×         batch sizes, these linear projections achieve higher weight
+    Memory                                                                                      reuse and improved GPU utilization. This cuts the relative
+   Memory-as        HMT/Titans         1.48×        1.47×     1.45×     1.38×     1.15×
+    -Context
+                                                                                                advantage of offloading, resulting in decreasing speedup.
+                                                                                                However, since the memory embeddings remain indepen-
+                                                                                                dent across samples, FPGA acceleration still provides bene-
+6.3. Energy Efficiency                                                                          fits in long-sequence regimes for computing the cross atten-
+                                                                                                tion score and performing memory embedding selections.
+Another important aspect of LLM inference is energy ef-
+ficiency, which directly affects serving cost. Table 3 lists                                    • MemAgent. The memory processing pipeline in MemA-
+the geomean energy efficiency of the GPU-FPGA system                                            gent is a standard LLM inference. Under batching, the
+and the baseline for each method mentioned in Section 6.2.                                      decode stage significantly benefits from weight reuse on
+Overall, the GPU-FPGA system can shrink the energy cost                                         GPUs. Given the lower compute throughput of FPGAs for
+by 1.11−1.61× for sparse attention, 1.07−1.21× for RAG,                                         dense operations, this leads to performance degradation as
+4.66× for MemAgent, and 1.65× for Memory as Context.                                            batch size increases.
+Furthermore, energy efficiency improvements generally in-
+crease with memory size, except for DeepSeek Attention                                          For MemAgent, the system can dynamically select the op-
+and LServe due to the diminishing performance after 1M                                          timal configuration. For example, when the batch size is
+tokens for HBM access (stop at 1.43× and 1.07× respec-                                          larger than 2 in MemAgent, we switch to a GPU-centric
+tively). The energy reduction does not solely come from the                                     deployment to avoid slowdown.
+speedup: the FPGA kernels have a lower operating power
+than the corresponding GPU kernels (Appendix G).
+                                                                                                7. Conclusion
+6.4. Batch Inference Scaling                                                                    In this work, we demonstrate that a GPU-FPGA heteroge-
+                                                                                                neous system can accelerate memory processing in LLM
+Table 4 reports the geomean speedup of the GPU-FPGA
+                                                                                                inference. By unifying LLM inference optimizations into a
+system over GPU-centric baselines across different batch
+                                                                                                four-step memory processing pipeline, we expose its nontriv-
+sizes. We observe the speedup increases with batch size for
+                                                                                                ial contribution to end-to-end latency and exploit its compu-
+sparse attention and RAG methods, decreases for Memory
+                                                                                                tational heterogeneity with a GPU-FPGA design, achieving
+as Context, and slowdown for MemAgent:
+                                                                                                a 1.04 ∼ 2.2× speedup and 1.11 ∼ 4.7× energy reduction.
+                                                                                                While our prototype uses off-the-shelf devices, a heteroge-
+• Sparse attention. KV cache and latent indexing embed-                                         neous ASIC could further improve energy efficiency and
+dings are not shared across samples within a batch (Zhao                                        eliminate cross-device communication overhead.
+
+                                                                                            9
+
+===== PDF p.10 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+Impact Statement                                                        D., Rosen, E., et al. Gemini 2.5: Pushing the Frontier
+                                                                        with Advanced Reasoning, Multimodality, Long Context,
+This paper presents work whose goal is to advance the field             and Next Generation Agentic Capabilities. arXiv preprint
+of efficient machine learning inference. There are many                 arXiv:2507.06261, 2025.
+potential societal consequences of our work, none of which
+we feel must be specifically highlighted here.                        Elasticsearch, B. Elasticsearch, 2026. URL https:
+                                                                        //github.com/elastic/elasticsearch. Ac-
+Acknowledgement                                                         cessed: January 2026.
+
+This work was supported in part by PRISM (2023-JU-3135),              Gao, Y., Guo, S., Cao, S., Xia, Y., Cheng, Y., Wang, L., Ma,
+one of the seven centers in the JUMP 2.0 program sponsored              L., Sun, Y., Ye, T., Dong, L., So, H. K.-H., Hua, Y., Cao,
+by SRC and DARPA. It is also supported by CDSC indus-                   T., Yang, F., and Yang, M. Sparse Attention Adaptation
+trial partners and the AMD HACC Program.                                for Long Reasoning. In The Fourteenth International
+                                                                        Conference on Learning Representations, 2026a.
+References
+                                                                      Gao, Y., Zeng, Z., Du, D., Cao, S., Zhou, P., Qi, J., Lai, J.,
+Advanced Micro Devices, Inc. rocBLAS documentation.                     So, H. K.-H., Cao, T., Yang, F., and Yang, M. SeerAtten-
+  https://rocm.docs.amd.com/projects/                                   tion: Self-distilled Attention Gating for Efficient Long-
+  rocBLAS/. Accessed: January 2026.                                     context Prefilling. In The Thirty-ninth Annual Conference
+                                                                        on Neural Information Processing Systems, 2026b.
+Agarwal, S., Ahmad, L., Ai, J., Altman, S., Applebaum, A.,
+  Arbus, E., Arora, R. K., Bai, Y., Baker, B., Bao, H., et al.
+                                                                      Grattafiori, A., Dubey, A., Jauhri, A., Pandey, A., Kadian,
+  GPT-OSS-120B & GPT-OSS-20B Model Card. arXiv
+                                                                        A., Al-Dahle, A., Letman, A., Mathur, A., Schelten, A.,
+  preprint arXiv:2508.10925, 2025.
+                                                                        Vaughan, A., et al. The llama 3 herd of models. arXiv
+AMD ROCm Software. HIPIFY: Convert CUDA to Portable                     preprint arXiv:2407.21783, 2024.
+ C++ Code. URL https://github.com/ROCm/
+ HIPIFY. Accessed: January 2026.                                      Gu, A. and Dao, T. Mamba: Linear-time Sequence Model-
+                                                                        ing with Selective State Spaces. In First Conference on
+Behrouz, A., Zhong, P., and Mirrokni, V. Titans: Learning              Language Modeling, 2024.
+  to memorize at test time. In The Thirty-ninth Annual
+  Conference on Neural Information Processing Systems,                He, Z., Song, L., Lucas, R. F., and Cong, J. LevelST:
+  2026.                                                                 Stream-based Accelerator for Sparse Triangular Solver.
+                                                                        In Proceedings of the 2024 ACM/SIGDA International
+Beltagy, I., Peters, M. E., and Cohan, A.        Long-                  Symposium on Field Programmable Gate Arrays, pp. 67–
+  former: The long-document transformer. arXiv preprint                 77, 2024.
+  arXiv:2004.05150, 2020.
+                                                                      He, Z., Cao, Y., Qin, Z., Prakriya, N., Sun, Y., and Cong,
+Boutros, A., Nurvitadhi, E., Ma, R., Gribok, S., Zhao, Z.,              J. HMT: Hierarchical Memory Transformer for Efficient
+  Hoe, J. C., Betz, V., and Langhammer, M. Beyond Peak                  Long Context Language Processing. In Proceedings of
+  Performance: Comparing the Real Performance of AI-                    the 2025 Conference of the Nations of the Americas Chap-
+  Optimized FPGAs and GPUs. In 2020 International                       ter of the Association for Computational Linguistics: Hu-
+  Conference on Field-Programmable Technology (ICFPT),                  man Language Technologies (Volume 1: Long Papers),
+  pp. 10–19, 2020. doi: 10.1109/ICFPT51103.2020.00011.                  pp. 8068–8089, 2025a.
+Bulatov, A., Kuratov, Y., and Burtsev, M. Recurrent Memory
+                                                                      He, Z., Truong, A., Cao, Y., and Cong, J. InTAR: Inter-Task
+  Transformer. Advances in Neural Information Processing
+                                                                        Auto-Reconfigurable Accelerator Design for High Data
+  Systems, 35:11079–11091, 2022.
+                                                                        Volume Variation in DNNs. In 2025 IEEE 33rd Annual
+Chen, H., Zhang, J., Du, Y., Xiang, S., Yue, Z., Zhang, N.,             International Symposium on Field-Programmable Cus-
+  Cai, Y., and Zhang, Z. Understanding the Potential of                 tom Computing Machines (FCCM), pp. 123–132. IEEE,
+  FPGA-based Spatial Acceleration for Large Language                    2025b.
+  Model Inference. ACM Transactions on Reconfigurable
+  Technology and Systems, 18(1):1–29, 2024.                           He, Z., Ye, S., Ma, R., Wang, Y., and Cong, J. LUT-
+                                                                        LLM: Efficient Large Language Model Inference with
+Comanici, G., Bieber, E., Schaekermann, M., Pasupat, I.,                Memory-based Computations on FPGAs. arXiv preprint
+  Sachdeva, N., Dhillon, I., Blistein, M., Ram, O., Zhang,              arXiv:2511.06174, 2025c.
+
+                                                                 10
+
+===== PDF p.11 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+Jiang, H., Li, Y., Zhang, C., Wu, Q., Luo, X., Ahn, S., Han,           NVIDIA Corporation. cuBLAS: Basic Linear Algebra
+   Z., Abdi, A. H., Li, D., Lin, C.-Y., Yang, Y., and Qiu,              on NVIDIA GPUs. https://developer.nvidia.
+   L. MInference 1.0: Accelerating Pre-filling for Long-                com/cublas. Accessed: January 2026.
+   context LLMs via Dynamic Sparse Attention. Advances
+   in Neural Information Processing Systems, 37:52481–                 Paszke, A., Gross, S., Massa, F., Lerer, A., Bradbury, J.,
+   52515, 2024.                                                          Chanan, G., Killeen, T., Lin, Z., Gimelshein, N., Antiga,
+                                                                         L., Desmaison, A., Kopf, A., Yang, E., DeVito, Z., Raison,
+Jiang, Z., Xu, F. F., Gao, L., Sun, Z., Liu, Q., Dwivedi-Yu,             M., Tejani, A., Chilamkurthy, S., Steiner, B., Fang, L.,
+   J., Yang, Y., Callan, J., and Neubig, G. Active Retrieval             Bai, J., and Chintala, S. PyTorch: An Imperative Style,
+   Augmented Generation. In Proceedings of the 2023 Con-                 High-performance Deep Learning Library. Advances in
+   ference on Empirical Methods in Natural Language Pro-                 neural information processing systems, 32, 2019.
+   cessing, pp. 7969–7992, 2023.
+                                                                       Peng, B., Alcaide, E., Anthony, Q., Albalak, A., Arcadinho,
+Kitaev, N., Kaiser, L., and Levskaya, A. Reformer: The                   S., Biderman, S., Cao, H., Cheng, X., Chung, M., Der-
+  efficient transformer. In International Conference on                  czynski, L., Du, X., Grella, M., Gv, K., He, X., Hou,
+  Learning Representations, 2020.                                        H., Kazienko, P., Kocon, J., Kong, J., Koptyra, B., Lau,
+                                                                         H., Lin, J., Mantri, K. S. I., Mom, F., Saito, A., Song,
+Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu,                  G., Tang, X., Wind, J., Woźniak, S., Zhang, Z., Zhou, Q.,
+ C. H., Gonzalez, J., Zhang, H., and Stoica, I. Efficient                Zhu, J., and Zhu, R.-J. RWKV: Reinventing RNNs for the
+ Memory Management for Large Language Model Serv-                        Transformer Era. In Findings of the association for com-
+ ing with PagedAttention. In Proceedings of the 29th Sym-                putational linguistics: EMNLP 2023, pp. 14048–14077,
+ posium on Operating Systems Principles, pp. 611–626,                    2023.
+ 2023.
+                                                                       Pu, Y., He, Z., Qiu, T., Wu, H., and Yu, B. Customized
+Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V.,            Retrieval Augmented Generation and Benchmarking for
+  Goyal, N., Küttler, H., Lewis, M., Yih, W.-t., Rocktäschel,          EDA Tool Documentation QA. In Proceedings of the
+  T., Riedel, S., and Kiela, D. Retrieval-Augmented Gen-                 43rd IEEE/ACM International Conference on Computer-
+  eration for Knowledge-intensive NLP Tasks. Advances                    Aided Design, pp. 1–9, 2024.
+  in neural information processing systems, 33:9459–9474,
+  2020.                                                                Rajashekar, M. B., Tian, X., and Fang, Z. HiSpMV: Hy-
+                                                                         brid row distribution and vector buffering for imbalanced
+Liu, A., Feng, B., Wang, B., Wang, B., Liu, B., Zhao,                    SpMV acceleration on FPGAs. In Proceedings of the
+  C., Dengr, C., Ruan, C., Dai, D., Guo, D., et al.                      2024 ACM/SIGDA International Symposium on Field
+  DeepSeek-V2: A Strong, Economical, and Efficient                       Programmable Gate Arrays, pp. 154–164, 2024.
+  Mixture-of-Experts Language Model. arXiv preprint
+  arXiv:2405.04434, 2024.                                              Shen, W., Yang, Z., Li, C., Lu, Z., Peng, M., Sun, H., Shi,
+                                                                         Y., Liao, S., Lai, S., Zhang, B., et al. QwenLong-L1.5:
+Liu, A., Mei, A., Lin, B., Xue, B., Wang, B., Xu, B., Wu,                Post-Training Recipe for Long-Context Reasoning and
+  B., Zhang, B., Lin, C., Dong, C., et al. Deepseek-v3.2:                Memory Management. arXiv preprint arXiv:2512.12967,
+  Pushing the frontier of open large language models. arXiv              2025.
+  preprint arXiv:2512.02556, 2025.
+                                                                       Sheng, Y., Zheng, L., Yuan, B., Li, Z., Ryabinin, M., Chen,
+Lù, X. H. BM25S: Orders of magnitude faster lexi-                       B., Liang, P., Ré, C., Stoica, I., and Zhang, C. FlexGen:
+  cal search via eager sparse scoring. arXiv preprint                    High-Throughput Generative Inference of Large Lan-
+  arXiv:2407.03618, 2024.                                                guage Models with a Single GPU. In International Con-
+                                                                         ference on Machine Learning, pp. 31094–31116. PMLR,
+Moreira, G. d. S. P., Ak, R., Schifferer, B., Xu, M., Os-                2023.
+ mulski, R., and Oldridge, E. Enhancing Q&A Text
+ Retrieval with Ranking Models: Benchmarking, fine-                    Song, L., Chi, Y., Guo, L., and Cong, J. Serpens: A high
+ tuning and deploying Rerankers for RAG. arXiv preprint                  bandwidth memory based accelerator for general-purpose
+ arXiv:2409.07691, 2024.                                                 sparse matrix-vector multiplication. In Proceedings of
+                                                                         the 59th ACM/IEEE design automation conference, pp.
+Niu, T., Joty, S., Liu, Y., Xiong, C., Zhou, Y., and                     211–216, 2022.
+  Yavuz, S. JudgeRank: Leveraging Large Language Mod-
+  els for Reasoning-Intensive Reranking. arXiv preprint                Su, W., Tang, Y., Ai, Q., Wu, Z., and Liu, Y. DRAGIN:
+  arXiv:2411.00142, 2024.                                                Dynamic Retrieval Augmented Generation based on the
+
+                                                                  11
+
+===== PDF p.12 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+  Information Needs of Large Language Models. In Pro-                 Chinese Embeddings. In Proceedings of the 47th In-
+  ceedings of the 62nd Annual Meeting of the Association              ternational ACM SIGIR Conference on Research and
+  for Computational Linguistics (Volume 1: Long Papers),              Development in Information Retrieval, SIGIR ’24, pp.
+  pp. 12991–13013, 2024.                                              641–649, New York, NY, USA, 2024. Association for
+                                                                      Computing Machinery. ISBN 9798400704314. doi: 10.
+Sun, Y., Li, X., Dalal, K., Xu, J., Vikram, A., Zhang, G.,            1145/3626772.3657878. URL https://doi.org/
+  Dubois, Y., Chen, X., Wang, X., Koyejo, S., Hashimoto,              10.1145/3626772.3657878.
+  T., and Guestrin, C. Learning to (Learn at test time):
+  RNNs with expressive hidden states. In Singh, A.,                 Yang, A., Yang, B., Hui, B., Zheng, B., Yu, B., Zhou, C., Li,
+  Fazel, M., Hsu, D., Lacoste-Julien, S., Berkenkamp,                 C., Li, C., Liu, D., Huang, F., Dong, G., Wei, H., Lin, H.,
+  F., Maharaj, T., Wagstaff, K., and Zhu, J. (eds.), Pro-             Tang, J., Wang, J., Yang, J., Tu, J., Zhang, J., Ma, J., Yang,
+  ceedings of the 42nd International Conference on Ma-                J., Xu, J., Zhou, J., Bai, J., He, J., Lin, J., Dang, K., Lu,
+  chine Learning, volume 267 of Proceedings of Machine                K., Chen, K., Yang, K., Li, M., Xue, M., Ni, N., Zhang,
+  Learning Research, pp. 57503–57522. PMLR, 13–19 Jul                 P., Wang, P., Peng, R., Men, R., Gao, R., Lin, R., Wang,
+  2025. URL https://proceedings.mlr.press/                            S., Bai, S., Tan, S., Zhu, T., Li, T., Liu, T., Ge, W., Deng,
+  v267/sun25h.html.                                                   X., Zhou, X., Ren, X., Zhang, X., Wei, X., Ren, X., Liu,
+                                                                      X., Fan, Y., Yao, Y., Zhang, Y., Wan, Y., Chu, Y., Liu, Y.,
+Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+                                                                      Cui, Z., Zhang, Z., Guo, Z., and Fan, Z. Qwen2 technical
+  A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P.,
+                                                                      report. arXiv preprint arXiv:2407.10671, 2024a.
+  Bhosale, S., et al. Llama 2: Open foundation and fine-
+  tuned chat models. arXiv preprint arXiv:2307.09288,
+                                                                    Yang, A., Li, A., Yang, B., Zhang, B., Hui, B., Zheng, B.,
+  2023.
+                                                                      Yu, B., Gao, C., Huang, C., Lv, C., et al. Qwen3 technical
+Trivedi, H., Balasubramanian, N., Khot, T., and Sabharwal,            report. arXiv preprint arXiv:2505.09388, 2025a.
+  A. Interleaving Retrieval with Chain-of-Thought Reason-
+  ing for Knowledge-Intensive Multi-Step Questions. In              Yang, F., Yang, X., Wang, H., Wang, Z., Zhu, Z., Zeng, S.,
+  Proceedings of the 61st annual meeting of the association           and Wang, Y. GLITCHES: GPU-FPGA LLM Inference
+  for computational linguistics (volume 1: long papers), pp.          Through a Collaborative Heterogeneous System. In 2024
+  10014–10037, 2023.                                                  IEEE High Performance Extreme Computing Conference
+                                                                      (HPEC), pp. 1–7. IEEE, 2024b.
+Wang, G., Xie, Y., Jiang, Y., Mandlekar, A., Xiao, C., Zhu,
+ Y., Fan, L., and Anandkumar, A. Voyager: An open-                  Yang, S., Guo, J., Tang, H., Hu, Q., Xiao, G., Tang, J., Lin,
+ ended embodied agent with large language models. arXiv               Y., Liu, Z., Lu, Y., and Han, S. LServe: Efficient Long-
+ preprint arXiv:2305.16291, 2023.                                     sequence LLM Serving with Unified Sparse Attention.
+                                                                      Proceedings of Machine Learning and Systems, 7, 2025b.
+Wang, L., Cheng, Y., Shi, Y., Mo, Z., Tang, Z., Xie, W.,
+ Wu, T., Ma, L., Xia, Y., Xue, J., Yang, F., and Yang, Z.           Yang, S., Kautz, J., and Hatamizadeh, A. Gated Delta
+ TileLang: Bridge Programmability and Performance in                  Networks: Improving Mamba2 with Delta Rule. In The
+ Modern Neural Kernels. In The Fourteenth International               Thirteenth International Conference on Learning Repre-
+ Conference on Learning Representations, 2026.                        sentations, 2025c.
+Wang, X. and Zhou, D. Chain-of-thought reasoning without            Yao, S., Yu, D., Zhao, J., Shafran, I., Griffiths, T., Cao, Y.,
+ prompting. Advances in Neural Information Processing                 and Narasimhan, K. Tree of thoughts: Deliberate problem
+ Systems, 37:66383–66409, 2024.                                       solving with large language models. Advances in neural
+                                                                      information processing systems, 36:11809–11822, 2023a.
+Williams, S., Waterman, A., and Patterson, D. Roofline:
+ an insightful visual performance model for multicore
+                                                                    Yao, S., Zhao, J., Yu, D., Du, N., Shafran, I., Narasimhan,
+ architectures. Communications of the ACM, 52(4):65–76,
+                                                                      K. R., and Cao, Y. ReAct: Synergizing Reasoning and
+ 2009.
+                                                                      Acting in Language Models. In The eleventh international
+Wu, Y., Liang, S., Zhang, C., Wang, Y., Zhang, Y., Guo,               conference on learning representations, 2023b.
+ H., Tang, R., and Liu, Y. From Human Memory to AI
+ Memory: A Survey on Memory Mechanisms in the Era                   Yu, H., Chen, T., Feng, J., Chen, J., Dai, W., Yu, Q., Zhang,
+ of LLMs. arXiv preprint arXiv:2504.15965, 2025.                      Y.-Q., Ma, W.-Y., Liu, J., Wang, M., and Zhou, H. MemA-
+                                                                      gent: Reshaping Long-Context LLM with Multi-Conv
+Xiao, S., Liu, Z., Zhang, P., Muennighoff, N., Lian, D.,              RL-based Memory Agent. In The Fourteenth Interna-
+  and Nie, J.-Y. C-Pack: Packed Resources For General                 tional Conference on Learning Representations, 2026.
+
+                                                               12
+
+===== PDF p.13 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+Zeng, S., Liu, J., Dai, G., Yang, X., Fu, T., Wang, H., Ma, W.,
+  Sun, H., Li, S., Huang, Z., Dai, Y., Li, J., Wang, Z., Zhang,
+  R., Wen, K., Ning, X., and Wang, Y. FlightLLM: Efficient
+  large language model inference with a complete mapping
+  flow on FPGAs. In Proceedings of the 2024 ACM/SIGDA
+  International Symposium on Field Programmable Gate
+  Arrays, pp. 223–234, 2024.
+
+Zhang, D., Li, W., Song, K., Lu, J., Li, G., Yang, L., and Li,
+  S. Memory in large language models: Mechanisms, eval-
+  uation and evolution. arXiv preprint arXiv:2509.18868,
+  2025.
+Zhang, J., He, Z., Fraser, N., Blott, M., Sun, Y., and
+  Cong, J. FlexLLM: Composable HLS Library for Flex-
+  ible Hybrid LLM Accelerator Design. arXiv preprint
+  arXiv:2601.15710, 2026a.
+Zhang, T., Bi, S., Hong, Y., Zhang, K., Luan, F., Yang, S.,
+  Sunkavalli, K., Freeman, W. T., and Tan, H. Test-Time
+  Training Done Right. In The Fourteenth International
+  Conference on Learning Representations, 2026b.
+Zhang, Y., Long, D., Xu, G., and Xie, P. HLATR: Enhance
+  Multi-stage Text Retrieval with Hybrid List Aware Trans-
+  former Reranking. arXiv preprint arXiv:2205.10569,
+  2022.
+Zhao, Y., Lin, C.-Y., Zhu, K., Ye, Z., Chen, L., Zheng, S.,
+  Ceze, L., Krishnamurthy, A., Chen, T., and Kasikci, B.
+  Atom: Low-bit quantization for efficient and accurate
+  LLM serving. Proceedings of Machine Learning and
+  Systems, 6:196–209, 2024.
+
+
+
+
+                                                                  13
+
+===== PDF p.14 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+A. Related Works
+Surveys on memory in LLM inference. Recent surveys on LLM memory provide comprehensive characterizations of
+memory types and their usage patterns. Wu et al. draw parallels between LLM memory and human cognition, proposing a
+three-dimensional, eight-quadrant (3D-8Q) taxonomy based on memory origin, representation form, and retention duration.
+Zhang et al. evaluate memory effectiveness across four categories: parametric memory (model weights), contextual memory
+(KV caches), external memory (indexed vectors), and procedural memory (event stores). However, these surveys do not
+articulate the shared procedural structure by which memory is generated, accessed, and updated. This omission hinders a
+systematic understanding of memory processing in LLM inference and limits opportunities for optimizations.
+Sparse attention. Longformer (Beltagy et al., 2020) first proposes an effective sparse attention that combines the sliding
+window attention and a global token attention. Reformer (Kitaev et al., 2020) employs local sensitive hashing to select the
+relevant tokens to compute the attention scores. MInference (Jiang et al., 2024) employs mixed static-dynamic sparsity
+across heads for high precision sparse attention at the prefill stage. SeerAttention (Gao et al., 2026b) trains an auxiliary
+predictor to identify important blocks. These methods primarily optimize input processing rather than decoding.
+Advanced RAG systems. JudgeRank (Niu et al., 2024) leverages prompt engineering to distill key information from each
+document, utilizing users’ queries before passing to the reranker. HLATR (Zhang et al., 2022) adds a second reranking pass:
+it concatenates all candidate documents selected during the initial retrieval stages and then computes multiple similarity
+scores over this combined text using the second reranker model. By scoring the concatenated content all at once, HLATR
+provides more holistic relevance judgments.
+Context compression and recurrent models. QwenLong-L1.5 (Shen et al., 2025) extends MemAgent by introducing
+planning tokens for structured memory generation. RMT (Bulatov et al., 2022) suggests a recurrent memory transformer
+that compresses sequences into embeddings but lacks explicit retrieval mechanisms. Mamba (Gu & Dao, 2024) introduces a
+selective state space model that enables efficient long-context processing by replacing attention with recurrent state updates.
+Gated DeltaNet (Yang et al., 2025c) improves Mamba by controlling state updates through learnable gates. RWKV (Peng
+et al., 2023) unifies RNN and Transformer paradigms by utilizing time-mixing and channel-mixing mechanisms, enabling
+constant-memory inference.
+
+B. Detail Computation Properties of Memory Processing Pipeline
+Figures 13 and 14 illustrates the arithmetic intensity of memory processing in each LLM inference optimization. Higher
+arithmetic intensity means the operation is more compute bounded. The arithmetic intensity and computation pattern
+analysis are widely discussed in prior works (Chen et al., 2024) related to LLM inference acceleration. For the latency
+distribution among each step of memory processing pipeline:
+
+• Sparse Attention & RAG: the bottleneck is compute relevancy and retrieval, and the proportion of latency is increasing as
+the memory size grows.
+• MemAgent: the bottleneck is prepare memory, which is essentially LLM decoding.
+• Memory as Context: similar to sparse attention and RAG, the bottleneck is compute relevancy and retrieval, but the
+proportion of latency grows more slowly than them.
+• TTT/LaCT: the bottleneck is prepare memory and apply to inference, which is the LaCT block forward and backward pass.
+
+For sparse attention, RAG, MemAgent, and Memory as Context methods, the dominant latency originates from memory-
+centric and irregular operations such as relevance computation and top-k retrieval. By offloading these bottleneck steps
+to the FPGA, which enables customized data paths and fine-grained control, the system mitigates GPU inefficiencies on
+memory-bounded workloads and shortens the critical path of inference. Consequently, this mapping yields a substantial
+improvement in end-to-end inference speed.
+
+C. Cross-device Communication
+For generalization across different vendors of FPGAs and GPUs, we consider PCI Express (PCIe) as the interconnect
+standard to communicate between devices. The devices are installed in the same node with the same root complex to
+
+                                                             14
+
+===== PDF p.15 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+
+
+
+Figure 13. Arithmetic intensity (FLOPs/byte) of memory processing pipeline and the rest operations in LLM inference for sparse attention,
+single-stage RAG, Memory as Context, and TTT/LaCT. For RAG, prepare memory is a one-time operation and will be amortized with
+multiple queries.
+
+
+minimize PCIe overhead. The standard method of communicating FPGA with GPU is through memory copy runtime
+APIs of each device and utilize CPU and system DRAM to handle the control (Yang et al., 2024b) (Figure 15(a)). This
+method can only achieve 1/20 of the peak PCIe bandwidth. In this work, we configure the system alternatively using PCIe
+peer-to-peer (P2P) data transfer: Both FPGA’s and GPU’s HBM can initiate direct memory access (DMA) to the pinned
+memory buffer (non-swappable by the operating system) allocated on CPU (Figure 15(b)). The transaction will involve two
+hops of DMA with CPU as the intermediate, bypassing the system DRAM.
+A common concern regarding PCIe-based data transfer is its limited bandwidth. Compared to GPU–GPU communication
+over NVLink (600 GB/s for NVLink 3.0), PCIe provides substantially lower throughput (32 GB/s for PCIe 3.0). However,
+our profiling results indicate that the communication overhead introduced by PCIe in our configuration is sufficiently low
+and more than compensated for by the performance gains achieved through our customized FPGA kernels (Section 6.2).
+
+C.1. PCIe Latency
+One concern of the GPU-FPGA system in accelerating memory processing in LLM inference is the PCIe overhead between
+the FPGA and the GPU. Figure 16 depicts the latency profiling of PCIe latency. For sparse attention and RAG, the data
+transferred between the FPGA and the GPU are retrieved index and processed memory, which are under 1KB per request.
+Consequently, the transaction latency is in the order of microseconds (7 µs). For MemAgent and Memory as Context, the
+transferred embeddings have a size in the order of MBs, which takes microseconds to miliseconds to deliver. PCIe overhead
+is not the bottleneck because methods that require larger data movement also exhibit substantially longer end-to-end
+latency, making the PCIe overhead relatively small in comparison. The following numbers provide an order-of-magnitude
+comparison between PCIe latency and corresponding GPU kernel latency:
+
+   • Sparse Attention: Transfers include the query vector, new key indexing vectors, and retrieved indices, taking
+     approximately 14 µs. The corresponding GPU kernels take 128–2450 µs.
+   • RAG: Transfers only include the query document counter and retrieved indices, taking approximately 7 µs. The
+     corresponding GPU kernels take 23–1596 ms.
+   • Memory as Context: Transfers include memory, query, and retrieved embeddings for each segment, taking approxi-
+     mately 20–320 µs. The corresponding GPU kernels take 26–498 ms.
+
+                                                                  15
+
+===== PDF p.16 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+
+
+
+Figure 14. Arithmetic intensity of memory processing pipeline and the rest operations in LLM inference for two-stage RAG. Each stage
+has a compute relevancy and retrieval step.
+
+
+
+
+Figure 15. (a) Standard cross device data transfer using memory copy for heterogeneous system. (b) PCIe P2P data transfer to bypass
+system DRAM accesses.
+
+
+   • MemAgent: Transfers include KV cache and token IDs for each segment, taking approximately 14–218 ms. The
+     corresponding GPU kernels require 17–534 s.
+
+These comparisons show that PCIe communication overhead remains small (∼ 1000× difference) relative to computation
+time across all methods, even when data transfer size increases.
+
+D. Detail Experiment Settings
+The system specification is shown in Table 5.
+
+                                                    Table 5. Hardware Specification
+
+                                   Device   Model                                Memory
+                                   CPU      AMD EPYC 7v13 @ 2.5GHz (7 nm)        1 TB (51.2 GB/s)
+                                   GPU      AMD Instinct MI210 (6 nm)            64 GB (1.6 TB/s)
+                                   FPGA     AMD Alveo U55C (16 nm)               16 GB (460 GB/s)
+
+
+DeepSeek Attention DeepSeek Attention (Liu et al., 2025) introduces a lightning indexer to the Multi-headed Latent
+Attention (MLA) (Liu et al., 2024) module. For every compressed query embedding and KV latent embedding, it first
+generates 64 query heads and a key indexing vector by applying partial RoPE embedding, computes the dot products
+
+                                                                  16
+
+===== PDF p.17 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+
+
+
+Figure 16. Transfer latency on PCIe bus against the transfer data size. For transferring indices (KB) and single-token KV embeddings
+(MB) are in the order of microseconds, which is negligible compared to the latency of memory processing.
+
+
+between key vectors and all query heads, and weight-averages them based on the query weights derived from the input token.
+The final scores are used for top-k selection for MLA module to attend the token, where k is 2048 in the DeepSeek V3.2
+Exp model.
+We utilize the vLLM (Kwon et al., 2023) optimized DeepSeek V3.2 Exp inference kernel for the GPU baseline. Since the
+original DeepSeek V3.2 Exp is larger than the HBM capacity of MI210 GPU, we modify vLLM to load only the first layer
+of the model. Since k of DeepSeek attention is constant across layers, we calculate the end-to-end latency by multiplying
+the first-layer latency with the number of layers. For the GPU-FPGA system, the multi-head query vector and new key
+indexing vectors are delivered to FPGA from GPU and the retrieved indices are transferred from FPGA to GPU.
+SeerAttention-R During inference, SeerAttention-R (Gao et al., 2026a) first down projects the query vectors and key vectors
+with average pooling, then computes the dot products between the the projected queries and keys. Each score is for a block
+of tokens. The attention module only attend the current tokens to the selected blocks. During inference, the user can choose
+to determine the retrieved tokens by either a token budget with top-k selection, or a threshold based selection (select if the
+score is above the threshold).
+We utilize the TileLang (Wang et al., 2026) optimized kernel for SeerAttention-R. The base model is Qwen 3 8B. We set
+the block size to 64, token budget to 4096 for top-k mode, and threshold to 5e-4 for threshold mode. For the GPU-FPGA
+system, the projected query vector and new block-wise key indexing vectors are delivered to FPGA from GPU and the
+retrieved indices are transferred from FPGA to GPU.
+LServe LServe (Yang et al., 2025b) organizes blocks of tokens into logical pages and physical pages, where each physical
+page can have multiple logical pages. Each logical page is represented by two vectors: one with the minimum and one
+with maximum values for each channel. The score is computed by finding the maximum dot products between the query
+and these two vectors. Selection is in the granularity of the physical page, where the score for each physical page is the
+maximum score of logical pages.
+To use the CUDA kernels in the LServe codebase, we use HIPIFY (AMD ROCm Software) to port them to HIP kernel
+and compile them with hipcc to deploy on the MI210 GPU. We employ the default hyperparameters in their original
+benchmarking script for profiling. For the GPU-FPGA system, the query vector and min-max indexing vectors are delivered
+to FPGA from GPU and the retrieved indices are transferred from FPGA to GPU.
+DRAGIN, FLARE, and Fixed-sentence RAG Following the experiment setup in DRAGIN (Su et al., 2024), all three
+methods utilize Llama 2 7B (Touvron et al., 2023) as the generator model and BM25 indexing as the retrieval heuristic. The
+original retriever backend is ElasticSearch (Elasticsearch, 2026). We replace it with a faster backend specific for BM25
+indexing (BM25S (Lù, 2024)). The system will retrieve 64 documents and the maximum number of tokens generated is 32.
+For the GPU-FPGA system, query sentences are preprocessed into word counts and passed to the FPGA as a dictionary, and
+the FPGA return the retrieved document indices back to the GPU.
+Two-stage RAG A two-stage RAG first executes an hybrid search (semantic embedding and BM25 lexical search) to
+retrieve the top-N relevant documents, then filters the documents using a reranker to obtain the top-k documents in the
+
+                                                                17
+
+===== PDF p.18 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+selected N documents. The reranker is usually a transformer model. In the experiment, we follow the setup in RAG-EDA
+(Pu et al., 2024), where the first stage comprises an embedding model (bge-large-en-v1.5 (Xiao et al., 2024)) and a
+BM25 indexer, and the second stage is a reranker (bge-reranker-large (Xiao et al., 2024)). The first stage selects 64
+documents and the second stage picks 10 documents. The maximum number of tokens generated is 32.
+Memory as context In Titans (Behrouz et al., 2026), Memory as Context is a type of recurrent models that chunks
+sequence into segments, utilize soft prompts to generate latent embeddings as memory, and convert each segment into query
+embedding to find relevant embeddings stored in the past. In the experiment, we set the segment length to 1024 tokens
+and the output sequence length is 32. In the GPU-FPGA system, the GPU delivers the newly generated memory and next
+segment embeddings to the FPGA, and the FPGA returns the retrieved memory embeddings to the GPUs.
+MemAgent Following the experiment setup in Yu et al., we set the segment length to 5000 tokens, the memory size to 1024
+tokens, and the output max token length to 32. In the GPU-FPGA system, the GPU sends the KV cache produced in the
+prefill stage to the FPGA, and the FPGA returns the generated memory token ids back to the GPUs.
+
+E. FPGA Kernel Design
+For GPU kernels, we use (cuBLAS/cuSparse (NVIDIA Corporation) and rocBLAS/rocSparse (Advanced Micro Devices,
+Inc.)) for linear operations and custom CUDA/HIP kernels for non-linear operations to ensure that steps deployed on the
+GPU achieve state-of-the-art performance.
+For Memory as Context, we follow the HMT plugin design in FlexLLM (Zhang et al., 2026a). The FPGA loads the segment
+embeddings to the HBM from the CPU when the input is streaming. As show in Figure 17, the segment loader will read the
+segment embeddings on chip and stream to the query linear projection module to generate the query vector. At the same
+time, the memory loader reads past generated memory embeddings and performs cross attention with the query to extract
+and amplify the memory that are most relevant to the current segment. The output memory will be written back to the HBM
+and delivered to the GPU for processing the proceeding segments. Each modules is connected with FIFO streams.
+
+
+
+
+Figure 17. FPGA kernel architecture for Memory as Context method. The kernel is a dataflow design with each module fully data driven
+compute a single operation. Past memory embeddings are cached in the HBM and the segment embeddings are loaded from the CPU
+directly for each incoming segment.
+
+
+For MemAgent, the FPGA only executes the LLM decoding. Therefore, we can directly follow the designs in previous works
+(Zeng et al., 2024; He et al., 2025c; Yang et al., 2024b) and optimize them to specialize for decoding, e.g., the attention is a
+sequence of GEMV operations and we can increase the parallelism in the hidden dimension. Figure 18 illustrates the overall
+architecture. We follow a similar design to FlightLLM (Zeng et al., 2024) with separate special function units (SwiGLU,
+LayerNorm) and matrix/vector multiplication engines (Linear Projection, Attention). However, we align with the LUT-LLM
+(He et al., 2025c) with separate attention and linear projection engines since attention requires higher precision than linear
+projections to maintain accuracy. A global buffer is used to store partial weight matrices and intermediate data. Data are
+streamed in each engine to reduce on-chip data store requirements, and executions are sequentially scheduled between
+engines to ensure high computational throughput.
+
+F. FPGA Kernel Improvement Analysis
+Case 1: Large On-chip Memory. For block-sparse attention, compressed key vectors are either fully stored (SeerAttention-R)
+or partially cached (LServe) in FPGA on-chip memory. The aggregated on-chip memory (URAM + BRAM) bandwidth
+on U55C is about 5× higher than the effective SRAM bandwidth of MI210, with each bank managed as a scratchpad
+
+                                                                18
+
+===== PDF p.19 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+
+
+
+Figure 18. FPGA kernel architecture for MemAgent. Following the design in prior works (Zeng et al., 2024; He et al., 2025c;b), we
+design the kernel specialized to LLM decoding, where the KV cache is delivered from the GPU through PCIe. Linear projections are
+executed in INT4 to align with the weight precision, and the rest operations (attention, SwiGLU, LayerNorm) are calculated at FP32 to
+maintain accuracy of the model.
+
+
+
+to maximize target data access bandwidth. Since the Compute Relevancy and Retrieval stages are memory-bound, this
+yields 1.8–2.2× speedup for SeerAttention-R with top-k, 2.6–4.9× with threshold, and 1.2–5.6× for LServe (Figure 9),
+translating to 1.04–1.25× and 1.15–1.49× end-to-end speedups for SeerAttention-R and LServe. LServe performance
+degrades beyond 256K tokens and becomes worse than the GPU at 1M tokens. This is because the FPGA kernel starts to
+read from the HBM, while the GPU’s HBM utilization scales with sequence length and eventually surpasses that of the
+FPGA at 1M tokens. Therefore, the system dynamically falls back to GPU-only execution for sequences longer than 1M
+tokens.
+Case 2: Pipelined and Flexible Datapath. The memory processing pipeline has strong data dependency between steps.
+Moreover, operations such as the BM25 and the top-k selection involve irregular data access pattern as illustrated in Section
+4. With custom logic for fine-grained pipelining and optimized random access, the U55C FPGA can better reduce and
+overlap communication and computation latency than GPUs. Some methods (e.g., RAG) adopt CPU offloading as a baseline
+to accelerate these operations relative to GPU execution. Nevertheless, the U55C still achieves higher performance due to its
+3.5× higher peak TOPs and its substantially higher HBM bandwidth compared to system DRAM.
+We observe that these benefits generalize across sparse attention, RAG, and Memory as Context methods. For sparse
+attention, we pipeline index score computation with top-k/threshold-based selection, achieving a 1.3–2.2× speedup in
+memory processing for DeepSeek Attention, resulting in a 1.1–1.2× end-to-end speedup. Note that both LServe and
+DeepSeek attention require reading key vectors from HBM for a subset of tokens, incurring lower bandwidth than on-chip
+memory. Similar to LServe, the system dynamically falls back to GPU-only execution when the sequence length exceeds
+1M. For RAG (Figure 10), we pipeline the BM25 score computation with embedding search and top-k selection. For
+single-stage RAG methods (DRAGIN, FLARE, and FS-RAG), the GPU-FPGA system achieves a 5.1–6.6× speedup in
+memory processing over the baseline with the state-of-the-art BM25S kernel. In contrast, for two-stage RAG, the speedup
+drops to 1.1–2.1× due to the reranker dominating the GPU execution time, leading to an overall end-to-end speedup of up to
+1.47–1.84×. For Memory as Context methods, we fuse query generation, which is a linear projection on the current segment
+embeddings, with cross attention that outputs memory embeddings. Figure 11 compares end-to-end and memory-processing
+latency for Memory as Context between the GPU-FPGA system and the baseline. The GPU-FPGA system achieves a
+3.1 − 4.0× speedup for memory processing, resulting in a 1.3 − 1.6× end-to-end speedup.
+Case 3: Faster Decoding. Prior studies have shown that FPGAs can achieve faster LLM decoding than GPUs despite
+having fewer raw computational resources (Zeng et al., 2024; He et al., 2025b;c). This advantage arises because LLM
+decoding is fundamentally memory-bound, and FPGAs enable customized architectures that precisely control off-chip
+memory transactions to fully exploit the HBM bandwidth. In contrast, although GPUs provide higher peak HBM bandwidth,
+this bandwidth is often underutilized even with highly optimized kernels (Zeng et al., 2024). Since MemAgent relies on
+
+                                                                 19
+
+===== PDF p.20 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+LLM decoding to generate memory, the decoding efficiency of FPGAs directly translates into substantial system-level
+benefits. As shown in Figure 12, under the prefill-decode disaggregation scheme, the GPU-FPGA heterogeneous system
+consistently achieves a 1.8× speedup over a GPU-only baseline.
+
+G. Expanded Results for Sparse Attention and RAG
+Figures 19, 20, 21, and 22 illustrate the absolute value of latency for end-to-end inference and memory processing of sparse
+attention and RAG. Figures 23 and 24 show the corresponding energy efficiency comparison in joule per token (for sparse
+attention) and joule per request (for RAG).
+For kernel power consumption:
+
+   • DeepSeek Attention: U55C: 26.4 W, MI210: 55 W
+   • SeerAttention-R threshold: U55C: 24.9 W, MI210: 45 W
+   • SeerAttention-R top-k: U55C: 25.3 W, MI210: 46 W
+   • LServe: U55C: 26.2 W, MI210: 47 W
+   • RAG: U55C 29.7 W, MI210: 106 W, EPYC 7v13: 34 W
+   • MemAgent: U55C: 44.2 W, MI210: 99 W
+   • HMT/Titans: U55C: 42.6 W, MI210: 94 W
+
+
+
+
+Figure 19. End-to-end latency of each sparse attention mechanism on the baseline and the GPU-FPGA system with respect to the sequence
+length.
+
+
+H. Results with NVIDIA A100
+Compared with the AMD MI210, the NVIDIA A100 is a more widely adopted GPU for LLM inference. Although we do not
+have access to a platform that hosts both the A100 and the U55C within the same node, we calculate the end-to-end latency
+
+                                                                 20
+
+===== PDF p.21 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+
+
+
+         Figure 20. Latency of memory processing in each sparse attention mechanism with respect to the sequence length.
+
+
+by aggregating the measured latency components of the FPGA, GPU, and PCIe communication, while profiling kernel
+execution latency separately. Figures 25 and 26 present a representative case study using DeepSeek Attention. The results
+show that, even when paired with the MI210, the GPU–FPGA heterogeneous system can outperform the A100 in certain
+configurations. For end-to-end latency, since the A100 generally outperforms the MI210 under identical optimizations, the
+MI210+U55C configuration can be slower than an A100-only system. However, when the GPU is upgraded to the A100, the
+heterogeneous system continues to deliver consistent speedups. This demonstrates that the proposed heterogeneous system
+is effective and largely agnostic to the specific GPU model.
+
+I. Practical Impact and Device Scaling
+We add the following clarifications to better contextualize the practical impact of the reported speedups. Our current
+prototype utilizes the AMD Alveo U55C FPGA, which is manufactured in a 16 nm process technology, while the A100
+GPU in our baseline system uses a 7 nm process. More recent FPGA platforms, such as the AMD Alveo V80, provide
+a substantially higher compute resources and HBM bandwidth. Based on our kernel synthesis results, we estimate that
+migrating from U55C to V80 would provide an additional 1.6× geomean end-to-end speedup. Since the kernel design
+paradigms remain unchanged, this migration is straightforward from an implementation perspective.
+Although we do not have access to a current-generation GPU-FPGA system for real-system profiling, the architectural trends
+suggest that the advantage of heterogeneous execution will continue to hold. As GPUs improve, CPU-offloaded or otherwise
+non-GPU components can become a larger fraction of end-to-end latency, increasing the impact of the FPGA acceleration.
+Moreover, many targeted operations are memory-bound or irregular, and their performance does not scale linearly with the
+GPU HBM bandwidth alone. For example, a radix-based top-k on GPUs involves irregular memory accesses for histogram
+construction and is also constrained by scratchpad capacity, which determines bucket sizing and parallelization. Modern
+FPGA platforms such as V80 provide 94 MB on-chip scratchpad, which is substantially larger than GPU L1 scratchpad
+capacity, enabling more efficient implementations of such irregular memory-processing operations.
+
+
+
+
+                                                               21
+
+===== PDF p.22 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+
+
+
+Figure 21. End-to-end latency of each RAG system on the baseline system and GPU-FPGA system with respect to the document counts.
+
+
+
+
+Figure 22. Latency of memory processing in single stage RAG using BM25 as the retrieval heuristic (DRAGIN, FLARE, FS-RAG) and
+two stage RAG with respect to the document counts.
+
+
+
+
+                                                              22
+
+===== PDF p.23 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+
+
+
+        Figure 23. Energy efficiency of sparse attention mechanisms in Joule per token.
+
+
+
+
+              Figure 24. Energy efficiency of RAG systems in Joule per request.
+
+
+
+                                              23
+
+===== PDF p.24 =====
+Understand and Accelerate Memory Processing Pipeline for Large Language Model Inference
+
+
+
+
+Figure 25. The relative speedup of end-to-end inference of DeepSeek V3.2 Exp with DeepSeek Attention when deployed on MI210,
+A100, MI210 + U55C, and A100 + U55C. A100 is generally faster in LLM inference than MI210. When integrating U55C with A100,
+the GPU-FPGA heterogeneous system can still speed up the inference.
+
+
+
+
+Figure 26. The relative speedup of memory processing in DeepSeek Attention when deployed on MI210, A100, MI210 + U55C, and
+A100 + U55C. Even with MI210, the GPU-FPGA heterogeneous system can still outperform A100.
+
+
+
+
+                                                            24

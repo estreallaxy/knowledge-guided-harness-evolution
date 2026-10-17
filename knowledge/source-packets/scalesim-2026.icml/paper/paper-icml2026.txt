@@ -1,0 +1,1059 @@
+===== PDF p.1 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation
+                         Distance-Based Memory Management
+
+
+          Zaifeng Pan 1 * Yipeng Shen 1 * Zhengding Hu 1 Zhuang Wang 2 Aninda Manocha 2 Zheng Wang 1
+                                        Zhongkai Yu 1 Yue Guan 1 Yufei Ding 1
+
+
+                           Abstract                                                                         LLM invocation      Action simulation
+
+
+        LLM-based multi-agent simulations are increas-                   Multi-Agent Simulation           Activated (LLM Involved)
+
+        ingly adopted across application domains, but
+        remain difficult to scale due to GPU memory                                                                LLM Not-Involved
+                                                                                                                                       Timeline
+
+        pressure. Each agent maintains private GPU-
+        resident states, including models, prefix caches,                                  Agent-Specific Memory Consumption
+
+        and adapters, which quickly exhaust device mem-                     LoRA Adapter           Prefix Cache        VectorDB Indices     …
+        ory as the agent count grows. We identify two
+        key properties of these workloads: sparse agent              Figure 1. Illustration of multi-agent simulation phases and agent-
+                                                                     specific memory consumption.
+        activation and estimable agent invocation orders.
+        Based on an analysis of representative workload
+        classes, we introduce invocation distance, a uni-
+        fied abstraction that estimates the relative order           in shared environments, multi-agent simulation serves as
+        in which agents will issue future LLM requests.              a key tool for studying collective behaviors, coordination
+        Leveraging this abstraction, we present ScaleSim,            strategies, and emergent dynamics in large-scale systems.
+        a memory-efficient LLM serving system for large-
+                                                                     Scaling up the number of agents in simulation improves be-
+        scale multi-agent simulations. ScaleSim enables
+                                                                     havioral diversity and enables more complex interaction pat-
+        proactive prefetching and priority-based eviction,
+                                                                     terns, which are critical for many downstream tasks. How-
+        supports diverse agent-specific memory through
+                                                                     ever, existing backend systems for serving LLM-based agent
+        a modular interface, and achieves up to 1.74×
+                                                                     applications are struggling to handle large-scale simulations
+        speedup over SGLang on simulation benchmarks.
+                                                                     efficiently. A key bottleneck arises from the agent-specific
+        ScaleSim’s source code is available at https:
+                                                                     memory, which includes private models (Park et al., 2025),
+        //github.com/PanZaifeng/KVFlow.
+                                                                     LoRA adapters (Yu et al., 2024), prefix caches (Zheng et al.,
+                                                                     2024a; Gim et al., 2024; Pan et al., 2025b), and action his-
+                                                                     tories1 (Packer et al., 2023; Chhikara et al., 2025; Xu et al.,
+1. Introduction                                                      2025b). As illustrated in Figure 1, each agent maintains its
+Large language model (LLM)-based multi-agent simulation              own memory components on the GPU. As the agent popula-
+is widely used to model and analyze complex systems in-              tion increases, the aggregate memory demand grows rapidly,
+volving interacting agents. It has enabled progress in diverse       often exceeding available GPU capacity. This results in
+application domains, including social science (Park et al.,          frequent memory evictions and data transfers between host
+2023; 2024; Ren et al., 2024; Li et al., 2025b), autonomous          and device, introducing significant I/O overhead (Figure 2)
+driving (Gulino et al., 2023; Zhou et al., 2024), urban plan-        and degrading overall system throughput.
+ning (Ni et al., 2024), robotics (Kannan et al., 2024; Ren           Despite this growing memory footprint, we make a key ob-
+et al., 2025), and economic modeling (Li et al., 2023). By           servation: agent execution is inherently sparse. Specifically,
+capturing how individual agents perceive, decide, and act            the number of concurrent LLM requests at any given time
+    *
+   Equal contribution 1 University of California, San Diego          is much smaller than the total number of agents. This spar-
+2                                                                    sity arises from the two-phase structure of agent simulation
+ Amazon Web Services. Correspondence to: Zaifeng Pan <za-
+pan@ucsd.edu>.                                                       shown in Figure 1: one phase involves invoking the LLM
+Proceedings of the 43 rd International Conference on Machine            1
+                                                                          To avoid ambiguity, we use action history to represent the
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026         agent’s accumulated experience or memory content, as memory in
+by the author(s).                                                    this paper refers to storage resources such as GPU memory.
+
+                                                                 1
+
+===== PDF p.2 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+
+                   17.5                                                            100                                  that ScaleSim provides consistent performance improve-
+
+
+
+
+                                                          Active Agent Ratio (%)
+                   15.0                                                             80
+I/O Overhead (s)
+
+
+                   12.5                                                                                                 ments as the number of agents scales.
+                   10.0                                                             60
+                    7.5                                                             40                                  In summary, we make the following contributions:
+                    5.0
+                    2.5                                                             20
+                    0.0                                                              0                                    • We identify two key properties of multi-agent simula-
+                          50     100      500      1000                                  0   5      10         15
+                               Simulation Agents                                             Simulation Step
+                                                                                                                            tion workloads: sparse agent activation and estimable
+Figure 2. I/O overhead per sim- Figure 3. Only a small fraction                                                             agent invocation orders. To capture these behaviors, we
+ulation step increases with the of agents are activated during                                                              introduce the unified invocation distance abstraction,
+number of simulation agents.    each simulation step.
+                                                                                                                            which generalizes activation patterns across diverse
+                                                                                                                            applications.
+ to generate actions (LLM-involved), while the other exe-                                                                 • We design and implement ScaleSim, a memory-
+ cutes those actions in the environment without requiring                                                                   efficient LLM serving system that leverages invocation
+ LLM inference (LLM-not-involved). We refer to an agent                                                                     distance to guide memory management decisions.
+ as activated when it is in the LLM-involved phase. Our
+ profiling of large-scale agent societies (Piao et al., 2025)                                                             • We conduct comprehensive experiments on three rep-
+ reveals that only a small fraction of agents are activated at                                                              resentative workloads. Results show that ScaleSim
+ any moment, resulting in sparse LLM execution patterns                                                                     achieves up to 1.74× speedup compared to a vanilla
+ shown in Figure 3. This execution sparsity implies that sim-                                                               SGLang baseline, demonstrating its effectiveness in
+ ply adding more machines to handle scalability often leads                                                                 scaling multi-agent simulation.
+ to poor hardware utilization, since most agents are inactive
+ at any given time.                                                                                                     2. Background and Related Work
+We make another key observation: in many multi-agent                                                                    LLM-based multi-agent simulation. LLM-based multi-
+simulation workloads, the relative order in which agents                                                                agent simulation models a system composed of multiple
+are invoked can be effectively estimated. Based on how                                                                  autonomous agents, where each agent relies on a large lan-
+agent invocation order can be estimated, we categorize rep-                                                             guage model to reason about its local state and generate
+resentative applications into three types: (1) Independent                                                              actions in response to the shared environment. As illus-
+simulation, where agents operate in isolation and the next                                                              trated in Figure 1, the behavior of each LLM-based agent
+invocation can be inferred directly from their current action;                                                          typically alternates between two phases: invoking the LLM
+(2) Interaction-involved simulation, where agent interac-                                                               to generate the next action, and executing that action over
+tions are possible, but future activations remain predictable                                                           a period of time without LLM involvement. This results in
+based on environmental cues such as agent location and                                                                  the sparse activation patterns shown in Figure 3, where only
+moving velocity; and (3) Predefined activation paths, such                                                              a small subset of agents are simultaneously issuing LLM
+as information diffusion in social networks, where the next                                                             requests. This structural property introduces opportunities
+activation time of agents can be compared through structural                                                            for more efficient memory and compute management in
+patterns like hop counts.                                                                                               large-scale systems.
+ Motivated by sparse agent activation and estimable invo-
+ cation orders, we propose ScaleSim, an LLM serving sys-                                                                Agent-specific memory. Each agent in an LLM-based
+ tem that efficiently manages GPU memory for large-scale                                                                simulation maintains its own memory footprint, compris-
+ multi-agent simulations. ScaleSim introduces invocation                                                                ing both static model configurations and dynamic runtime
+ distance for each agent to guide memory management                                                                     state. On the static side, agents may load personalized com-
+ and exposes a unified interface for applications to provide                                                            ponents such as LoRA adapters (Yu et al., 2024), system-
+ distance estimates. Based on the invocation distances of                                                               specific prefix caches that encode role and behavioral pri-
+ agents, ScaleSim enables distance-aware eviction, proac-                                                               ors (Zheng et al., 2024a; Pan et al., 2024; Gim et al., 2024;
+ tive prefetching, and execution preemption, which substan-                                                             Pan et al., 2025a;b), or even auxiliary draft models used
+ tially reduces I/O overhead. ScaleSim further defines an                                                               for speculative decoding (Leviathan et al., 2023; Liu et al.,
+ extensible abstraction for agent-specific memory, allow-                                                               2023; Miao et al., 2024). These components are typically
+ ing heterogeneous memory modules to be seamlessly in-                                                                  instantiated per agent and persist across multiple simula-
+ tegrated and jointly managed. We implement ScaleSim                                                                    tion steps. At runtime, agents accumulate action histories
+ on top of SGLang and evaluate it on three representative                                                               based on prior interactions (Packer et al., 2023; Ouyang
+ simulation applications: AgentSociety (Piao et al., 2025),                                                             et al., 2025), often requiring dedicated storage and indexing
+ Generative Agents (Park et al., 2023), and information dif-                                                            structures (Chhikara et al., 2025; Xu et al., 2025b) to sup-
+ fusion (Gao et al., 2023). Experimental results demonstrate                                                            port efficient retrieval. In retrieval-augmented generation
+
+                                                                                                                    2
+
+===== PDF p.3 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+
+(RAG) scenarios (Lewis et al., 2020; Zhang et al., 2021;                                LLM invocation         Action simulation         Memory load
+
+Xu et al., 2025a), agents further exhibit diverse and skewed            Agent 1
+access patterns depending on their task focus, resulting in                                                                Evict 1
+                                                                        Agent 2
+heterogeneous caching demands across GPU and CPU mem-                                                            Evict 2                  Evict 3
+ory (Hu et al., 2025; Lin et al., 2025; Jin et al., 2024). As           Agent 3
+                                                                                      On-demand load latency                         Redundant memory load
+illustrated in Figure 1, these components together define the
+                                                                                                Agent 1             Evicted        Agent 2
+agent-specific memory footprint, which must be efficiently              Memory pool
+                                                                                              Agent 2          Evicted Agent 3 Evicted   Agent 1
+managed to support large-scale simulation.
+                                                                                                                                      Simulation timeline
+
+
+                                                                     Figure 4. Inefficiency of existing systems due to frequent reactive
+                                                                     memory swaps and suboptimal eviction decisions.
+
+
+                                                                     3. Invocation Distance-Based Memory
+                                                                        Management
+LLM serving systems. LLM-based multi-agent simula-
+tion applications rely on general-purpose LLM serving sys-           3.1. Limitation of Existing Systems
+tems such as vLLM (Kwon et al., 2023) and SGLang (Zheng              Existing LLM serving systems (Kwon et al., 2023; Zheng
+et al., 2024a) to provide backend inference for agent de-            et al., 2024a; NVIDIA, 2025) are designed to be application-
+cision making. These systems incorporate optimizations               agnostic: they treat each request as an independent invoca-
+including flexible batching (Yu et al., 2022; Agrawal et al.,        tion and have no visibility into the execution semantics of
+2024; Zheng et al., 2024b; Chen et al., 2024b; Sheng et al.,         the frontend application. As a result, these systems man-
+2024; Guan et al., 2025), KV cache management (Qin et al.,           age agent-specific memory using generic strategies such as
+2025; Liu et al., 2024; Sheng et al., 2023; Zhang et al.,            Least Recently Used (LRU) or usage-based heuristics, with-
+2025a), large-scale parallelization (Patel et al., 2024; Zhong       out leveraging any information about when each agent will
+et al., 2024; Chen et al., 2024a; 2026), and kernel-level op-        be activated again. While this approach works adequately
+timizations (Dao et al., 2022; Ye et al., 2025; Dong et al.,         for stateless inference workloads, it becomes a fundamental
+2024; Pan et al., 2025a). However, these systems are un-             bottleneck in multi-agent simulation. We observe two key
+aware of simulation semantics, leading to inefficient mem-           limitations of existing systems in this setting:
+ory management in large-scale multi-agent simulation work-
+loads. We detail their inefficiency in Section 3.1.
+                                                                     Frequent reactive memory swaps. As illustrated in Fig-
+While recent works explore system optimizations for agen-            ure 4, consider a simulation involving three agents, where
+tic workloads, they primarily target scenarios other than            the available GPU memory can accommodate only two
+general multi-agent simulation or focus on more special-             agents’ memory at a time. In this setting, current LLM
+ized settings. Workflow-driven systems (Lin et al., 2024;            serving systems, which lack visibility into application-level
+Pan et al., 2025b; Gim et al., 2025) assume pre-defined              scheduling, can only load an agent’s memory on demand,
+execution structures, making them unsuitable for dynamic,            that is, when the agent issues an LLM call. For example,
+large-scale simulations with decentralized control. Infer-           at the beginning of the simulation, Agent 1 and Agent 2
+Cept (Abhyankar et al., 2024) manages KV cache in tool-              each issue an LLM call. Since the system loads their corre-
+augmented LLMs using profiled tool execution time, but               sponding memory to the GPU for inference, the available
+does not account for multi-agent simulations where action            memory is fully occupied, so at this point, Agent 3’s mem-
+execution time varies across agents and steps and may de-            ory cannot be cached on the GPU. Later, when Agent 3
+pend on inter-agent interactions. AI Metropolis (Xie et al.,         becomes active and attempts to perform an LLM inference,
+2024) improves batch efficiency in a specific simulation             the system must reactively load its memory from CPU to
+setting. It assumes that action simulation does not affect           GPU. This memory swap occurs despite the fact that both
+subsequent LLM generations to perform out-of-order exe-              Agent 1 and Agent 2 are no longer in their LLM stages and
+cution, which does not hold in many multi-agent simulation           have already transitioned to the simulation phase. However,
+applications. We provide a more detailed comparison with             because their memory remains on the GPU without being
+prior systems in Appendix B.                                         reclaimed, Agent 3 incurs a cold start cost.
+In this paper, we focus on the memory efficiency of LLM              Such on-demand memory swapping introduces repeated
+serving systems for multi-agent simulation. Compared to              transfers between CPU and GPU memory, which are costly
+existing works, our approach applies to a broader range of           and delay the execution of LLM inference. Since each mem-
+scenarios beyond their assumptions.                                  ory load incurs high latency, especially when model-specific
+
+                                                                 3
+
+===== PDF p.4 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+
+                                LLM invocation        Action simulation
+                                                                            Simulating: water
+                                                                               play for 5s                 Move at 2m/s                                 Heard
+                               LLM generates a 5s action plan
+                                                                                                                                                        a news
+
+
+                                                             Timeline
+                                           Simulate 5s                                    2s later                                          D=1
+
+                                                                                                         What are
+                                         NO interference on action                                      you doing?
+                                         simulation among agents                                                                                            D=2
+                                                                                                Interaction breaks
+                                                                                                current simulation
+
+
+                                                                                     2s     Invoke LLM for conversation
+   Unified Interface
+
+   UpdateAgentDistance                                                        D = min(simulation finish time,
+                                  D = simulation finish time                                                                      D = hop count
+   (agentID, D)                                                                       interaction time)
+
+
+                (a) Independent Simulation                                (b) Interaction-Involved Simulation             (c) Predefined Activation Paths
+
+Figure 5. Three representative categories of multi-agent simulation workloads. In each case, we define the invocation distances of agents
+accordingly and pass them to ScaleSim through a unified interface.
+
+
+memory such as LoRA adapters and prefix cache can be                                      rather the system’s lack of foresight into when each agent
+very large, these stalls accumulate and significantly degrade                             will next require model inference. Without such aware-
+system throughput. Importantly, this inefficiency is not due                              ness, the memory manager cannot make informed decisions,
+to GPU compute saturation, but rather a consequence of                                    leading to avoidable overhead and reduced throughput.
+treating agent activations as isolated events without consid-
+ering their temporal relationships.                                                        3.2. Invocation Distance Abstraction for Different
+                                                                                                Simulation Applications
+Suboptimal eviction decisions. Existing LLM serving
+systems make eviction decisions solely based on recent                                    To address the inefficiencies described above, we seek to
+memory access history, without understanding the actual                                   bridge the gap between low-level memory management and
+execution state of each agent. As a result, the system may                                high-level agent execution semantics. A key observation
+incorrectly assume that an agent is inactive simply because                               is that, in many multi-agent simulation applications, agent
+it has not accessed the LLM for a while. In reality, the agent                            activations are not random but follow predictable patterns,
+may just be in the middle of its simulation phase, during                                 providing an opportunity to anticipate when each agent will
+which it does not use the LLM but will soon issue another                                 next issue an LLM request.
+request. This misinterpretation often leads to premature                                  We leverage this insight by introducing a simulation-aware
+eviction of memory that will be needed again shortly.                                     abstraction called invocation distance, which captures the
+As illustrated in Figure 4, after Agent 2 completes its LLM                               temporal gap between an agent’s current state and its next
+generation, it proceeds to a local simulation phase where it                              expected LLM invocation. Invocation distance does not nec-
+no longer interacts with the LLM. During this period, the                                 essarily represent an exact timestamp or number of steps;
+system mistakenly regards Agent 2 as a low-priority candi-                                rather, it serves as a relative measure that enables the system
+date for retention, since its memory has not been accessed                                to compare the urgency of different agents’ upcoming acti-
+recently. Consequently, when Agent 3 issues a new LLM                                     vations. This allows memory management to move beyond
+request, the system evicts Agent 2’s memory to free GPU                                   reactive heuristics and instead make informed decisions by
+space. However, Agent 2 is scheduled to resume LLM infer-                                 prioritizing agents with smaller invocation distances.
+ence shortly afterward, forcing its memory to be reloaded                                  Based on how to construct the invocation distances, we
+soon. In contrast, Agent 1, which remains in a long sim-                                   classify multi-agent simulation applications into three repre-
+ulation phase and will not use the LLM for an extended                                     sentative categories:
+duration, retains its memory on the GPU unnecessarily.
+This mismatch between recency-based eviction policies and                                  Independent simulation. In independent multi-agent sim-
+the actual execution schedule of agents results in inefficient                             ulations (Wan et al., 2025; Wang et al., 2023a; Zhu et al.,
+GPU memory usage. The system often reloads memory for                                      2023; Zhou et al., 2023; Gur et al., 2023), each agent op-
+agents that will soon become active, while unnecessarily re-                               erates entirely in isolation, and its activation schedule is
+taining memory for agents that are in long simulation phases                               determined solely by its own internal logic. Since agents
+and will not invoke the LLM in the near future. The root                                   do not interact with each other, their execution timelines
+cause is not the insufficiency of GPU memory itself, but                                   are decoupled and predictable. Figure 5 (a) illustrates an
+
+                                                                                   4
+
+===== PDF p.5 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+
+example that each agent simulates independently, and the              invocation distance as the minimum of two components:
+action simulation time can be directly inferred.
+                                                                                     D = min(Daction , Dinteraction )           (1)
+For instance, consider a scenario where a large number of
+robotic arms simultaneously perform repetitive tasks. Each            where Daction corresponds to the remaining duration of
+arm repeatedly goes through a cycle consisting of observa-            the current action sequence, and Dinteraction captures the
+tion, planning, and physical actuation. After completing an           expected time until the next possible interaction between
+LLM-based planning step, the arm enters an action phase               agents. Generative agents and similar spatial multi-agent
+whose duration is fixed or bounded by system parameters.              simulations constitute a specific example in this category,
+Similarly, in environments where multiple agents are inde-            where the interaction distance can be estimated by comput-
+pendently playing through simulation episodes, each agent             ing the physical distance between agents and dividing by
+alternates between invoking the LLM to make decisions and             their movement velocity. As shown in Figure 5 (b), if two
+executing rule-based or environment-driven actions. In both           agents are moving toward each other in the environment,
+cases, the duration between two LLM calls can often be                the time to interaction can be approximated as:
+inferred from the agent’s current phase.
+                                                                                                     Physical Distance
+In some applications (Piao et al., 2025), agents may exhibit                        Dinteraction =                              (2)
+                                                                                                         Velocity
+limited forms of interaction, such as observing each other’s
+behavior or logging information for future reference. How-            This estimate enables the system to prioritize memory re-
+ever, these interactions do not interfere with the execution of       tention for agents that are spatially close to others and thus
+the current simulation phase. They only affect the internal           more likely to require a new LLM invocation in the near
+logs or memory buffers of the agents, which may influence             future, beyond only considering the current action duration.
+future LLM generations. Since the ongoing simulation be-
+havior remains unaffected, we categorize such settings as             Predefined activation paths. In some multi-agent simula-
+part of independent simulation.                                       tions, agent activation is governed by structured propagation
+In situations where this duration is not explicitly specified,        patterns that follow predefined paths through a network or
+the system can still estimate the invocation distance using           environment (Gao et al., 2023; Li et al., 2024; Zhang et al.,
+application-specific rules or by prompting the LLM to pre-            2025b). These simulations are often used to model infor-
+dict a value based on the current context. These estimates            mation diffusion, rumor spreading, or influence cascades
+do not need to be exact, as long as they capture the relative         in social networks (Gao et al., 2023). Unlike the previous
+urgency among agents.                                                 categories, where agents actively perform or adjust actions
+                                                                      based on internal plans or local interactions, agents in this
+                                                                      category may remain inactive for extended periods until they
+Interaction-involved simulation. Similar to independent               are explicitly reactivated by upstream events.
+simulations, each agent in this category (Park et al., 2023;
+                                                                      A typical example is a simulation of information diffusion
+2024; Wang et al., 2023b; AL et al., 2024; Li et al., 2025a)
+                                                                      where activation proceeds in a breadth-first manner along
+follows a local execution loop where it generates an action
+                                                                      a graph. An agent becomes active when it receives infor-
+plan through an LLM call and then performs the planned
+                                                                      mation from one of its neighbors, issues an LLM-based
+actions over a period of time. However, unlike in the inde-
+                                                                      response, and then passes the information to others. Af-
+pendent case, agents may interact with others during this
+                                                                      ter this step, the agent may become inactive for the rest
+period, which can disrupt their current plan and trigger a
+                                                                      of the simulation or remain idle until it receives new in-
+new LLM invocation earlier than originally expected.
+                                                                      put. Although the agent performs no visible action during
+A representative example is Generative Agents (Park et al.,           this waiting period, we treat it as a special form of action
+2023), where agents navigate a shared environment based               simulation, as it does not involve any LLM invocation.
+on individually generated daily schedules. While agents
+                                                                      In such settings, the system cannot rely on local execution
+typically simulate their plans independently, unexpected
+                                                                      state or physical proximity to estimate the next activation
+interactions can occur when they encounter each other in
+                                                                      time. Instead, it can use the agent’s position in the propaga-
+physical space. These interactions may lead to social con-
+                                                                      tion path as a proxy for invocation distance. For example, in
+versations, collaborative task execution, or negotiation, each
+                                                                      graph-based propagation, the hop count from the informa-
+requiring a new LLM query to adjust the current course
+                                                                      tion source provides a natural and effective approximation
+of action. As a result, the actual invocation time is influ-
+                                                                      of when an agent will next issue an LLM request, like Fig-
+enced not only by the agent’s own plan but also by potential
+                                                                      ure 5 (c) shows. Agents that are closer to the origin of
+interaction events.
+                                                                      propagation are likely to be activated earlier, whereas those
+To account for both sources of activation, we define the              farther away may remain idle for longer durations.
+
+                                                                  5
+
+===== PDF p.6 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+
+               GPU Memory                           Offloaded Memory                         LLM invocation         Action simulation         Memory load
+                                Prefetch if
+             Agent   Distance   𝐷!"# > 𝐷$%%&'()*)   Agent    Distance
+  Active       1         0                            7          1             Agent 1
+  agents       3         0                            4          3
+                                        threshold                                                                 Evict 1
+               8         2                            2          5
+               5         3                            6          5             Agent 2
+                                                                                                                                        Evict 3
+                                                                               Agent 3
+Figure 6. An example of invocation distance-guided proactive
+                                                                                             Proactive prefetch
+prefetching. Agent 7 is prefetched by replacing an inactive GPU-
+resident agent with a larger invocation distance.                              Memory pool    Agent 1    Evicted Agent 3 Evicted          Agent 1
+                                                                                                                    Agent 2
+
+                                                                                                                                           Simulation timeline
+3.3. Efficient Memory Management with Unified
+     Interface                                                                Figure 7. Simulation timeline after ScaleSim’s optimization.
+
+Building on the abstraction of invocation distance, we pro-
+pose a memory management system, ScaleSim, that enables
+the backend LLM serving system to make informed and
+proactive decisions for multi-agent simulation workloads.
+This design bridges the semantic gap between the simula-
+tion frontend and the backend memory manager, allowing
+ScaleSim to coordinate memory usage more effectively un-                    Future reuse-aware eviction. When GPU memory be-
+der constrained GPU resources.                                              comes insufficient, the system must evict memory belonging
+                                                                            to one or more agents. Instead of relying on recency-based
+To support this coordination, ScaleSim provides a unified                   policies such as LRU, ScaleSim prioritizes eviction based
+interface through which the simulation application exposes                  on invocation distance to reduce redundant data transfers.
+per-agent invocation distance estimates. Based on these
+values, we design two core optimizations in ScaleSim:                       In Figure 7, when Agent 3 is about to issue a new LLM
+                                                                            request, ScaleSim evicts Agent 1 rather than Agent 2, since
+                                                                            Agent 2 has a shorter invocation distance and will be acti-
+Distance-guided proactive prefetch. ScaleSim performs
+                                                                            vated sooner. This decision avoids an additional memory
+proactive prefetching by explicitly comparing invocation
+                                                                            load for Agent 2 and improves overall memory reuse.
+distances across agents. When an offloaded agent has an
+invocation distance below a predefined threshold, ScaleSim                  This eviction strategy provides two benefits. First, even with
+further checks whether its distance is smaller than that of                 prefetching, there are cases where memory transfers can-
+any inactive agent currently resident in GPU memory. If                     not fully overlap with computation, especially when many
+sufficient GPU memory is available, either as free capacity                 agents are prefetched in parallel. Reducing unnecessary
+or by replacing inactive agents with larger invocation dis-                 memory loads at the source improves transfer efficiency.
+tances, ScaleSim proactively prefetches the selected agent’s                Second, for certain types of agent-specific memory such as
+memory from the CPU to the GPU. Since LLM inference                         prefix caches, users may choose not to back them up in CPU
+does not involve CPU-GPU data transfer over PCIe, the                       memory to save resources. Once evicted, such memory must
+prefetch operation can proceed in parallel without blocking                 be recomputed rather than restored. Avoiding eviction in
+the agent’s execution on the GPU.                                           these cases is important for maintaining both performance
+                                                                            and resource efficiency.
+Figure 6 shows an example of this process. All active
+agents in GPU memory have an invocation distance of zero.
+Among offloaded agents, agents 7 and 4 satisfy the threshold                4. Evaluation
+condition. Agent 7 is prefetched because its invocation dis-
+                                                                            We build the prototype of ScaleSim on top of
+tance is smaller than those of inactive agents 8 and 5 on the
+                                                                            SGLang (Zheng et al., 2024a) v0.5.2. To support heteroge-
+GPU, whereas agent 4 is not prefetched since its invocation
+                                                                            neous agent-specific memory and enable unified, invocation
+distance is larger than all inactive GPU-resident agents.
+                                                                            distance–aware management in ScaleSim, we introduce an
+As shown in Figure 7, ScaleSim preloads Agent 3’s mem-                      agent-specific memory abstraction class, which is detailed
+ory while it is still performing actions. This allows the                   in Appendix A. Based on the interfaces defined by this
+LLM call to begin immediately when triggered. In con-                       abstraction, we implement two representative memory mod-
+trast, reactive memory loading causes the system to wait                    ules to demonstrate the applicability of our framework: one
+for the transfer to complete before inference can proceed.                  for managing LoRA adapters and another for handling pre-
+By overlapping memory loading with agent simulation, the                    fix caches. In this section, we conduct the evaluation of
+proactive prefetching of ScaleSim significantly reduces I/O                 ScaleSim to demonstrate its performance benefits in multi-
+stalls and improves throughput.                                             agent simulation workloads.
+
+                                                                        6
+
+===== PDF p.7 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+
+   Speedup over SGLang                                                 SGLang          HiCache         ScaleSim
+
+
+                         1.5                                                                                 1.5
+                                                                    1.0
+                         1.0                                                                                 1.0
+                                                                    0.5
+                         0.5                                                                                 0.5
+
+                         0.0                                        0.0                                      0.0
+                                   50     100      500    1000             50        100     500     1000           50       100     500      1000
+                                        (a) Agent Society                       (b) Generative Agents                 (c) Information Diffusion
+
+                               Figure 8. End-to-end speedup of ScaleSim over SGLang across different simulation applications and agent counts.
+
+
+4.1. Experimental Setups                                                                  from CPU memory instead of being regenerated. Both base-
+                                                                                          lines use an LRU policy for evicting agent-specific memory,
+Models and testbeds. We evaluate ScaleSim on the
+                                                                                          including LoRA adapters and prefix caches, and perform
+Qwen2.5 series of instruction-tuned language models.
+                                                                                          memory loading reactively upon request.
+We conduct most experiments on Qwen2.5-7B using an
+NVIDIA H100 GPU with 80GB memory and 64 GB/s PCIe
+                                                                                          4.2. End-to-End Performance
+Gen5 bandwidth. To evaluate ScaleSim’s performance in
+multi-GPU settings, we further test on Qwen2.5-32B using                                  We measure the end-to-end speedup of ScaleSim over the
+up to 8 H100 GPUs interconnected via NVLink.                                              baseline SGLang across three benchmark applications with
+                                                                                          varied simulated agent numbers. All experiments are con-
+Benchmarks. To demonstrate the generality of ScaleSim                                     ducted using Qwen2.5-7B-Instruct on a single H100 GPU.
+across diverse multi-agent simulation workloads, we eval-                                 The active agent rate is around 20%, and to reflect GPU
+uate it on three applications, each representing a distinct                               memory constraints, we cap the number of resident agents
+invocation pattern: (1) For independent simulation, we use                                to 25% of the total (up to 125 on an H100 GPU).
+AgentSociety (Piao et al., 2025), an open-source simulator.
+                                                                                          Figure 8 reports the relative speedup of each method over the
+Although agents in AgentSociety can have potential inter-
+                                                                                          vanilla SGLang baseline. Across all benchmarks, ScaleSim
+actions, their actions are simulated independently without
+                                                                                          consistently outperforms both SGLang and HiCache. In
+interference. (2) For interaction-involved simulation, we
+                                                                                          AgentSociety (Figure 8 (a)), where agents follow indepen-
+modify AgentSociety to add spatially driven interactions
+                                                                                          dent action simulation, ScaleSim achieves up to 1.73×
+like Generative Agents (Park et al., 2023), where two agents
+                                                                                          speedup by prefetching and pinning memory for agents
+initiate a conversation if their distance falls below a pre-
+                                                                                          with short invocation distances. In Generative Agents (Fig-
+defined threshold. (3) For predefined activation paths, we
+                                                                                          ure 8 (b)), the mobility-aware invocation distance allows
+simulate the information diffusion over structured social net-
+                                                                                          ScaleSim to accurately prioritize memory for agents ap-
+works according to a breadth-first schedule. The invocation
+                                                                                          proaching interaction, yielding up to 1.31× speedup. In
+distance is defined as the hop count from the network.
+                                                                                          information diffusion (Figure 8 (c)), the structured activa-
+In all benchmarks, we assume each agent has its own LoRA                                  tion order enables ScaleSim to eliminate the cold-start of
+adapter and prefix cache as the agent-specific memory. To                                 downstream nodes, reaching up to 1.74× speedup.
+simulate thousands of heterogeneous agents, we use a shared
+                                                                                          Figure 9 shows the execution time per simulation step in
+adapter for all agents but assign distinct logical IDs so the
+                                                                                          AgentSociety as the number of simulated agents increases
+system treats them as separate.
+                                                                                          from 25 to 1,000. While all methods exhibit roughly linear
+                                                                                          growth as agent count increases, ScaleSim consistently in-
+Baselines. We compare ScaleSim with two configura-                                        curs lower execution time compared to SGLang and SGLang
+tions of SGLang (Zheng et al., 2024a) with S-LoRA sup-                                    w/ HiCache. This improvement stems from the efficient
+port (Sheng et al., 2024). The first baseline, denoted                                    agent memory management of ScaleSim, which reduces the
+as SGLang, uses a GPU-resident radix-structured prefix                                    I/O overhead significantly. In contrast, the baselines suffer
+cache without CPU fallback. Once GPU memory is ex-                                        from higher memory churn due to their reactive eviction
+hausted, evicted prefix nodes are discarded and must be                                   strategies, especially under high concurrency.
+recomputed upon reuse. The second baseline, HiCache,
+enables SGLang’s default hierarchical caching, which asyn-
+chronously backs up frequently accessed prefix nodes to                                   Time-to-First-Token (TTFT) comparison. TTFT is a
+host memory. Upon reuse, these nodes can be restored                                      critical latency metric for LLM-based multi-agent simula-
+
+                                                                                      7
+
+===== PDF p.8 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+
+                                    SGLang          HiCache        ScaleSim                                                                           250 Sim. Agents       500 Sim. Agents
+
+
+
+
+                                                                                                          Speedup over SGLang
+  Simulation Step (s)
+                                                                                                                                      2
+    Exec. Time per
+
+
+
+                          30
+
+                          20                                                                                                          1
+
+                          10
+                                                                                                                                      0
+                               0    200        400      600      800     1000                                                                    50    100 150 200 250 300 350            400
+                                             Simulation Agents                                                                                          Avg. Concurrent Active Agents
+
+
+      Figure 9. Per-step execution time scaling in AgentSociety.                    Figure 11. Speedup of ScaleSim under different levels of sparsity.
+
+
+
+
+                                                                                    Speedup over SGLang
+                                                                                                                                                               SGLang      ScaleSim
+                                   SGLang          HiCache        ScaleSim
+                                                                                                          1.5
+     Average TTFT (ms)
+
+
+
+
+                         10
+                                                                                                          1.0
+
+                                                                                                          0.5
+                          5
+                                                                                                          0.0
+                                                                                                                                          7B-1GPU          7B-2GPU       32B-4GPU       32B-8GPU
+                                                                                                                                                           Model-GPU Configuration
+                                   200        400       600      800     1000
+                                             Simulation Agents
+                                                                                    Figure 12. Speedup of ScaleSim across different model and GPU
+Figure 10. Average Time-to-First-Token (TTFT) in AgentSociety                       configurations with 500 simulated agents.
+under increasing agent population.
+
+                                                                                    injecting random agent triggers at varying levels for the
+tions, especially in applications where outputs are streamed                        AgentSociety benchmark, thereby introducing controlled
+token-by-token to end users. A lower TTFT directly trans-                           prediction errors. We report performance comparisons with
+lates to better perceived responsiveness and service quality.                       SGLang for 500-agent simulations under different predic-
+Figure 10 reports the average TTFT across varying agent                             tion error rates in Figure 13. Although the speedup de-
+counts in the AgentSociety benchmark. As the number                                 creases as the prediction error increases, ScaleSim still out-
+of simulated agents increases, both SGLang and HiCache                              performs SGLang even under high error rates.
+experience significant TTFT degradation due to reactive
+memory loading and KV cache recomputation. In contrast,                             Scalability across model and GPU configurations. To
+ScaleSim maintains substantially lower TTFT by proactively                          evaluate the scalability of ScaleSim on AgentSociety under
+prefetching agent-specific memory with short invocation dis-                        different hardware and model sizes, we run experiments
+tances. Although TTFT increases with agent population for                           using Qwen2.5 models of 7B and 32B parameters on 1,
+all methods, ScaleSim consistently reduces first-token la-                          2, 4, and 8 H100 GPUs. All multi-GPU setups use tensor
+tency by 48%-68% compared to HiCache under high agent                               parallelism, and the total number of simulated agents is
+concurrency, demonstrating its ability to improve not only                          fixed at 500. Figure 12 shows that ScaleSim consistently
+throughput but also responsiveness.                                                 achieves higher speedup over SGLang across all configura-
+                                                                                    tions. This demonstrates that ScaleSim generalizes well to
+Sensitivity to sparsity. Figure 11 evaluates the impact                             larger models and distributed inference without introducing
+of workload sparsity on system performance under differ-                            performance bottlenecks.
+ent levels of concurrency. We vary sparsity by controlling                          More diverse invocation distances. We further evaluate
+the simulation time of each frame in AgentSociety, which                            ScaleSim on three extra benchmarks that exhibit diverse
+determines the degree of temporal overlap among agent
+executions. Results are reported for configurations with
+                                                                                                                                          1.5
+                                                                                                                    Speedup over SGLang
+
+
+
+
+250 and 500 total agents. For all these configurations, the
+GPU can host at most approximately 125 agents at the same                                                                                 1.0
+time, and larger values on the x-axis correspond to denser
+execution overlap. Across a wide range of sparsity levels,                                                                                0.5
+ScaleSim consistently achieves meaningful speedups over
+the SGLang baseline, demonstrating its robustness beyond                                                                                  0.0
+                                                                                                                                                <5%      ~20%       ~40%        ~60%    ~80%
+extremely sparse regimes.                                                                                                                                   Prediction Error Rate
+
+Sensitivity to prediction errors. To evaluate robustness                            Figure 13. Speedup of ScaleSim over SGLang across agent across
+under inaccurate predictions, we conduct experiments by                             prediction error rates.
+
+
+                                                                                8
+
+===== PDF p.9 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+  Speedup over SGLang
+                                                                                                                                      Decode           Load         HiCache
+                        1.5
+
+
+
+
+                                                                                                   Normalized Exec. Time
+                                                                                                                                      Prefill          Other        ScaleSim
+
+                        1.0
+                                                                                                                           1.0
+
+                        0.5
+                                                                                                                           0.5
+                        0.0
+                              50 100 500 1000 50 100 500 1000 50 100 500 1000
+                                                                                                                           0.0
+                              (a) State-Triggered (b) Dynamic Social (c) Stochastic Events                                       25      50        100     200    500   1000
+                                                        Groups
+                                                                                                                                                Simulation Agents
+Figure 14. Speedup of ScaleSim over SGLang across agent counts
+on benchmarks with more diverse invocation distances.                                             Figure 15. Execution time breakdown normalized to HiCache.
+
+
+                                                                                                 policy is lightweight and effectively hidden by overlap.
+invocation distance patterns: (a) State-triggered simulation.
+Each agent maintains an internal state (e.g., “hunger level”)                                    Meanwhile, the Other category remains small and relatively
+that may interrupt its current action once a threshold is                                        stable, indicating that ScaleSim does not introduce notable
+reached. We estimate the rate of state change based on                                           CPU-side scheduling overhead. This confirms that the in-
+recent observations to derive the invocation distance. (b)                                       vocation distance–aware policy is lightweight and can be
+Dynamic social groups. In addition to physical distance                                          further overlapped with other stages to hide latency, preserv-
+constraints, agents interact only within their social groups,                                    ing both throughput and responsiveness.
+and these group memberships evolve over time. The in-
+vocation distance is thus defined based on dynamic social                                        5. Conclusion
+connectivity. (c) Stochastic environmental events. Beyond
+regular action execution, we introduce environmental events                                      In this work, we present ScaleSim, a system designed to ad-
+following a Poisson process, which may interrupt the sim-                                        dress the inefficiencies of existing LLM serving frameworks
+ulation of a subset of agents. We incorporate the expected                                       when scaling to multi-agent simulations. We analyze repre-
+event trigger time when computing invocation distances. As                                       sentative classes of agent activation patterns and introduce
+shown in Figure 14, ScaleSim outperforms SGLang across                                           the unified abstraction of invocation distance to guide effi-
+these benchmarks, and the speedup increases as the number                                        cient memory management decisions. Experimental results
+of the simulation agents grows.                                                                  across multi-agent simulation benchmarks demonstrate the
+                                                                                                 effectiveness and generality of ScaleSim.
+4.3. Breakdown
+                                                                                                 Acknowledgment
+Figure 15 presents a breakdown of normalized execution
+time for HiCache (left bars) and ScaleSim (right bars) under                                     We sincerely thank the anonymous reviewers for their valu-
+simulated agents varying from 25 to 1,000. Each bar is nor-                                      able feedback and insightful suggestions. This work is
+malized to the total execution time of HiCache to highlight                                      supported in part by UC AI LEAP and NSF grant 2607536.
+the relative contributions of different runtime components.
+We categorize the time into four parts: Load (host-to-GPU                                        Impact Statement
+memory transfers), Prefill, Decode, and Other.
+                                                                                                 This paper presents work whose goal is to advance the field
+With ScaleSim, the time spent on Load is significantly
+                                                                                                 of Machine Learning Systems. There are many potential
+reduced across all scenarios. This improvement is at-
+                                                                                                 societal consequences of our work, none which we feel must
+tributed to ScaleSim’s proactive memory management,
+                                                                                                 be specifically highlighted here.
+which prefetches high-priority agent memory before it is re-
+quested and overlaps it with the action simulation, avoiding
+blocking host-to-device transfers on critical paths. In con-                                     References
+trast, HiCache relies on reactive memory loading, incurring                                      Abhyankar, R., He, Z., Srivatsa, V., Zhang, H., and
+repeated CPU-to-GPU transfers at runtime. ScaleSim does                                            Zhang, Y. Infercept: Efficient intercept support for aug-
+not directly affect the time spent on Prefill or Decode, which                                     mented large language model inference. arXiv preprint
+are dominated by model computation. As a result, the over-                                         arXiv:2402.01869, 2024.
+all speedup is inherently bounded by the proportion of time
+spent in the Decode phase. Meanwhile, the Other category                                         Agrawal, A., Kedia, N., Panwar, A., Mohan, J., Kwatra,
+remains small and stable, indicating negligible CPU-side                                           N., Gulavani, B., Tumanov, A., and Ramjee, R. Taming
+overhead and confirming that the invocation distance–aware                                         {Throughput-Latency} tradeoff in {LLM} inference with
+
+                                                                                             9
+
+===== PDF p.10 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+
+  {Sarathi-Serve}. In 18th USENIX Symposium on Operat-                 Guan, Y., Yu, C., Fang, S., Hu, W., Pan, Z., Wang, Z.,
+  ing Systems Design and Implementation (OSDI 24), pp.                   Liu, Z., Zhou, Y., Ding, Y., Guo, M., and Leng, J. Yg-
+  117–134, 2024.                                                         gdrasil: Bridging dynamic speculation and static run-
+                                                                         time for latency-optimal tree-based llm decoding. In The
+AL, A., Ahn, A., Becker, N., Carroll, S., Christie, N., Cortes,         Thirty-ninth Annual Conference on Neural Information
+ M., Demirci, A., Du, M., Li, F., Luo, S., Wang, P. Y.,                 Processing Systems, 2025.
+ Willows, M., Yang, F., and Yang, G. R. Project sid:
+ Many-agent simulations toward ai civilization. arXiv                  Gulino, C., Fu, J., Luo, W., Tucker, G., Bronstein, E., Lu,
+ preprint arXiv:2411.00114, 2024.                                       Y., Harb, J., Pan, X., Wang, Y., Chen, X., et al. Waymax:
+                                                                        An accelerated, data-driven simulator for large-scale au-
+Chen, C., Li, X., Zhu, Q., Duan, J., Sun, P., Zhang, X.,                 tonomous driving research. Advances in Neural Informa-
+  and Yang, C. Centauri: Enabling efficient scheduling for               tion Processing Systems, 36:7730–7742, 2023.
+  communication-computation overlap in large model train-
+  ing via communication partitioning. In Proceedings of the            Gur, I., Furuta, H., Huang, A., Safdari, M., Matsuo, Y., Eck,
+  29th ACM International Conference on Architectural Sup-                D., and Faust, A. A real-world webagent with planning,
+  port for Programming Languages and Operating Systems,                  long context understanding, and program synthesis. arXiv
+  Volume 3, pp. 178–191, 2024a.                                          preprint arXiv:2307.12856, 2023.
+                                                                       Hu, Z., Murthy, V., Pan, Z., Li, W., Fang, X., Ding, Y.,
+Chen, C., Chen, T., Duan, J., Zhu, Q., Wang, Z., Hu, Q., Sun,
+                                                                         and Wang, Y. Hedrarag: Co-optimizing generation and
+  P., Li, X., Yang, C., and Hoefler, T. Zeppelin: Balancing
+                                                                         retrieval for heterogeneous rag workflows. In Proceed-
+  variable-length workloads in data parallel large model
+                                                                         ings of the ACM SIGOPS 31st Symposium on Operating
+  training. In Proceedings of the 21st European Conference
+                                                                        Systems Principles, pp. 623–638, 2025.
+  on Computer Systems, pp. 1879–1893, 2026.
+                                                                       Jin, C., Zhang, Z., Jiang, X., Liu, F., Liu, X., Liu, X., and Jin,
+Chen, L., Ye, Z., Wu, Y., Zhuo, D., Ceze, L., and Krishna-
+                                                                          X. Ragcache: Efficient knowledge caching for retrieval-
+  murthy, A. Punica: Multi-tenant lora serving. Proceed-
+                                                                          augmented generation. arXiv preprint arXiv:2404.12457,
+  ings of Machine Learning and Systems, 6:1–13, 2024b.
+                                                                          2024.
+Chhikara, P., Khant, D., Aryan, S., Singh, T., and Yadav, D.           Kannan, S. S., Venkatesh, V. L., and Min, B.-C. Smart-
+  Mem0: Building production-ready ai agents with scalable                llm: Smart multi-agent robot task planning using large
+  long-term memory. arXiv preprint arXiv:2504.19413,                     language models. In 2024 IEEE/RSJ International Con-
+  2025.                                                                  ference on Intelligent Robots and Systems (IROS), pp.
+                                                                        12140–12147. IEEE, 2024.
+Dao, T., Fu, D., Ermon, S., Rudra, A., and Ré, C. Flashat-
+  tention: Fast and memory-efficient exact attention with              Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu,
+  io-awareness. Advances in neural information processing               C. H., Gonzalez, J., Zhang, H., and Stoica, I. Efficient
+  systems, 35:16344–16359, 2022.                                        memory management for large language model serving
+                                                                        with pagedattention. In Proceedings of the 29th Sym-
+Dong, J., Feng, B., Guessous, D., Liang, Y., and He,
+                                                                        posium on Operating Systems Principles, pp. 611–626,
+  H. Flex attention: A programming model for gen-
+                                                                        2023.
+  erating optimized attention kernels. arXiv preprint
+  arXiv:2412.05496, 2024.                                              Leviathan, Y., Kalman, M., and Matias, Y. Fast inference
+                                                                         from transformers via speculative decoding. In Inter-
+Gao, C., Lan, X., Lu, Z., Mao, J., Piao, J., Wang, H., Jin,              national Conference on Machine Learning, pp. 19274–
+  D., and Li, Y. S3: Social-network simulation system with               19286. PMLR, 2023.
+  large language model-empowered agents. arXiv preprint
+  arXiv:2307.14984, 2023.                                              Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V.,
+                                                                         Goyal, N., Küttler, H., Lewis, M., Yih, W.-t., Rocktäschel,
+Gim, I., Chen, G., Lee, S.-s., Sarda, N., Khandelwal, A.,                T., Riedel, S., and Kiela, D. Retrieval-augmented gen-
+  and Zhong, L. Prompt cache: Modular attention reuse for                eration for knowledge-intensive nlp tasks. Advances in
+  low-latency inference. Proceedings of Machine Learning                 neural information processing systems, 33:9459–9474,
+  and Systems, 6:325–338, 2024.                                          2020.
+Gim, I., Ma, Z., Lee, S.-s., and Zhong, L. Pie: A pro-                 Li, N., Gao, C., Li, M., Li, Y., and Liao, Q. Econa-
+  grammable serving system for emerging llm applications.                gent: large language model-empowered agents for
+  In Proceedings of the ACM SIGOPS 31st Symposium on                     simulating macroeconomic activities. arXiv preprint
+  Operating Systems Principles, pp. 415–430, 2025.                       arXiv:2310.10436, 2023.
+
+                                                                  10
+
+===== PDF p.11 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+
+Li, X., Xu, Y., Zhang, Y., and Malthouse, E. C. Large lan-          Packer, C., Wooders, S., Lin, K., Fang, V., Patil, S. G.,
+  guage model-driven multi-agent simulation for news dif-             Stoica, I., and Gonzalez, J. E. Memgpt: Towards llms
+  fusion under different network structures. arXiv preprint           as operating systems. arXiv preprint arXiv:2310.08560,
+  arXiv:2410.13909, 2024.                                             2023.
+
+Li, Y., Liu, S., Zheng, T., and Song, M. Parallelized               Pan, R., Wang, Z., Jia, Z., Karakus, C., Zancato, L., Dao, T.,
+  planning-acting for efficient llm-based multi-agent sys-            Wang, Y., and Netravali, R. Marconi: Prefix caching for
+  tems. arXiv preprint arXiv:2503.03505, 2025a.                       the era of hybrid llms. arXiv preprint arXiv:2411.19379,
+                                                                      2024.
+Li, Y., Sun, L., and Zhang, Y. Metaagents: large language
+  model based agents for decision-making on teaming. Pro-           Pan, Z., Ding, Y., Guan, Y., Wang, Z., Yu, Z., Tang, X.,
+  ceedings of the ACM on Human-Computer Interaction, 9                Wang, Y., and Ding, Y. Fasttree: Optimizing attention
+  (2):1–27, 2025b.                                                    kernel and runtime for tree-structured llm inference. In
+                                                                      Proceedings of Machine Learning and Systems, 2025a.
+Lin, C., Han, Z., Zhang, C., Yang, Y., Yang, F., Chen, C.,
+  and Qiu, L. Parrot: Efficient serving of {LLM-based}              Pan, Z., Patel, A., Shen, Y., Hu, Z., Guan, Y., Li, W.-L.,
+  applications with semantic variable. In 18th USENIX                 Qin, L., Wang, Y., and Ding, Y. Kvflow: Efficient prefix
+  Symposium on Operating Systems Design and Implemen-                 caching for accelerating llm-based multi-agent workflows.
+  tation (OSDI 24), pp. 929–945, 2024.                                In The Thirty-ninth Annual Conference on Neural Infor-
+                                                                      mation Processing Systems, 2025b.
+Lin, C.-Y., Kamahori, K., Liu, Y., Shi, X., Kashyap, M., Gu,
+  Y., Shao, R., Ye, Z., Zhu, K., Wang, S., et al. Telerag:          Park, C., Han, S., Guo, X., Ozdaglar, A., Zhang, K., and
+  Efficient retrieval-augmented generation inference with             Kim, J.-K. Maporl: Multi-agent post-co-training for
+  lookahead retrieval. arXiv preprint arXiv:2502.20969,               collaborative large language models with reinforcement
+  2025.                                                               learning. arXiv preprint arXiv:2502.18439, 2025.
+
+Liu, X., Hu, L., Bailis, P., Cheung, A., Deng, Z., Stoica,          Park, J. S., O’Brien, J., Cai, C. J., Morris, M. R., Liang,
+  I., and Zhang, H. Online speculative decoding. arXiv                P., and Bernstein, M. S. Generative agents: Interactive
+  preprint arXiv:2310.07177, 2023.                                    simulacra of human behavior. In Proceedings of the 36th
+                                                                      annual acm symposium on user interface software and
+Liu, Y., Li, H., Cheng, Y., Ray, S., Huang, Y., Zhang, Q.,            technology, pp. 1–22, 2023.
+  Du, K., Yao, J., Lu, S., Ananthanarayanan, G., et al.
+  Cachegen: Kv cache compression and streaming for fast             Park, J. S., Zou, C. Q., Shaw, A., Hill, B. M., Cai, C.,
+  large language model serving. In Proceedings of the ACM             Morris, M. R., Willer, R., Liang, P., and Bernstein, M. S.
+  SIGCOMM 2024 Conference, pp. 38–56, 2024.                           Generative agent simulations of 1,000 people. arXiv
+                                                                      preprint arXiv:2411.10109, 2024.
+Miao, X., Oliaro, G., Zhang, Z., Cheng, X., Wang, Z.,
+ Zhang, Z., Wong, R. Y. Y., Zhu, A., Yang, L., Shi, X.,             Patel, P., Choukse, E., Zhang, C., Shah, A., Goiri, Í., Maleki,
+ Shi, C., Chen, Z., Arfeen, D., Abhyankar, R., and Jia,               S., and Bianchini, R. Splitwise: Efficient generative llm
+ Z. Specinfer: Accelerating large language model serving              inference using phase splitting. In 2024 ACM/IEEE 51st
+ with tree-based speculative inference and verification. In           Annual International Symposium on Computer Architec-
+ Proceedings of the 29th ACM International Conference                 ture (ISCA), pp. 118–132. IEEE, 2024.
+ on Architectural Support for Programming Languages
+ and Operating Systems, Volume 3, pp. 932–949, 2024.                Piao, J., Yan, Y., Zhang, J., Li, N., Yan, J., Lan, X., Lu,
+                                                                      Z., Zheng, Z., Wang, J. Y., Zhou, D., Gao, C., Xu, F.,
+Ni, H., Wang, Y., and Liu, H. Planning, living and judging:           Zhang, F., Rong, K., Su, J., and Li, Y. Agentsociety:
+  A multi-agent llm-based framework for cyclical urban                Large-scale simulation of llm-driven generative agents
+  planning. arXiv preprint arXiv:2412.20505, 2024.                    advances understanding of human behaviors and society.
+                                                                      arXiv preprint arXiv:2502.08691, 2025.
+NVIDIA. TensorRT-LLM. https://github.com/
+ NVIDIA/TensorRT-LLM, 2025.                                         Qin, R., Li, Z., He, W., Cui, J., Ren, F., Zhang, M., Wu, Y.,
+                                                                      Zheng, W., and Xu, X. Mooncake: Trading more storage
+Ouyang, S., Yan, J., Hsu, I., Chen, Y., Jiang, K., Wang,              for less computation—a {KVCache-centric} architecture
+  Z., Han, R., Le, L. T., Daruki, S., Tang, X., et al. Rea-           for serving {LLM} chatbot. In 23rd USENIX Conference
+  soningbank: Scaling agent self-evolving with reasoning              on File and Storage Technologies (FAST 25), pp. 155–170,
+  memory. arXiv preprint arXiv:2509.25140, 2025.                      2025.
+
+                                                               11
+
+===== PDF p.12 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+
+Ren, J., Zhuang, Y., Ye, X., Mao, L., He, X., Shen, J., Dogra,        Ye, Z., Chen, L., Lai, R., Lin, W., Zhang, Y., Wang, S.,
+  M., Liang, Y., Zhang, R., Yue, T., Yang, Y., Liu, E., Wu,             Chen, T., Kasikci, B., Grover, V., Krishnamurthy, A., and
+  R., Benavente, K., Nagaraju, R. M., Faayez, M., Zhang,                Ceze, L. Flashinfer: Efficient and customizable attention
+  X., Sharma, D. V., Zhong, X., Ma, Z., Shu, T., Hu, Z., and            engine for llm inference serving. In Eighth Conference
+  Qin, L. Simworld: An open-ended realistic simulator for               on Machine Learning and Systems, 2025.
+  autonomous agents in physical and social worlds. arXiv
+                                                                      Yu, G.-I., Jeong, J. S., Kim, G.-W., Kim, S., and Chun, B.-
+  preprint arXiv:2512.01078, 2025.
+                                                                        G. Orca: A distributed serving system for {Transformer-
+Ren, S., Cui, Z., Song, R., Wang, Z., and Hu, S. Emergence              Based} generative models. In 16th USENIX Symposium
+  of social norms in generative agent societies: principles             on Operating Systems Design and Implementation (OSDI
+  and architecture. arXiv preprint arXiv:2403.08251, 2024.              22), pp. 521–538, 2022.
+                                                                      Yu, X., Luo, T., Wei, Y., Lei, F., Huang, Y., Peng, H.,
+Sheng, Y., Zheng, L., Yuan, B., Li, Z., Ryabinin, M., Chen,             and Zhu, L. Neeko: Leveraging dynamic lora for effi-
+  B., Liang, P., Ré, C., Stoica, I., and Zhang, C. Flexgen:            cient multi-character role-playing agent. arXiv preprint
+  High-throughput generative inference of large language                arXiv:2402.13717, 2024.
+  models with a single gpu. In International Conference
+  on Machine Learning, pp. 31094–31116. PMLR, 2023.                   Zhang, F., Zhai, J., Shen, X., Wang, D., Chen, Z., Mutlu, O.,
+                                                                        Chen, W., and Du, X. Tadoc: Text analytics directly on
+Sheng, Y., Cao, S., Li, D., Hooper, C., Lee, N., Yang, S.,              compression. The VLDB Journal, 30(2):163–188, 2021.
+  Chou, C., Zhu, B., Zheng, L., Keutzer, K., Gonzalez, J. E.,         Zhang, H., Shi, J., Wang, Y., Chen, Q., Shan, Y., and Guo,
+  and Stoica, I. Slora: Scalable serving of thousands of lora           M. Improving the serving performance of multi-lora
+  adapters. Proceedings of Machine Learning and Systems,                large language models via efficient lora and kv cache
+  6:296–311, 2024.                                                      management. arXiv preprint arXiv:2505.03756, 2025a.
+Wan, Z., Du, Y., Ibrahim, M., Qian, J., Jabbour, J., Zhao, Y.,        Zhang, L., Hu, Y., Li, W., Bai, Q., and Nand, P. Llm-aidsim:
+ Krishna, T., Raychowdhury, A., and Reddi, V. J. Reca:                  Llm-enhanced agent-based influence diffusion simulation
+ Integrated acceleration for real-time and efficient cooper-            in social networks. Systems, 13(1):29, 2025b.
+ ative embodied autonomous agents. In Proceedings of the
+                                                                      Zheng, L., Yin, L., Xie, Z., Huang, J., Sun, C., Yu, C. H.,
+ 30th ACM International Conference on Architectural Sup-
+                                                                        Cao, S., Kozyrakis, C., Stoica, I., Gonzalez, J. E., Bar-
+ port for Programming Languages and Operating Systems,
+                                                                        rett, C. W., and Sheng, Y. Sglang: Efficient execution of
+ Volume 2, pp. 982–997, 2025.
+                                                                        structured language model programs. Advances in Neu-
+                                                                        ral Information Processing Systems, 37:62557–62583,
+Wang, G., Xie, Y., Jiang, Y., Mandlekar, A., Xiao, C., Zhu,
+                                                                        2024a.
+ Y., Fan, L., and Anandkumar, A. Voyager: An open-
+ ended embodied agent with large language models. arXiv               Zheng, Z., Ji, X., Fang, T., Zhou, F., Liu, C., and Peng,
+ preprint arXiv:2305.16291, 2023a.                                      G. Batchllm: Optimizing large batched llm inference
+                                                                        with global prefix sharing and throughput-oriented token
+Wang, Z., Chiu, Y. Y., and Chiu, Y. C. Humanoid agents:                 batching. arXiv preprint arXiv:2412.03594, 2024b.
+ Platform for simulating human-like generative agents.
+ arXiv preprint arXiv:2310.05418, 2023b.                              Zhong, Y., Liu, S., Chen, J., Hu, J., Zhu, Y., Liu, X., Jin, X.,
+                                                                        and Zhang, H. {DistServe}: Disaggregating prefill and
+Xie, Z., Kang, H., Sheng, Y., Krishna, T., Fatahalian, K.,              decoding for goodput-optimized large language model
+  and Kozyrakis, C. Ai metropolis: Scaling large language               serving. In 18th USENIX Symposium on Operating Sys-
+  model-based multi-agent simulation with out-of-order                  tems Design and Implementation (OSDI 24), pp. 193–210,
+  execution. arXiv preprint arXiv:2411.03519, 2024.                     2024.
+                                                                      Zhou, S., Xu, F. F., Zhu, H., Zhou, X., Lo, R., Sridhar, A.,
+Xu, Q., Zhang, F., Li, C., Cao, L., Chen, Z., Zhai, J., and             Cheng, X., Ou, T., Bisk, Y., Fried, D., et al. Webarena:
+  Du, X. Harmony: A scalable distributed vector database                A realistic web environment for building autonomous
+  for high-throughput approximate nearest neighbor search.              agents. arXiv preprint arXiv:2307.13854, 2023.
+ Proceedings of the ACM on Management of Data, 3(4):
+ 1–28, 2025a.                                                         Zhou, Z., Haibo, H., Chen, X., Wang, J., Guan, N., Wu,
+                                                                        K., Li, Y.-H., Huang, Y.-K., and Xue, C. J. Behaviorgpt:
+Xu, W., Mei, K., Gao, H., Tan, J., Liang, Z., and Zhang, Y.             Smart agent simulation for autonomous driving with next-
+ A-mem: Agentic memory for llm agents. arXiv preprint                   patch prediction. Advances in Neural Information Pro-
+  arXiv:2502.12110, 2025b.                                              cessing Systems, 37:79597–79617, 2024.
+
+                                                                 12
+
+===== PDF p.13 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+
+Zhu, X., Chen, Y., Tian, H., Tao, C., Su, W., Yang, C.,
+  Huang, G., Li, B., Lu, L., Wang, X., et al. Ghost
+  in the minecraft: Generally capable agents for open-
+  world environments via large language models with
+  text-based knowledge and memory. arXiv preprint
+  arXiv:2305.17144, 2023.
+
+
+
+
+                                                          13
+
+===== PDF p.14 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+
+A. Agent-Specific Memory Abstraction
+As multi-agent simulation applications continue to evolve, the types of memory required by each agent have become
+increasingly diverse, including prefix cache, LoRA adapters, draft model buffers, vector database indices, etc. Supporting
+these heterogeneous memory types poses new challenges for system design.
+A naiv̈e solution would be to reimplement memory management logic for each new memory type in an ad-hoc manner.
+However, this approach leads to duplicated engineering effort, increased code complexity, and difficulty in maintaining
+consistency across memory modules. Each new addition must separately handle eviction, prefetching, and registration logic,
+which increases the risk of bugs and performance regressions.
+To improve extensibility and reduce implementation overhead, we provide an abstract base class for agent-specific memory
+in ScaleSim, which defines a set of common interfaces for memory management. Each memory module implements this
+interface and can be independently registered with the ScaleSim runtime. Once registered, the module is automatically
+integrated into ScaleSim’s unified memory management workflow, including invocation distance-aware eviction and
+asynchronous prefetching.
+Table 1 summarizes the major interfaces exposed by our abstraction. Each interface is invoked under a specific triggering
+condition, such as receiving an agent request, encountering memory pressure, or detecting an upcoming activation. This
+design allows the memory manager to coordinate agent-specific memory in a uniform and extensible manner.
+
+                               Table 1. Invocation Distance-Based Memory Management Interfaces
+
+ Memory Module Interface          Function                                                      Triggered Condition
+
+ HandleReq(req, agentID)          Handle the LLM request from a specific agent and deter-       Triggered when the backend system
+                                  mine whether memory-related operations are required. This     receives an LLM request.
+                                  may involve establishing the agent–memory mapping, up-
+                                  dating memory states, etc.
+
+ Evict(size, agentDistances)      Evict memory blocks based on invocation distance, priori-     Triggered when GPU memory is
+                                  tizing agents with larger values. Typically used to free up   insufficient. Programmable by
+                                  space for incoming activations.                               memory module developers.
+
+ DispatchLoadTasks(               Selects a subset of agents whose invocation distance is       Triggered when the frontend sends
+ agentDistances, threshold,       below a threshold and asynchronously submits memory           a prefetch request. Programmable
+ budget=None)                     load tasks to the ScaleSim’s scheduler. The scheduler will    by frontend application developers.
+                                  enqueue and process these tasks according to their priority
+                                  and resource availability.
+
+ Load(memObj, agentIDs,           Load memory objects from lower-level storage (e.g., CPU).     Called by ScaleSim’s load task
+ GetPreemptionSignal)             GetPreemptionSignal is a function handle that devel-          scheduler during runtime execution.
+                                  opers can query to determine whether the load task should
+                                  be aborted due to preemption.
+
+
+
+Fine-grained distance assignment. An agent may depend on multiple memory objects, and some of these objects can
+be shared across agents. For example, in prefix caching, agents often reuse overlapping KV prefixes organized in a tree
+structure. In such cases, a memory object may be associated with multiple agents that have different invocation distances. To
+support this, ScaleSim computes the invocation distance of a memory object as the minimum invocation distance among all
+agents that currently reference it. As illustrated in Figure 16, the middle memory objective is shared by Agent 1 and Agent
+2, with distances of 1 and 2, respectively. In this case, the system assigns the memory object a distance of min{1, 2} = 1.
+This fine-grained distance assignment allows ScaleSim to reason about memory relevance at the object level, rather than at
+the agent level, enabling more precise eviction and prefetching decisions in shared-memory settings.
+
+Load task scheduler. To manage memory load tasks efficiently, ScaleSim maintains a centralized scheduler that coordi-
+nates all memory transfers from CPU to GPU. This scheduler enables global prioritization based on invocation distance and
+avoids contention across independently issued loading operations. Without a centralized mechanism, competing memory
+modules may trigger redundant or conflicting loads, leading to bandwidth waste and degraded responsiveness under memory
+pressure. The DispatchLoadTasks interface in Table 1 allows developers to submit prefetch tasks to the scheduler.
+
+                                                               14
+
+===== PDF p.15 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+
+
+               D=1                   D=2                                                               D=2           D=3
+                       Agent 1                                                    Timestamp = 0                                 …   Task queue
+                                              Agent 2
+                                                                                                   Ongoing task
+                                                                                                                            Re-Enqueue
+            MemObj                                      MemObj                                                      D=0       D=1      D=2
+                                 MemObj
+                                                                                  Timestamp = 1
+                                                                                                                  Urgent Task
+             D=1            D = min{1, 2} = 1            D=2                                       Preempt
+
+Figure 16. Example of memory object shared across agents. Invoca- Figure 17. Load task scheduler with preemption support. Urgent
+tion distance (D) is fine-grainedly assigned as the minimum among tasks can interrupt lower-priority loads and force re-enqueueing
+referencing agents.                                               based on updated invocation distances.
+
+
+Preemption support. In practice, invocation distance predictions are not always accurate. Unexpected events such as
+early termination of an action phase or a sudden change in agent behavior may cause an agent to reach the LLM stage
+earlier than anticipated. In such cases, a high-priority loading task may arrive while the system is already executing a
+lower-priority one. To handle this, ScaleSim supports preemption within its load task queue. As illustrated in Figure 17, at
+timestamp 0, the scheduler is executing a task with distance D = 2. At timestamp 1, a new urgent task with D = 0 arrives.
+The scheduler immediately interrupts the ongoing task, re-enqueues it back into the queue, and inserts the urgent task at the
+front. This design allows latency-critical agents to continue progressing even when prediction errors occur, while ensuring
+that the system falls back to the reactive baseline in the worst case. The preemption mechanism relies on the load interface’s
+GetPreemptionSignal function handle, which developers can use to detect cancellation signals and safely terminate
+in-progress transfers.
+
+B. Detailed Related Work Comparison
+ScaleSim targets memory management for general multi-agent simulation workloads, whereas most prior systems are
+designed for more specialized settings. Table 2 summarizes the key differences among representative systems.
+
+                                              Table 2. Comparison of ScaleSim with Existing Systems
+
+ Systems                  SGLang          /      S-LoRA            FastLIBRA         InferCept         AI Metropolis       ScaleSim
+                          vLLM
+
+ Target Application       General LLM            Multi-LoRA        Multi-LoRA        Tool-             Generative-         General multi-agent
+                          serving                LLM serving       LLM serving       intercepted       agent-style         simulation
+                                                                                     generation        simulation
+
+ Optimized Memory         General                LoRA adapters     LoRA              KV      cache     None                General
+ Scope                                           and KV cache      adapters and      only                                  agent-specific
+                                                                   KV cache                                                memory
+
+ Loading Policy           Reactive               Prefetch          Application-      Reactive          Reactive            Distance-guided
+                                                 adapters for      unaware                                                 prefetch
+                                                 queued requests   heuristic
+
+ Eviction Policy          LRU                    LRU               Application-      Heuristic         LRU                 Future reuse-aware
+                                                                   unaware                                                 eviction
+                                                                   heuristic
+
+ Invocation Distance      N/A                    N/A               N/A               Limited           Limited             General abstraction
+ Capture                                                                                                                   with three categories
+
+ Sparsity Regime          N/A                    N/A               N/A               Small             Large               Moderate to large
+
+
+Specifically, S-LoRA (Sheng et al., 2024) and FastLIBRA (Zhang et al., 2025a) optimize memory management in multi-
+LoRA LLM serving, but their designs do not consider multi-agent simulation workloads, ignoring application-aware
+optimization opportunities.
+For AI Metropolis (Xie et al., 2024), it focuses on batch efficiency rather than memory management. Besides, the target
+application scope of ScaleSim is substantially broader than that of AI Metropolis. First, AI Metropolis models agent
+
+                                                                         15
+
+===== PDF p.16 =====
+ScaleSim: Serving Large-Scale Multi-Agent Simulation with Invocation Distance-Based Memory Management
+
+dependencies primarily through spatial relationships, whereas ScaleSim supports a wider range of application semantics
+beyond spatial interactions. Second, the main optimization, out-of-order execution, in AI Metropolis cannot be applied to
+these applications. It assumes that action simulation does not affect subsequent LLM generations, which does not hold in
+our agent society (Piao et al., 2025) benchmarks where simulation affects subsequent generations. Third, AI Metropolis is
+evaluated only under extremely sparse settings, while ScaleSim continues to provide benefits under moderate sparsity.
+For InferCept (Abhyankar et al., 2024), it estimates the next LLM invocation time based on profiled tool execution latency
+to determine whether to preserve or discard the KV cache. However, in general multi-agent simulation workloads, action
+simulation time can vary significantly across agents and across steps, and may further be affected by inter-agent interactions,
+which are not captured by InferCept’s abstraction. In addition, InferCept relies on heuristics that require estimating absolute
+execution time to make eviction decisions. Such estimation is challenging in applications such as information diffusion and
+workflow-style simulations. In contrast, ScaleSim uses relative measures, such as hop count, to compare the urgency of
+different agents, enabling effective prefetching and eviction without accurate time prediction.
+In summary, prior systems rely on specific assumptions or require accurate execution-time estimation, which limits their
+applicability to general multi-agent simulation. By introducing invocation distance as a unified abstraction, ScaleSim enables
+robust and effective memory optimization across a broad range of sparsity regimes and agent interaction patterns.
+
+
+
+
+                                                             16

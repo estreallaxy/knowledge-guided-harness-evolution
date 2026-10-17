@@ -1,0 +1,957 @@
+===== PDF p.1 =====
+Beyond Markovian Forgetfulness:
+                         Episodic Memory for Reasoning-Intensive Retrieval
+
+                           Dohyeon Lee1 2 , Yeonseok Jeong3 , Seung-won Hwang2 3 *
+                         Korea Advanced Institute of Science and Technology (KAIST)1
+                         Computer Science and Engineering, Seoul National University2 ,
+                 Interdisciplinary Program in Artificial Intelligence, Seoul National University3
+                  waylight3@kaist.ac.kr, jys3136@snu.ac.kr, seungwonh@snu.ac.kr
+
+
+                              Abstract                                  (a) CoT-based Reasoning
+
+                                                                                                       One big step
+
+            Reasoning-intensive information retrieval uses              Q      AI safety                                Q     AI safety
+            large language models to solve complex queries              D       D1, D2
+                                                                                                      Long CoT chain
+                                                                                                                        D      D1, D2
+            via multi-step reasoning. However, existing                       Input                                            Output
+            methods have critical limitations. Chain-of-
+            Thought (CoT) approaches suffer from inef-                  (b) State-based Reasoning
+            ficiency, while state-based methods, despite                     Step 1                      Step 2              Step 3
+            better token efficiency, often fall into reason-
+                                                                        Q      AI safety          Q      AI alignment   Q     AI safety
+            ing cycles that trap the query refinement pro-
+                                                                        D       D1, D2            D         D3, D4      D      D1, D2
+            cess. To address these issues, we propose
+            Episodic Memory for Retrieval (EMR), which                        Input                                            Output
+
+            enhances the state-based framework with an                  (c) EMR (Ours)
+            episodic memory. This module stores the full
+            history of prior states for a query, allowing the                Step 1                      Step 2              Step 3
+            model to avoid repetition of such cycles. Ex-
+                                                                                                                            AI alignment
+            periments on the BRIGHT benchmark show                      Q      AI safety          Q      AI alignment   Q
+                                                                                                                             for safety
+            that EMR consistently outperforms both CoT                  D       D1, D2            D         D3, D4      D   D1, D2, D3, D4
+            and state-based baselines. Moreover, it is                        Input                                            Output
+            highly token-efficient, reducing token usage
+            by 72% on average. Our results show that
+            episodic memory is an effective and token-             Figure 1: An illustration of different reasoning ap-
+            efficient mechanism for reasoning-intensive re-        proaches for query refinement. (a) CoT-based Rea-
+            trieval. The gains also generalize across dif-         soning generates a single and long reasoning chain,
+            ferent base models and stay efficient in terms         which can be inefficient and may not result in a mean-
+            of end-to-end latency. The code is available in        ingful query update. (b) State-based Reasoning refines
+            https://github.com/ldilab/EMR.                         the query based solely on the immediate previous state,
+                                                                   making it vulnerable to reasoning cycles. (c) EMR en-
+                                                                   hances state-based reasoning with an episodic memory
+    1       Introduction                                           that retains the history of all past states. This prevents
+                                                                   cycles and enables progressive query refinement.
+    Traditional Information Retrieval (IR) systems of-
+    ten struggle to answer complex queries that require
+    multi-step reasoning (Yang et al., 2018; Feldman               approaches sacrifice token efficiency. As shown in
+    and El-Yaniv, 2019). Reasoning-intensive IR (Xiao              Figure 1(a), the model generates a long and redun-
+    et al., 2024; Das et al., 2025) leverages large lan-           dant reasoning chain within a single step. This pro-
+    guage models (LLMs) to enhance retrieval perfor-               cess can lead to a reasoning cycle (e.g., AI safety
+    mance through techniques such as iterative query               → AI safety) that consumes substantial compu-
+    refinement and document reranking.                             tation without yielding progress.
+       Early approaches to reasoning-intensive IR,
+                                                                      To improve efficiency, state-based methods such
+    such as Rank1 (Weller et al., 2025) and Rank-
+                                                                   as SMR (Lee et al., 2025) decompose reasoning
+    R1 (Zhuang et al., 2025) leveraged the Chain-of-
+                                                                   into iterative transitions. By design, each step is
+    Thought (CoT) capabilities of LLMs. While effec-
+                                                                   prompted to produce a new state, mitigating imme-
+    tive in producing detailed reasoning traces, these
+                                                                   diate self-loops and reducing token usage. How-
+        *    Corresponding Authors                                 ever, this framework imposes a Markovian assump-
+                                                                37266
+Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 37266–37280
+                                 July 2-7, 2026 ©2026 Association for Computational Linguistics
+
+===== PDF p.2 =====
+tion, conditioning each new state only on the imme-     leveraged CoT prompting to deconstruct intricate
+diate predecessor. As a result, multi-step cycles can   information needs.
+still emerge (e.g., AI safety → AI alignment →             However, the lengthy reasoning chains they
+AI safety), as shown in Figure 1(b). In our exper-      generated are often redundant, which could mis-
+iments, we observed that such loops occur in up to      guide the query refinement process. Subsequent
+65% of queries, depending on the dataset.               CoT compression approaches, like O1-Pruner (Luo
+    We address these limitations with Episodic          et al., 2025), aimed to mitigate this by shortening
+Memory for Retrieval (EMR), which augments              the CoT chain. Despite these efforts, the fundamen-
+the state-based paradigm with an explicit memory        tal limitation of the CoT paradigm is its single-pass
+module to eliminate reasoning cycles. Inspired by       generation process. This approach is vulnerable to
+episodic memory in agentic approaches (DeChant,         reasoning cycles, motivating a shift toward more
+2025; Nuxoll and Laird, 2012), which refers to          granular, state-based methods.
+the ability to recall past experiences, our method
+                                                        2.2   State-based Reasoning for IR
+records the full history of states generated for a
+query. The model is then prompted to condition on       To address the inefficiencies of CoT, methods like
+this trajectory when producing the next state. This     SMR (Lee et al., 2025) reformulated the task as a
+trajectory-aware mechanism prevents the revisiting      sequence of state transitions. This approach signifi-
+of prior states and encourages the generation of        cantly improved token efficiency by breaking down
+progressively refined queries.                          the reasoning process into discrete steps.
+    Figure 1(c) shows how a query progresses               However, its reliance on a Markovian assump-
+through refinement: For instance, by referencing        tion makes it susceptible to multi-step reasoning
+its memory of having already generated AI safety        cycles. This motivates a mechanism that can retain
+and AI alignment, the model is guided to produce        and leverage the history of past states to ensure
+a more advanced query like AI alignment for             consistent forward progress.
+safety, rather than repeating previous steps. This
+                                                        2.3   Memory in Agentic Approaches
+episodic memory is implemented as a text-based
+log within the model’s system prompt, ensuring          The need for a history-aware mechanism has been
+constant accessibility during inference. Further-       explored in the field of agentic AI. In this do-
+more, through prompt compression, EMR achieves          main, episodic memory (DeChant, 2025; Nuxoll
+superior token efficiency compared to the state-        and Laird, 2012) refers to an agent’s ability to
+based method, despite the additional tokens to store    record and recall a sequence of past experiences,
+past states.                                            allowing it to engage in more complex planning.
+    To validate EMR, we conducted extensive ex-            Inspired by this approach, our primary contri-
+periments on BRIGHT, a widely-used benchmark            bution is the integration of this episodic memory
+for reasoning-intensive IR. Across the evaluated        concept into the state-based IR framework. Unlike
+settings, EMR consistently outperforms both CoT-        previous methods conditioned only on the prior
+based and state-based baselines. Furthermore, we        state, our approach conditions the policy on the en-
+show that our approach is token-efficient, reducing     tire history of previously generated queries. This al-
+token consumption by 72% on average compared to         lows our model to systematically prevent reasoning
+the state-based approach. This result suggests that     cycles while preserving the high token efficiency of
+the gains in token efficiency from episodic memory      the state-based paradigm, allowing more consistent
+are larger than the cost introduced by maintaining      forward progress during query refinement.
+it.                                                     3     Method
+2   Related Work                                        Our approach enhances the state-based reasoning
+                                                        paradigm as a sequential state-transition problem,
+2.1 CoT-based Reasoning for IR                          defining its core components: states, actions, and
+The advent of LLMs has enabled new approaches           the policy model (§3.1). Building upon this foun-
+for addressing complex information retrieval tasks      dation, we then introduce our core contribution,
+that demand multi-step reasoning. Early ap-             EMR, and describe how its episodic memory is
+proaches in this domain, such as Rank1 (Weller          constructed and applied to guide the reasoning pro-
+et al., 2025) and Rank-R1 (Zhuang et al., 2025),        cess (§3.2).
+                                                   37267
+
+===== PDF p.3 =====
+3.1 Problem Setup: State-based Reasoning                  olution. Embodied by an LLM, the policy as-
+Following the recent work (Lee et al., 2025), we          sesses the current state st = (qt , Dt ) at each
+formulate the reasoning-intensive IR task as a se-        step t to determine the most promising action
+quential decision-making process. This process is         at ∈ {REFINE, RERANK, STOP} to execute. For effi-
+characterized by three fundamental components: a          ciency, the LLM generates both the chosen action
+state representing the current context, an action that    and its direct result within a single forward pass.
+modifies it, and a policy that selects the best action.   For instance, if the policy chooses REFINE, it out-
+This formulation can be viewed as a Markov Deci-          puts the action itself along with the newly refined
+sion Process (MDP), where the policy guides the           query. This one-call-per-step architecture mini-
+transitions between states to progressively refine        mizes latency and computational cost. To ensure
+the initial state.                                        the reasoning process remains bounded, the pol-
+                                                          icy is also constrained by a predefined maximum
+State. We define the state st at step t as a tuple        number of steps, Tmax . If the current step count
+consisting of the current query and a set of retrieved    reaches this threshold, the policy issues a STOP ac-
+documents. This represents a snapshot of the rea-         tion, preventing overly long or costly reasoning
+soning process at a given moment. Formally, a             chains.
+state is defined as:
+                                                          Reasoning Cycle. A significant drawback of the
+                    st = (qt , Dt )                (1)    state-based formulation is its vulnerability to rea-
+                                                          soning cycles, where the agent becomes trapped
+where qt ∈ Q is the query at step t, with Q being         in a loop by revisiting previously explored states.
+the list of all possible queries. Dt ⊂ D is the list of   This issue is a direct consequence of the policy’s
+documents retrieved using the query qt , where D          Markovian nature: its decisions are conditioned
+represents the entire document corpus. The goal is        solely on the current state st , with no memory of
+to transition from an initial state s0 to a final state   the path taken to reach it. Formally, the reasoning
+sn where Dn is optimized for the user’s informa-          cycle is defined as follows:
+tion need.
+                                                                           qt = qt′ (t′ < t)              (3)
+Action. An action at represents a strategic oper-
+ation chosen by the policy to advance the search          where equality denotes exact lexical identity. In
+process. Our action space A consists of three dis-        practice, we flag a cycle when the newly gener-
+tinct operations:                                         ated query string exactly matches any previously
+                                                          generated query in memory. Such loops prevent
+         A = { REFINE, RERANK, STOP }              (2)
+                                                          meaningful progress, leading to redundant compu-
+The REFINE action is deployed to broaden the              tation and suboptimal retrieval performance. This
+search space. It uses the LLM to generate a new           limitation highlights the need for a mechanism that
+query qt+1 , retrieves a new set of documents, and        can break the Markovian chain by incorporating a
+expands the current document list Dt by appending         memory of its history into the agent.
+these new results. Conversely, the RERANK action
+                                                          3.2   Proposed: EMR
+is used to exploit the currently held information. It
+leverages the LLM to perform a listwise reranking         This section discusses how EMR introduces an
+of documents in Dt , prioritizing the most relevant       episodic memory, by first describing the concep-
+items. For computational feasibility, this list is        tual role of episodic memory in state-based rea-
+then truncated to the top-k entries, creating a more      soning (§3.2.1) and then detailing its implementa-
+focused document set Dt+1 while the query qt re-          tion for reading and writing states in textual form
+mains stable. Finally, the process terminates with        (§3.2.2). Finally, we introduce the memory com-
+the STOP action when the policy determines that           pression mechanism designed to maintain high to-
+the gathered documents in Dt are sufficient. This         ken efficiency, even with the overhead of storing
+terminates the loop and returns Dt as the output.         memory states (§3.2.3).
+
+Policy. The Policy π serves as the decision-              3.2.1 Role of Episodic Memory
+making engine of our reasoning agent, strategi-           The role of the episodic memory in EMR is to
+cally guiding the search process toward a res-            break the Markovian dependency inherent in the
+                                                     37268
+
+===== PDF p.4 =====
+State Transition                                                                Episodic Memory
+                                              Write
+               Step 1                                          Action    REFINE   Query          AI safety          Docs      D1, D2
+
+      Q          AI safety                             Read
+      D           D1, D2
+                                              Policy
+                                              Model
+
+
+                                              Write
+               Step 2                                          Action    REFINE   Query          AI safety          Docs      D1, D2
+
+      Q        AI alignment                                    Action    REFINE   Query        AI alignment         Docs      D3, D4
+                                                       Read
+      D           D3, D4
+
+                                              Policy
+                                              Model
+
+
+
+
+                                              Write
+               Step 3                                          Action    REFINE   Query          AI safety          Docs      D1, D2
+
+      Q   AI alignment for safety                              Action    REFINE   Query        AI alignment         Docs      D3, D4
+                                                               Action    REFINE   Query   AI alignment for safety   Docs   D1, D2, D3, D4
+      D       D1, D2, D3, D4
+
+
+
+
+Figure 2: An illustration of the EMR architecture and the role of episodic memory. The figure shows the interplay
+between the iterative State Transition process (left) and the Episodic Memory (right). At each step, the policy
+model generates the next state based on the memory’s history, and then updates the memory with that newly
+generated state.
+
+
+standard state-based approach. As defined in §3.1,                         Second, beyond cycle prevention, the memory
+the vanilla policy π makes decisions based solely                       provides a rich historical context to generate more
+on the current state st , rendering it blind to the path                targeted queries, rather than just reacting to the im-
+taken to arrive there.                                                  mediate present. The following sections will detail
+   To address this, we introduce an episodic mem-                       the practical implementation of how this concep-
+ory, denoted as Mt , which is the complete history                      tual memory is read and written as a textual log
+of all states visited up to step t. Formally, the mem-                  within the LLM’s prompt.
+ory is a sequence of past states:
+                                                                        3.2.2     Memory Read and Write Operations
+                Mt = (s0 , s1 , . . . , st−1 )                (4)
+                                                                        To utilize the conceptual memory Mt described in
+where si = (qi , Di ) is the state at step i.                           the previous section, we designed a token-efficient
+   By incorporating this memory, we redefine the                        textual format that can be seamlessly integrated
+policy function. The original policy π(st ) is trans-                   into the policy model’s prompt. This process in-
+formed into a memory-augmented policy, π ′ , which                      volves two key operations: writing the historical
+conditions its decisions on both the current state                      states into a textual log and reading this log as
+and the entire history stored in the memory. The                        context for the next decision. The entire memory
+action selection process is thus updated as follows:                    structure is prepended to the main task prompt at
+                                                                        each step t, ensuring the model has constant access
+                        at = π ′ (st , Mt )                   (5)
+                                                                        to its history.
+This seemingly simple modification has two pro-                            The memory is formatted as plain text and orga-
+found implications for the reasoning process, as                        nized into two distinct sections as shown in Table 1:
+illustrated in Figure 2.                                                a history of actions and a repository of document
+   First, the memory-augmented policy can explic-                       contents.
+itly prevent cycles. By having access to the set                           The History of Recent Actions section
+of all past queries {q0 , q1 , . . . , qt−1 } within Mt ,               serves as a log of the reasoning trajectory. A cru-
+the policy π ′ can be instructed to avoid generat-                      cial design choice for token efficiency is that each
+ing any query that has been previously explored.                        entry stores only the identifiers (IDs) of the docu-
+This directly resolves the cyclic behavior defined                      ments retrieved at that step, rather than their full
+in Equation 3.                                                          contents. This significantly reduces the token count
+                                                               37269
+
+===== PDF p.5 =====
+## History of Recent Actions                                         This read-write cycle continues until the STOP
+[1] Action : { a_1 } Query : { q_1 } Ranks : { IDs of D_1 }       action is issued, ensuring that the memory is al-
+...
+[t -1] Action : { a_ {t -1}} Query : { q_ {t -1}} Ranks : { IDs   ways a complete and up-to-date record of the entire
+       of D_ {t -1}}
+                                                                  reasoning process.
+## Memory of Documents
+[ ID of d_1 ] { d_1 }
+[ ID of d_2 ] { d_2 }                                             3.2.3   Memory Compression
+...
+[ ID of d_n ] { d_n }                                             Despite deduplication, the cumulative length of
+                                                                  unique document contents still poses a significant
+                                                                  challenge to token efficiency. As a result, as the
+Table 1: Text format of the history of previous states in         reasoning process explores more documents, the
+the system prompt of EMR.
+                                                                  memory’s token footprint can grow excessively,
+                                                                  leading to increased computational costs and po-
+that grows with each step, as document contents                   tential context window limitations. To mitigate this
+can be hundreds of tokens long while their IDs are                issue, we introduce a memory compression mecha-
+just single tokens or short strings.                              nism that reduces each document to only its most
+    The Memory of Documents section acts as a                     query-relevant sentences.
+deduplicated repository. It maps document IDs to                     This compression is performed via a three-step
+their full textual content. This structure decouples              extractive summarization process whenever a new
+the log from the voluminous document content, pre-                set of documents Dt is retrieved by a query qt .
+venting redundant storage of the same document if
+                                                                  Sentence Segmentation. All documents in Dt
+it is retrieved multiple times across different steps.
+                                                                  are split into sentences using spaCy1 , creating a
+    We deliberately chose a simple plain text format
+                                                                  large pool of candidate sentences.
+over structured formats like JSON or XML. Our
+preliminary experiments indicated that while struc-               Relevance Scoring. Each sentence is scored for
+tured formats offered no significant performance                  relevance to qt using a pre-trained MiniLM cross-
+improvement, they consistently incurred a higher                  encoder2 .
+token overhead due to syntactic characters (e.g.,
+                                                                     This compression only affects the current prompt
+brackets, quotes, and tags). The plain text approach
+                                                                  construction, as the backend preserves the original
+provides the best balance of performance and token
+                                                                  text of every document. Because no data is perma-
+economy for this task.
+                                                                  nently lost, the system can re-summarize the same
+Read Operation. The read operation is per-                        content differently for later requests.
+formed implicitly at the beginning of each step
+                                                                  Global Filtering and Composition. Unlike per-
+t. The entire two-part memory block, represent-
+                                                                  document selection, we rank every sentence from
+ing Mt , is formatted as a single string and placed
+                                                                  the entire pool and keep only the top-k overall.
+within the LLM’s prompt, typically following the
+                                                                  This global approach ensures that only the most rel-
+system message. This provides the full historical
+                                                                  evant sentences enter the Memory of Documents,
+context required for the memory-augmented policy
+                                                                  effectively pruning irrelevant documents. We se-
+π ′ (st , Mt ) to make its next decision.
+                                                                  lect top-k filtering specifically to ensure predictable
+Write Operation. The write operation occurs af-                   inference costs. While threshold-based methods
+ter the policy executes an action at and a new state              might offer better adaptivity, they often result in
+st+1 = (qt+1 , Dt+1 ) is generated. The process                   inconsistent prompt sizes that are harder to man-
+involves two updates:                                             age. This selection process reduces token over-
+                                                                  head and focuses the model on information essen-
+   • A new formatted string is appended to the                    tial for reasoning. Furthermore, while stronger
+     History of Recent Actions.                                   encoders could enhance the quality of sentence se-
+                                                                  lection, such improvements are orthogonal to the
+   • Each document in the retrieved set Dt is                     core mechanism of EMR.
+     checked. If a document’s ID is not already                       1
+                                                                     https://spacy.io/
+     present in the Memory of Documents, its ID                       2
+                                                                     https://huggingface.co/cross-encoder/
+     and full content are appended to that section.               ms-marco-MiniLM-L6-v2
+
+                                                              37270
+
+===== PDF p.6 =====
+4                 Results and Analysis                  Reducing Reasoning Cycles. To answer RQ1,
+                                                        we first measure the occurrence of reasoning cycles
+4.1 Experimental Setup
+                                                        as defined in Eq. 3: any instance where a refined
+Datasets and Metrics. We evaluate on the                query revisits a previously generated one.
+BRIGHT benchmark (Su et al., 2024), which con-             As illustrated in Figure 3, EMR (red) consis-
+tains 12 reasoning-intensive retrieval datasets span-   tently suppresses reasoning cycles compared to
+ning domains such as mathematics, code, and sci-        SMR (blue) across all BRIGHT datasets. Aggre-
+ence. We use nDCG@10 as the primary metric and          gated over all datasets, the average cycle rate is
+report additional results on Recall and MAP in the      reduced by 94%, from 38.75% for SMR to just
+Appendix A.3.                                           2.25% for EMR.
+Baselines. We compare EMR with three CoT-                  A closer analysis reveals that the baseline’s vul-
+based baselines, Rank1 (Weller et al., 2025), Rank-     nerability to reasoning cycles is heterogeneous,
+R1 (Zhuang et al., 2025), and O1-Pruner (Luo et al.,    varying with the type of the queries in each do-
+2025), and with the state-based baseline SMR (Lee       main. On datasets like Leetcode and AoPS, SMR
+et al., 2025). We report results with two retrieval     already exhibits few cycles. This is likely because
+backbones, BM25 (Robertson et al., 2009) and            their queries often contain code snippets or math-
+ReasonIR (Shao et al., 2025). More details are          ematical formulas, whose high lexical specificity
+provided in Appendix A.1.                               makes exact repetition less probable. In contrast,
+                                                        on datasets with natural language queries such
+Implementation Details. Unless otherwise                as EarthScience, Psychology, and StackOverflow,
+noted, we follow the original implementations           SMR is highly vulnerable to cyclic behavior, with
+and settings of prior methods. We use Qwen2.5-          cycle rates exceeding 60%. Across all datasets,
+32B and Qwen3-32B as the main backbones.                EMR reduces the cycle rates to under 4%. These
+Full implementation details are provided in             results show that conditioning on prior states sub-
+Appendix A.2.                                           stantially reduces reasoning cycles in state-based
+4.2 Analysis                                            retrieval.
+We structure our analysis around three research               bio          earth         eco           psy
+questions to validate the effectiveness of EMR.
+                                                             +10.4         +15.3         +2.7         +16.5
+4.2.1 RQ1. Does Reducing Cycles with                         96.7%         94.4%         95.5%        96.8%
+      Episodic Memory Boost Performance?                      rob          stack         sus           leet
+
+
+
+                                                              +7.1         +8.5          +3.0          +3.6
+
+                                                             94.8%         95.9%         71.9%        66.7%
+ Cycle Rate (%)
+
+
+
+
+                                                             pony          aops         theoq         theot
+
+
+
+                                                              +2.4         +6.7          +5.2         +13.3
+
+                                                             97.0%         100%         70.6%         90.9%
+
+
+
+                              Datasets in BRIGHT
+                                                        Figure 4: Analysis of queries that encounter cycles with
+                                                        SMR baseline. For each BRIGHT dataset, the donut
+                                                        chart displays the percentage of these queries for which
+ Cycle Rate (%)
+
+
+
+
+                                                        EMR successfully resolves the cycle (blue). The central
+                                                        number indicates the average nDCG@10 point gain for
+                                                        these resolved queries.
+
+
+                              Datasets in BRIGHT
+                                                        Performance Gain in Cycle Queries. To further
+Figure 3: Comparison of the cycle ratio between EMR     quantify the impact of cycle mitigation, we con-
+and SMR on the BRIGHT benchmark. The ratio indi-        ducted a fine-grained analysis on queries where
+cates the percentage of queries that encounter one or   SMR encounters a reasoning cycle. We measure
+more reasoning cycles during the refinement process.    both the rate at which EMR resolves the cycle and
+                                                        the subsequent impact on retrieval performance.
+                                                   37271
+
+===== PDF p.7 =====
+Bio      Earth     Econ     Psy     Rob     Stack    Sus     Leet    Pony    AoPS    TheoQ   TheoT   Avg
+  Retriever
+  BM25                       18.9     27.2      14.9     12.5    13.6    18.4     15.0    24.4    7.9     6.2     10.4     4.9    14.5
+  CoT-based Reasoning
+  BM25 + Rank1               22.1     31.7      14.6     15.7    15.8    17.7     20.3    22.9    9.7     5.9     11.8     9.3    16.5
+  BM25 + Rank-R1             23.6     33.5      16.8     15.4    18.8    18.4     20.3    24.9    9.1     6.9     12.1     8.7    17.4
+  BM25 + O1-Pruner           23.6     31.9      17.7     18.0    17.2    20.0     19.8    24.2    8.4     6.6     10.7     7.0    17.1
+  State-based Reasoning
+  BM25 + SMR (Qwen2.5)       28.7     34.9      20.4     20.7    20.9    20.8     19.2    22.1    6.3     6.3     18.0    20.3    19.9
+  BM25 + SMR (Qwen3)         44.0     42.1      22.9     23.3    18.3    21.1     29.5    14.5    7.8     3.1      6.9     6.4    20.0
+  EMR: State-based Reasoning with Episodic Memory
+  BM25 + EMR (Qwen2.5)       41.2     42.1      24.7     33.1    19.2    23.8     26.1    26.4    8.3     6.8     26.5    29.2    26.4
+  BM25 + EMR (Qwen3)         53.1     54.6      23.2     37.4    23.4    26.9     31.8    15.8    9.0     7.2     20.9    17.3    26.7
+
+Table 2: Retrieval performance (nDCG@10) on the BRIGHT benchmark using BM25 as the underlying retriever.
+Best scores per dataset are bolded.
+
+                               Bio      Earth    Econ      Psy    Rob     Stack    Sus     Leet   Pony    AoPS    TheoQ   TheoT   Avg
+  Retriever
+  ReasonIR                     43.6     42.9      32.7    38.8    20.9    25.8     27.5    31.5    19.6    7.4     33.1    35.7   30.0
+  CoT-based Reasoning
+  ReasonIR + Rank1             49.7     35.8      22.0    37.5    22.5    21.7     35.0    18.8    32.5    10.8    22.9    43.7   29.4
+  ReasonIR + Rank-R1           50.3     36.1      24.4    38.9    23.7    22.0     34.2    22.6    31.3    10.7    24.5    44.0   30.2
+  ReasonIR + O1-Pruner         48.6     37.4      24.4    38.8    24.0    21.6     35.3    22.5    31.1    11.2    24.0    44.1   30.3
+  State-based Reasoning
+  ReasonIR + SMR (Qwen2.5)     52.2     51.1      27.5    45.1    22.8    29.4     30.9    27.9    18.1    7.4     36.4    32.6   31.8
+  ReasonIR + SMR (Qwen3)       53.7     52.3      29.5    46.9    24.5    30.6     32.5    29.0    19.8    9.2     38.0    34.2   33.4
+  EMR: State-based Reasoning with Episodic Memory
+  ReasonIR + EMR (Qwen2.5)     55.9     55.4      33.3    49.4    26.7    33.6     35.1    31.2    22.6    11.1    39.0    35.6   35.7
+  ReasonIR + EMR (Qwen3)       56.9     56.0      33.5    50.0    28.2    34.1     35.7    32.4    23.1    12.4    40.5    37.2   36.7
+
+Table 3: Retrieval performance (nDCG@10) on GPT4-Reason queries of the BRIGHT b enchmark. Best scores
+per dataset are bolded.
+
+
+   Figure 4 shows that EMR successfully resolves                         that stronger base models can still exhibit repeti-
+the cycle in over 90% of these failure cases on aver-                    tive refinement behavior, making explicit trajectory
+age, as indicated by the blue portion of each chart.                     control useful even as model quality improves.
+Moreover, this resolution translates into substantial
+gain. The number at the center of each chart repre-                      4.2.2     RQ2. Is EMR More Effective and
+sents the nDCG@10 gain for these queries, amount-                                  Efficient?
+ing to 8%p increase in average. Notably, the largest                     To answer RQ2, we evaluate EMR along two axes:
+performance gains are observed in datasets with                          retrieval effectiveness and token efficiency.
+natural language queries, such as EarthScience
+                                                                         Retrieval Effectiveness. Table 2 shows that
+(+15.3) and Psychology (+16.5).
+                                                                         EMR achieves the best average nDCG@10 under
+  These results explain the model-specific perfor-                       BM25. On average, EMR achieves a 6.7%p gain in
+mance in Table 2. In logical domains like LeetCode                       nDCG@10 compared to SMR. See Appendix A.3
+and TheoQ, stronger base models often exhibit                            for a comprehensive evaluation across other met-
+repetitive refinement behavior. Our analysis reveals                     rics such as Recall and MAP.
+that Qwen3 generates 25% more reasoning cycles                              This performance gain is not just the result of
+than Qwen2.5 on LeetCode. This suggests that                             better initial query refinement of LLMs. To ver-
+more capable models are prone to repetitive refine-                      ify this, we conducted an experiment using strong
+ment in specific domains. These findings suggest                         initial queries refined by GPT-4, provided by the
+                                                                  37272
+
+===== PDF p.8 =====
+BRIGHT benchmark. As detailed in Table 3, EMR
+
+
+
+
+                                                        Retrieval Performance (nDCG@10, %)
+remains the top-performing method, still outper-
+forming SMR by a 3.3%p margin in nDCG@10.
+   Regarding the limited performance gain of CoT
+over ReasonIR in Table 4, we find that ReasonIR
+has effectively internalized the reasoning process
+of CoT. Since ReasonIR is trained specifically for
+reasoning-intensive retrieval, adding explicit CoT
+steps during inference becomes redundant. In con-
+trast, EMR still achieves significant gains on top of                                                # Input Tokens (x106)
+ReasonIR. This demonstrates that EMR provides
+orthogonal benefits that even a sophisticated rea-      Figure 5: Retrieval performance (nDCG@10) versus
+soning retriever does not possess.                      cumulative input tokens on four representative BRIGHT
+   Furthermore, the gains are not simply from us-       datasets. Solid lines denote EMR and dashed lines de-
+ing a more powerful LLM. Across both Table 2            note SMR. Each color represents a different dataset.
+                                                        Across datasets, EMR achieves higher retrieval perfor-
+and Table 3, while the Qwen3-based models gen-
+                                                        mance at comparable or lower token budgets.
+erally outperform Qwen2.5-based models, EMR
+maintains the highest average score regardless of
+the underlying LLM. This indicates that episodic        that the benefits of EMR do not depend on delicate
+memory provides a robust advantage that is not de-      tuning of the memory budget (Appendix A.6).
+pendent on initial query quality or biased towards         To broaden the comparison, we measure cumu-
+a specific LLM.                                         lative token usage for CoT-based baselines. As
+                                                        shown in Table 5, EMR remains the most efficient
+Robustness Across Base Models. The gains of             method while also achieving the best retrieval per-
+EMR are not limited to the 32B Qwen models used         formance. CoT-based approaches such as Rank1,
+in our main experiments. On DeepSeek-R1, EMR            Rank-R1, and O1-Pruner require roughly 8 times
+improves over SMR by +5.3 nDCG@10 (17.6 to              more input tokens than EMR, yet still underper-
+22.9). The same trend also holds in a smaller model,    form it in nDCG@10. This result confirms that
+where EMR improves over SMR with Qwen2.5-               EMR outperforms both SMR and CoT-style meth-
+7B from 29.2 to 31.9. These results suggest that        ods with improved computational efficiency.
+the effectiveness of EMR stems from its trajectory-
+aware memory, rather than from model scale alone.       End-to-End Latency. We measured the end-to-
+Appendix A.4 gives more details about the experi-       end wall-clock latency per query on an NVIDIA
+ments.                                                  A6000 GPU using vLLM. Despite the additional
+                                                        memory management, EMR achieves a ×2.7
+Token Efficiency. Beyond performance, EMR               speedup over SMR. While prompt construction
+demonstrates superior token efficiency. Figure 5        adds a small overhead, EMR prevents the model
+shows retrieval performance against the number          from falling into redundant reasoning loops. These
+of tokens consumed for the representative four          loops are the primary bottleneck in SMR. Conse-
+datasets of the BRIGHT benchmark. In this fig-          quently, the time saved by reducing reasoning steps
+ure, each color represents a distinct dataset, while    far outweighs the cost of memory compression.
+solid lines denote EMR and dashed lines indicate        This suggests that the efficiency gains of EMR ex-
+SMR. See Appendix A.5 for more details.                 tend beyond token counts to end-to-end runtime.
+   The figure shows that EMR reaches higher
+nDCG@10 than SMR at comparable or lower to-             4.2.3                                RQ3. Is EMR Complementary to
+ken budgets. The added memory tokens are offset                                              Stronger Retrievers?
+by fewer redundant reasoning steps and by memory        For RQ3, we test whether EMR remains effective
+compression.                                            when paired with a stronger retriever.
+   We also perform an ablation on the compression          We test if the performance gains from EMR per-
+rate by varying the top-k filtering parameter. EMR      sist when using a more powerful retriever. We
+remains stable across all tested values, with less      replaced the sparse retriever BM25 with ReasonIR,
+than 1.0 nDCG@10 variance overall. This suggests        a strong dense retriever trained for reasoning tasks.
+                                                   37273
+
+===== PDF p.9 =====
+Bio    Earth    Econ   Psy    Rob     Stack   Sus    Leet   Pony   AoPS   TheoQ   TheoT   Avg
+    Retriever
+    ReasonIR                    26.3    31.5    23.3   30.3   17.8    24.0    20.6   35.0   10.3   14.3   31.6    27.2    24.4
+    CoT-based Reasoning
+    ReasonIR + Rank1            32.0    30.0    22.3   31.1   16.7    25.8    22.4   31.4   15.5   12.1   27.8    26.3    24.5
+    ReasonIR + Rank-R1          33.0    34.1    24.2   33.5   20.2    25.4    22.8   33.5   14.1   10.7   30.3    27.8    25.8
+    ReasonIR + O1-Pruner        31.6    34.9    24.5   33.2   21.0    24.9    24.7   33.3   11.8   12.9   29.9    27.1    25.8
+    State-based Reasoning
+    ReasonIR + SMR (Qwen2.5)    34.7    35.1    26.2   32.8   20.9    25.2    24.2   30.8   10.4   13.5   30.1    28.6    26.0
+    ReasonIR + SMR (Qwen3)      41.7    37.8    26.4   31.2   20.3    26.0    32.5   28.8   10.5   14.8   33.0    28.5    27.6
+    EMR: State-based Reasoning with Episodic Memory
+    ReasonIR + EMR (Qwen2.5)    41.7    41.5    31.4   36.6   22.8    25.8    34.9   32.0   11.2   15.1   38.4    34.3    30.5
+    ReasonIR + EMR (Qwen3)      52.4    46.8    32.2   39.9   24.7    30.2    35.3   36.1   12.2   15.3   40.7    34.6    33.4
+
+Table 4: Retrieval performance (nDCG@10) on the BRIGHT benchmark using ReasonIR as the underlying
+retriever. Best scores per dataset are bolded.
+
+
+                Method      Tokens     nDCG@10                       introducing EMR, a framework that integrates an
+                Rank1       ×8.3         29.4                        episodic memory module to guide the reasoning
+                                                                     process. By conditioning the policy on its entire
+                Rank-R1     ×8.1         30.2
+                                                                     history of visited states, EMR reduces the cycle rate
+            O1-Pruner       ×8.2         30.3
+                                                                     by about 94%. Experiments on the BRIGHT bench-
+                 SMR        ×3.6         33.4                        mark demonstrate that this approach consistently
+                 EMR        ×1.0         36.7                        outperforms existing CoT-based and state-based
+                                                                     baselines in both retrieval effectiveness and token
+Table 5: Comparison of retrieval performance and rel-                efficiency.
+ative input token usage across CoT-based, state-based,
+and memory-augmented reasoning methods. ×1.0 de-
+notes the input token cost of EMR.                                   Acknowledgements
+
+                                                                     This work was supported by the InnoCORE
+Table 4 shows that the advantage of EMR remains                      program of the Ministry of Science and ICT
+with a significant margin. Specifically, EMR with                    (N10250156), and by Institute of Information &
+Qwen3 achieves an average nDCG@10 of 33.4, sur-                      communications Technology Planning & Evalua-
+passing the strongest baseline (SMR with Qwen3)                      tion (IITP) grant funded by the Korea government
+by 5.8%p. This suggests that the gains from EMR                      (MSIT) (No. 2022-0-00077/RS-2022-II220077, AI
+and the gains from a stronger retriever are comple-                  Technology Development for Commonsense Ex-
+mentary.                                                             traction, Reasoning, and Inference from Heteroge-
+   We also compare EMR against GRITHop-                              neous Data).
+per (Erker et al., 2026), a strong retriever+LLM
+baseline in the broader multi-hop retrieval
+                                                                     Limitations
+paradigm. EMR still achieves superior perfor-
+mance, improving nDCG@10 from 30.2 to 36.7.                          While EMR demonstrates robust performance, it
+This comparison is notable because EMR is                            has a modular design that allows for several promis-
+training-free and applied at test time, whereas                      ing extensions. For instance, the current action
+GRITHopper relies on additional training. The                        space is intentionally concise (Refine, Rerank,
+result suggests that better trajectory control can                   Stop). This set could easily be expanded to in-
+remain competitive with trained retrieval-and-                       clude more specialized tools like external API calls
+reasoning pipelines.                                                 and user feedback, transforming EMR into a more
+                                                                     comprehensive information searcher. Such interac-
+5    Conclusion
+                                                                     tions would enhance our episodic memory with a
+In this work, we address reasoning cycles in state-                  more comprehensive history.
+based approaches for reasoning-intensive IR by
+                                                              37274
+
+===== PDF p.10 =====
+References                                                 Orion Weller, Kathryn Ricci, Eugene Yang, Andrew
+                                                             Yates, Dawn Lawrie, and Benjamin Van Durme. 2025.
+Debrup Das, Sam O’ Nuallain, and Razieh Rahimi.              Rank1: Test-time compute for reranking in informa-
+  2025. Rader: Reasoning-aware dense retrieval mod-          tion retrieval. arXiv preprint arXiv:2502.18418.
+  els. arXiv preprint arXiv:2505.18405.
+Chad DeChant. 2025. Episodic memory in ai agents           Chenghao Xiao, G Thomas Hudson, and Noura Al
+  poses risks that should be studied and mitigated. In       Moubayed. 2024. Rar-b: Reasoning as retrieval
+  2025 IEEE Conference on Secure and Trustworthy             benchmark. arXiv preprint arXiv:2404.06347.
+  Machine Learning (SaTML), pages 321–332. IEEE.
+                                                           Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Ben-
+Justus-Jonas Erker, Nils Reimers, and Iryna Gurevych.
+                                                             gio, William W Cohen, Ruslan Salakhutdinov, and
+   2026. Grithopper: Decomposition-free multi-hop
+                                                             Christopher D Manning. 2018. Hotpotqa: A dataset
+   dense retrieval. In Proceedings of the 19th Confer-
+                                                             for diverse, explainable multi-hop question answer-
+   ence of the European Chapter of the Association for
+                                                             ing. arXiv preprint arXiv:1809.09600.
+  Computational Linguistics (Volume 1: Long Papers),
+   pages 77–94.
+                                                           Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak
+Yair Feldman and Ran El-Yaniv. 2019. Multi-hop para-         Shafran, Karthik Narasimhan, and Yuan Cao. 2023.
+  graph retrieval for open-domain question answering.        React: Synergizing reasoning and acting in language
+  arXiv preprint arXiv:1906.06606.                           models. In International Conference on Learning
+                                                             Representations (ICLR).
+Gautier Izacard, Mathilde Caron, Lucas Hosseini, Se-
+  bastian Riedel, Piotr Bojanowski, Armand Joulin,
+  and Edouard Grave. 2021. Unsupervised dense in-          Shengyao Zhuang, Xueguang Ma, Bevan Koopman,
+  formation retrieval with contrastive learning. arXiv       Jimmy Lin, and Guido Zuccon. 2025. Rank-
+  preprint arXiv:2112.09118.                                 r1: Enhancing reasoning in llm-based document
+                                                             rerankers via reinforcement learning. arXiv preprint
+Dohyeon Lee, Yeonseok Jeong, and Seung-won Hwang.            arXiv:2503.06034.
+  2025. From token to action: State machine reason-
+  ing to mitigate overthinking in information retrieval.
+  arXiv preprint arXiv:2505.23059.
+                                                           A     Appendix
+Haotian Luo, Li Shen, Haiying He, Yibo Wang, Shi-          A.1    Baseline Methods
+  wei Liu, Wei Li, Naiqiang Tan, Xiaochun Cao,
+  and Dacheng Tao. 2025. O1-pruner: Length-                To provide a comprehensive evaluation of EMR,
+  harmonizing fine-tuning for o1-like reasoning prun-      we compare it against various baseline methods.
+  ing. arXiv preprint arXiv:2501.12570.
+Xueguang Ma, Liang Wang, Nan Yang, Furu Wei, and           CoT-based Reasoning. We include CoT-based
+  Jimmy Lin. 2024. Fine-tuning llama for multi-stage       baselines as they are standard approach in the liter-
+  text retrieval. In Proceedings of the 47th Inter-        ature and represent a widely adopted methodology,
+  national ACM SIGIR Conference on Research and            ensuring our evaluation is grounded in established
+  Development in Information Retrieval, pages 2421–
+  2425.
+                                                           practices.
+
+Andrew M Nuxoll and John E Laird. 2012. Enhancing              • Rank1 (Weller et al., 2025) and Rank-
+  intelligent agents with episodic memory. Cognitive
+  Systems Research, 17:34–48.
+                                                                 R1 (Zhuang et al., 2025) are strong CoT-based
+                                                                 reasoning models. Rank1 is fine-tuned on
+Stephen Robertson, Hugo Zaragoza, et al. 2009. The               reasoning traces, while Rank-R1 further en-
+   probabilistic relevance framework: Bm25 and be-
+  yond. Foundations and Trends® in Information Re-               hances this capability through reinforcement
+   trieval, 3(4):333–389.                                        learning. We select these models over earlier
+                                                                 methods like ReAct (Yao et al., 2023) because
+Rulin Shao, Rui Qiao, Varsha Kishore, Niklas Muen-
+  nighoff, Xi Victoria Lin, Daniela Rus, Bryan                   they are specifically adapted for IR and rep-
+  Kian Hsiang Low, Sewon Min, Wen-tau Yih,                       resent the leading CoT-based methods in this
+  Pang Wei Koh, et al. 2025. Reasonir: Train-                    domain.
+  ing retrievers for reasoning tasks. arXiv preprint
+  arXiv:2504.20595.
+                                                               • O1-Pruner (Luo et al., 2025) focuses on the
+Hongjin Su, Howard Yen, Mengzhou Xia, Weijia                     efficiency of CoT. It employs reinforcement
+  Shi, Niklas Muennighoff, Han-yu Wang, Haisu Liu,               learning to compress the lengthy reasoning
+  Quan Shi, Zachary S Siegel, Michael Tang, et al.
+  2024. Bright: A realistic and challenging bench-
+                                                                 paths generated by CoT models, aiming to
+  mark for reasoning-intensive retrieval. arXiv preprint         reduce computational overhead without sacri-
+  arXiv:2407.12883.                                              ficing the final answer quality.
+                                                      37275
+
+===== PDF p.11 =====
+State-based Reasoning. We include state-based            Experimental Settings. We conducted all exper-
+baselines to compare EMR, aiming to demonstrate          iments on a single NVIDIA A6000 GPU using the
+superior overall performance and how our pro-            vLLM engine. Unless otherwise noted, hyperpa-
+posed episodic memory component enhances the             rameters remained consistent across all datasets:
+efficiency of state transitions.                         a batch size of 8, LLM temperature of 0.1, and a
+                                                         maximum of 16 reasoning steps. For retrieval, we
+   • SMR (Lee et al., 2025) frames the multi-step
+                                                         set the top-k value to 10. We define computational
+     retrieval process as a Markov Decision Pro-
+                                                         cost as the total number of input tokens consumed
+     cess. At each step, a policy model observes
+                                                         throughout the entire reasoning process.
+     the current state (e.g., the query and retrieved
+     documents) and selects a discrete action to            To evaluate temporal efficiency, we measured the
+     transition to the next state, finally building a    end-to-end wall-clock latency per query. This met-
+     set of relevant documents for the answer.           ric covers the entire pipeline, including document
+                                                         retrieval, prompt construction, and the compression
+Retriever. We include both a traditional sparse
+                                                         process. We also used the same system prompt (Ta-
+retriever and a strong dense retriever to investi-
+                                                         ble 6) as SMR for our policy model to ensure a
+gate the synergy between the retrieval backbone
+                                                         fair comparison and isolate the improvements of
+and EMR. This comparison is crucial to demon-
+                                                         our method. This setup prevents performance gains
+strate that the benefits of EMR are orthogonal to
+                                                         from being attributed to prompt variations rather
+the retriever’s capabilities. Our method provides
+                                                         than our core mechanism.
+consistent improvements even when paired with a
+more powerful retriever.
+   • BM25 (Robertson et al., 2009) serves as our         A.3   Evaluation on Other Metrics
+     traditional sparse retrieval baseline. It is a
+     keyword-based algorithm that has been a long-
+     standing and robust baseline in IR for decades,     To further demonstrate the robustness of our pro-
+     relying on term frequency and inverse docu-         posed method, this section supplements the pri-
+     ment frequency.                                     mary nDCG@10 evaluation with results on ad-
+                                                         ditional metrics. We evaluated performance on
+   • ReasonIR (Shao et al., 2025) represents             the BRIGHT benchmark using BM25 as the re-
+     a strong baseline in dense retrieval for            triever, measuring results with two additional met-
+     reasoning-intensive IR. It is highly effective      rics: MAP@10 (shown in Table 7) and Recall@10
+     for tasks that require understanding context        (shown in Table 8). Consistent with our main find-
+     and intent beyond simple keyword match-             ings, EMR maintains a clear performance advan-
+     ing. Its strong performance over other notable      tage over both CoT and compressed CoT baselines
+     dense retrievers like Contriever (Izacard et al.,   across these metrics.
+     2021) and RankLLaMA (Ma et al., 2024)
+     makes it a challenging and relevant baseline.
+A.2 Implementation Details                               A.4   Additional Backbone and Baseline
+Models and Adaptations. The baseline mod-                      Comparisons
+els used in our experiments are derived from var-
+ious LLMs. Rank1-32B utilizes Qwen2.5-32B1               To verify that the gains of EMR are not specific to
+as its backbone, while Rank-R1-14B is built upon         the 32B Qwen backbones used in our main exper-
+Qwen2.5-14B2 . Due to the absence of a 32B ver-          iments, we evaluate additional backbone settings
+sion for Rank-R1, our experiments employ the 14B         in Table 9. First, on DeepSeek-R1, EMR improves
+model. For O1-Pruner, which is not inherently a          nDCG@10 from 17.6 to 22.9 when replacing SMR.
+retrieval model, we implemented a custom prompt          Second, in a smaller-model setting with Qwen2.5-
+to enable query rewriting and document rerank-           7B, EMR improves over SMR from 29.2 to 31.9.
+ing functionalities; its 32B version originates from     These results suggest that the benefits of episodic
+QwQ-32B-preview3 . To ensure a fair and compre-          memory are not a simple consequence of model
+hensive evaluation, we also benchmark against the        scale, but arise from a more general improvement
+base LLMs, Qwen2.5-32B1 and Qwen3-32B4 .                 to the state-based reasoning process.
+                                                    37276
+
+===== PDF p.12 =====
+A.5 Token Efficiency
+We assess the token efficiency of EMR by compar-
+ing its token consumption to that of SMR under
+the same experimental setup (top-k=10). Table 10
+shows that EMR is more efficient, requiring about
+72% fewer tokens on average. This demonstrates
+that the episodic memory in EMR enhances re-
+trieval performance while achieving superior token
+efficiency.
+
+A.6 Ablation on Memory Compression Rate
+To evaluate the sensitivity of EMR to the memory
+compression budget, we perform an ablation on
+the top-k filtering parameter used in Section 3.2.3.
+Table 11 reports the retrieval performance for dif-
+ferent values of k. Across all tested settings, EMR
+remains stable with less than 1.0 nDCG@10 vari-
+ance. Even at the lowest-performing setting, EMR
+still outperforms the strongest baseline SMR. This
+result indicates that EMR is robust to the compres-
+sion rate and does not require sensitive hyperpa-
+rameter tuning.
+
+A.7 Use of AI Assistants
+We used AI assistants only for limited support, in-
+cluding code debugging, grammar checking, and
+minor phrasing suggestions.
+
+
+
+
+   1
+     Qwen/Qwen2.5-32B-Instruct
+   2
+     Qwen/Qwen2.5-14B-Instruct
+   3
+     Qwen/QwQ-32B-Preview
+   4
+     Qwen/Qwen3-32B-FP8
+
+                                                  37277
+
+===== PDF p.13 =====
+You are a highly intelligent artificial agent responsible for managing a search system . Your role is to
+     either refine the given query or re - rank retrieved search results , thereby enhancing both recall and
+     precision of the search . You can output exactly one of the following operations , after which another
+     agent will execute it and return the results to you .
+
+## Input Format
+The input provided to you will have the following structure :
+
+```
+{
+" query ": "< current version of a query >" ,
+" ranks ": [
+     (" < docid >" , " document contents ") ,
+     (" < docid >" , " document contents ") ,
+     ...
+]
+}
+```
+
+### Decision policy ( check in order ) :
+
+1. Query Refinement
+   Choose " action = refine " if any of the following are met :
+   - The query is ambiguous or generic
+   - The retrieved search results are unsatisfactory
+   - The query is short
+   - Key domain terms are missing in the query
+
+2. Re - ranking
+   Choose " action = rerank " only if the query already looks good and at least one retrieved document seems
+          on - topic .
+
+3. Stop
+   Choose " action = stop " only when you are * certain * that no further improvement is possible .
+
+
+## Possible Outputs ( select exactly one )
+
+### Query Refinement
+You may refine the query by rewriting it into a clear , specific , and formal version that is better suited
+     for retrieving relevant information from a list of passages . Only return the document IDs (` docid `) in
+     the ` reranked ` list . Do not include document contents . Output format :
+
+```
+{
+" action ": " refine ",
+" query ": "< refined version of a query >" ,
+" reason ": " < reason for this action >"
+}
+```
+
+### Re - ranking
+You may reorder the retrieved documents ( do not remove non - relevant ones ) . The results should be sorted in
+     descending order of relevance . Output format :
+
+```
+{
+" action ": " rerank ",
+" ranks ": [" < docid >" , "< docid >" , ...] ,
+" reason ": " < reason for this action >"
+}
+```
+
+### Stop
+You may stop this iteration when the results are satisfactory . Output format :
+
+```
+{
+" action ": " stop ",
+" reason ": " < reason for this action >"
+}
+```
+
+
+
+
+                                             Table 6: System prompt used in EMR.
+
+
+
+
+                                                           37278
+
+===== PDF p.14 =====
+Bio     Earth    Econ    Psy     Rob     Stack    Sus     Leet    Pony    AoPS    TheoQ    TheoT    Avg
+  Retriever
+  BM25                     13.1     18.1     8.9     7.0     8.5     13.4    10.0    19.7     1.6     6.2     10.4     4.9     10.2
+  CoT-based Reasoning
+  BM25 + Rank1             16.1     23.0     7.9    11.3    10.5     12.3    16.2    17.6     2.2     3.1     10.4     8.6     11.6
+  BM25 + Rank-R1           17.7     25.0    10.3    10.7    14.1     13.1    16.1    20.2     2.1     4.9     10.8     7.7     12.7
+  BM25 + O1-Pruner         17.2     22.6    10.7    12.9    12.7     14.9    15.5    19.5     1.8     3.7     8.9      5.6     12.2
+  State-based Reasoning
+  BM25 + SMR (Qwen2.5)     22.0     25.7    13.6    15.4    15.0     15.5    16.6    21.0     1.6     3.1     14.1     15.2    14.9
+  BM25 + SMR (Qwen3)       23.1     24.4    14.0    15.7    15.3     16.2    17.0    21.8     1.9     3.4     16.2     15.4    15.4
+  EMR: State-based Reasoning with Episodic Memory
+  BM25 + EMR (Qwen2.5)     33.9     42.1    16.1    26.3    15.2     17.3    19.7    22.0     1.9     4.0     24.2     25.8    20.7
+  BM25 + EMR (Qwen3)       44.3     44.5    15.4    28.2    17.3     20.5    24.6    10.4     2.2     4.2     19.1     15.2    20.5
+
+Table 7: Retrieval performance (MAP@10) on the BRIGHT benchmark using BM25 as the underlying retriever.
+Best scores per dataset are bolded.
+
+
+
+
+                           Bio     Earth    Econ    Psy     Rob     Stack    Sus     Leet    Pony    AoPS    TheoQ    TheoT    Avg
+  Retriever
+  BM25                     21.7     31.9    16.8    15.6    19.6     21.3    21.3    29.5     4.1     6.0     8.6      9.2     17.1
+  CoT-based Reasoning
+  BM25 + Rank1             21.7     31.9    16.8    15.6    19.6     21.3    21.3    29.5     4.1     6.0     8.6      9.2     17.1
+  BM25 + Rank-R1           21.7     31.9    16.8    15.6    19.6     21.3    21.3    29.5     4.1     6.0     8.6      9.2     17.1
+  BM25 + O1-Pruner         23.8     34.4    20.2    19.8    19.6     21.3    21.5    29.5     2.3     6.0     12.9     10.3    18.5
+  State-based Reasoning
+  BM25 + SMR (Qwen2.5)     25.3     33.0    19.5    21.7    21.4     24.6    21.6    26.6     3.6     6.1     20.9     24.8    20.8
+  BM25 + SMR (Qwen3)       25.9     34.1    22.9    22.4    20.8     25.0    22.1    27.2     3.7     6.6     21.3     25.1    21.1
+  EMR: State-based Reasoning with Episodic Memory
+  BM25 + EMR (Qwen2.5)     38.3     47.0    23.3    34.5    17.4     29.1    26.8    30.7     4.3     6.4     26.0     30.7    26.2
+  BM25 + EMR (Qwen3)       52.8     53.7    23.2    38.3    24.3     32.5    31.2    25.6     4.3     6.9     21.0     17.9    27.6
+
+Table 8: Retrieval performance (Recall@10) on the BRIGHT benchmark using BM25 as the underlying retriever.
+Best scores per dataset are bolded.
+
+
+
+
+                          Bio     Earth    Econ    Psy     Rob     Stack    Sus     Leet    Pony    AoPS    TheoQ    TheoT    Avg
+    On DeepSeek-R1
+    DeepSeek-R1 + SMR     28.5    39.2     18.8    17.1    11.9    17.6     20.7    26.2    6.5     10.0     7.7      6.7     17.6
+    DeepSeek-R1 + EMR     49.7    50.7     18.8    34.1    19.8    24.4     27.5    11.2    4.8     2.5     17.6     13.7     22.9
+    On Smaller Backbone (7B)
+    Qwen2.5 (7B) + SMR    47.9    49.8     25.8    44.4    19.6    27.3     26.0    26.3    16.0    4.9     35.2     27.6     29.2
+    Qwen2.5 (7B) + EMR    51.6    52.4     30.1    43.7    24.2    27.2     30.6    27.6    18.2    7.3     35.3     34.3     31.9
+
+Table 9: Retrieval performance (nDCG@10) on additional backbone settings. EMR consistently improves over
+SMR on both DeepSeek-R1 and Qwen2.5-7B.
+
+
+
+                                                             37279
+
+===== PDF p.15 =====
+Dataset    SMR      EMR     Reduction
+           bio       10.5     4.4     -58.1%
+          earth      40.7     5.0     -87.7%
+           econ      14.3     3.8     -73.2%
+           psy       22.7     3.4     -85.1%
+           rob       18.5     6.7     -63.8%
+          stack      30.2     5.1     -83.0%
+           sus       13.8     5.1     -62.8%
+           leet      6.5      5.0     -22.6%
+          pony       5.0      2.0     -60.1%
+           aops      3.3      2.9     -11.0%
+          theoq      6.2      4.3     -31.0%
+          theot      3.9      1.3     -66.9%
+         Average     14.6     4.1     -72.1%
+
+Table 10: Comparison of token usage (in millions) be-
+tween EMR and SMR across various datasets in the
+BRIGHT benchmark. The values represent the total
+number of input tokens required per task. The final col-
+umn shows the average of all datasets.
+
+
+
+
+                    k      nDCG@10
+                    3        26.2
+                    5        26.7
+                    7        26.8
+                    9        26.3
+                   11        25.9
+
+Table 11: Ablation on the top-k memory compression
+rate. EMR remains stable across different values of k,
+with less than 1.0 nDCG@10 variance.
+
+
+
+
+                                                      37280

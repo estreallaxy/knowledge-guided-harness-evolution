@@ -1,0 +1,1020 @@
+===== PDF p.1 =====
+M OSAIC: Unlocking Over 30× Context Length for Diffusion LLMs Inference
+          via Global Memory Planning and Dynamic Peak Taming
+
+
+        Liang Zheng 1 Bowen Shi 1 Yitao Hu 1 Jiawei Zhang 1 Ruofan Li 1 Guotao Yang 1 Zhixin Zhao 1
+               Zhengchao Wang 1 Sheng Chen 1 Wenxin Li 1 Dezhi Ran 2 Tao Xie 2 Keqiu Li 1
+
+
+                          Abstract                                      1. Introduction
+     Diffusion-based large language models (dLLMs)                      While autoregressive (AR) models have driven recent break-
+     have emerged as a promising alternative to autore-                 throughs in generative AI (Zhao et al., 2023; Minaee et al.,
+     gressive models, leveraging simultaneous denois-                   2024), diffusion-based large language models (dLLMs) have
+     ing to enable global planning and iterative refine-                emerged as a distinct paradigm. Unlike the sequential, left-
+     ment. These properties make dLLMs attractive                       to-right generation of AR models, dLLMs progressively de-
+     for long-context generation. However, deploying                    noise the entire sequence simultaneously (Nie et al., 2025;
+     dLLMs faces a prohibitive memory barrier, as                       Zhu et al., 2025; Ye et al., 2025). This capability facilitates
+     existing inference systems are inefficient for the                 global planning and iterative refinement, making dLLMs
+     diffusion paradigm. We observe that current in-                    a promising paradigm for maintaining long-range consis-
+     ference systems are misaligned with dLLMs. Un-                     tency (Sahoo et al., 2024; Yu et al., 2025).
+     like autoregressive models, whose memory foot-
+     print is dominated by the KV-Cache, dLLMs are                      A key trend in dLLM is the shift toward long-context gen-
+     bottlenecked by transient activations rematerial-                  eration (Liu et al., 2025a; He et al., 2025). This capability
+     ized per step. Moreover, generic memory reuse                      unlocks advanced applications such as repository-level code
+     mechanisms lack the global visibility to handle                    generation (Xie et al., 2025) and massive-context informa-
+     dynamic memory peaks of dLLMs, which alter-                        tion filling. Despite this potential, deploying long-context
+     nate between logits and feed-forward networks.                     dLLMs remains constrained by a prohibitive memory ca-
+     To address these challenges, we present M OSAIC,                   pacity barrier stemming from system inefficiencies.
+     a memory-efficient inference system that shifts                    Specifically, existing memory optimizations for LLMs prior-
+     dLLM execution from local, static management to                    itize KV-Cache (Kwon et al., 2023; Prabhu et al., 2025), the
+     a global, dynamic paradigm. M OSAIC integrates                     primary bottleneck in autoregressive generation; however,
+     (i) a mask-only logits kernel eliminating redun-                   these techniques do not transfer to dLLMs. Our profil-
+     dant activation materialization, (ii) a lazy chunk-                ing reveals a fundamental shift: dLLMs are bottlenecked
+     ing optimizer using online heuristics to tame dy-                  by transient activations recomputed at every step. While
+     namic memory peaks, and (iii) a global memory                      general-purpose reuse mechanisms address activation mem-
+     manager leveraging virtual addressing to mitigate                  ory to some extent (Pisarchyk & Lee, 2020; Ansel et al.,
+     memory fragmentation. Evaluations show that                        2024), they lack the global visibility to adapt to dLLMs’ dy-
+     M OSAIC reduces the memory peak-to-average                         namic peaks, which toggle between logits and feed-forward
+     ratio by 2.71× on average and increases the                        networks (FFNs). Consequently, applying existing methods
+     maximum inference sequence length on identical                     results in significant memory fragmentation and redundancy,
+     hardware by 15.30–32.34×. Crucially, M OSAIC                       necessitating a system tailored to these distinct patterns.
+     is training-free and preserves exact model out-
+     puts, while reducing end-to-end latency by 2.5%–                   To materialize this shift, we propose M OSAIC, a memory-
+     55.4%. Our code is publicly available at https:                    efficient inference system tailored for long-context dLLMs.
+     //github.com/flashserve/Mosaic.                                    M OSAIC shifts from local, static management to a global,
+                                                                        dynamic paradigm. We introduce a mask-only logits ker-
+   1                                                                    nel that eliminates redundancy by computing logits solely
+     Tianjin University, China 2 Peking University, China. Corre-
+spondence to: Yitao Hu <yitao@tju.edu.cn>.                              for masked tokens. To handle dynamic bottlenecks, a
+                                                                        lazy chunking optimizer employs an online search to split
+Proceedings of the 43 rd International Conference on Machine            memory-intensive operators only when necessary, minimiz-
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026            ing latency overhead. Underpinning these components is a
+by the author(s).
+
+                                                                    1
+
+===== PDF p.2 =====
+M OSAIC : Unlocking Over 30× Context Length for Diffusion LLMs Inference
+                                                                        Prompt     MASK                  Prompt          MASK
+global memory manager utilizing a graph registrar to cap-
+ture the full computation lifecycle, enabling a unified virtual
+                                                                                                                                              Loop    Stage1
+memory mapping that eliminates external fragmentation.                                                          Bidirectional Attention
+                                                                                                                                                     Forward
+                                                                                                                         FFN
+Our contributions are summarized as follows:                                                                            Logits
+                                                                            Mask
+                                                                                                      Token 1   0.13         Token 1   0.03
+                                                                            Token
+                                                                                                      Token 2   0.80         Token 2   0.19
+                                                                           Generated    N times ···                                                  Stage2
+                                                                             Token                    Token n   0.02         Token n   0.75          Sample
+   • We provide the first comprehensive characterization
+     of dLLM memory usage, identifying the bottleneck
+     shift to transient activations and the phenomenon of                              Figure 1. dLLM inference pipeline.
+     dynamic memory peaks.
+
+   • We propose M OSAIC, an inference system that inte-
+     grates mask-only computation, a lazy chunking strat-
+     egy, and a global memory manager utilizing a graph
+     registrar to capture the full computation lifecycle for          the process starts from a fully masked sequence of length
+     efficient long-context dLLM inference.                           L. Over N steps, masks are progressively replaced with
+                                                                      sampled tokens.
+   • Extensive evaluations demonstrate that M OSAIC
+     achieves an average 2.71× reduction in memory peak-              As shown in Figure 1, each step consists of two stages:
+     to-average ratio and extends the maximum supportable             (1) a bidirectional forward pass that produces logits for all
+     sequence length by 15.30–32.34×. Crucially, M O -                masked positions, and (2) a sampling stage that selects and
+     SAIC is training-free and preserves exact model out-             fills a subset of masks. Across iterations, the sequence
+     puts, while simultaneously reducing end-to-end latency           transitions from fully masked to fully specified.
+     by 2.5%–55.4%.                                                   Memory Implications. Both paradigms produce large inter-
+                                                                      mediate tensors, including activations and attention-related
+Conflict of Interest Disclosure. The authors declare that             states, whose memory footprint often exceeds that of model
+they have no financial conflicts of interest to disclose.             parameters. Efficient memory management is therefore crit-
+                                                                      ical for scalable inference.
+2. Preliminaries
+                                                                      2.2. LLM Memory Management
+This section reviews LLM inference paradigms and memory
+management techniques, focusing on the fundamental dif-               LLM inference memory consumption is dominated by two
+ferences between autoregressive (AR) and diffusion-based              categories: (1) transient activations within a forward pass,
+LLMs (dLLMs) and their distinct memory characteristics.               and (2) persistent caches such as the KV-Cache in AR de-
+                                                                      coding. We briefly summarize representative management
+                                                                      techniques as follows.
+2.1. From Autoregression to Diffusion
+                                                                      Transient Activations via Memory Reuse. Activations are
+LLM inference has traditionally followed the autoregres-
+                                                                      short-lived and only required within a single forward pass.
+sive (AR) paradigm (Yang et al., 2025; Grattafiori et al.,
+                                                                      Graph-based memory planning models the computation as
+2024). Recently, diffusion-based LLMs (dLLMs), such as
+                                                                      a directed acyclic graph (DAG), enabling liveness analysis
+LLaDA (Nie et al., 2025) and Dream (Ye et al., 2025), have
+                                                                      to identify each tensor’s creation and last use. Tensors with
+emerged with fundamentally different inference workflows.
+                                                                      non-overlapping lifetimes can safely share memory buffers,
+Although both paradigms typically adopt the Transformer
+                                                                      reducing peak memory usage. This technique underpins
+architecture (Vaswani et al., 2017), they exhibit distinct
+                                                                      memory optimization in modern inference engines (Ansel
+computation patterns and memory behaviors.
+                                                                      et al., 2024; Pisarchyk & Lee, 2020; Lamprou et al., 2023).
+Autoregression. AR inference generates tokens sequen-
+                                                                      KV-Cache via Paging. In AR inference, causal attention
+tially. At each iteration, the model produces a single token,
+                                                                      allows past keys and values to be reused across iterations,
+appends it to the sequence, and feeds the extended sequence
+                                                                      forming the KV-Cache (Li et al., 2024). Inference consists
+into the next step. Due to causal dependencies, the effective
+                                                                      of a prefill phase that initializes the cache from the prompt
+sequence length grows monotonically until an EOS token
+                                                                      and a decode phase that incrementally extends it. Since
+or a length limit is reached.
+                                                                      KV-Cache size grows linearly with sequence length, paging-
+Diffusion. In contrast, dLLMs perform non-autoregressive,             based methods such as PagedAttention (Kwon et al., 2023)
+iterative refinement, generating all output tokens jointly.           store KV tensors in fixed-size blocks, reducing fragmenta-
+Given a prompt, target length L, and inference steps N ,              tion and enabling long-context generation.
+
+                                                                  2
+
+===== PDF p.3 =====
+M OSAIC : Unlocking Over 30× Context Length for Diffusion LLMs Inference
+
+
+
+
+                                                                                                                     Memory Usage (GB)
+                         32K Context        64K Context                     128K Context                                                      Input   Q Proj    V Proj                Out Proj    Residual     FFN
+                                                                                                                                              Norm    K Proj    Attention             Add+Norm    Final Add    Logits
+              210                                               210
+Memory (GB)
+
+
+
+
+                                                  Memory (GB)
+              26                                                26                                                                       20
+              22                                                22
+              2−2                                               2−2                                                                      10
+              2−6                                               2−6
+                                                                                                                                          0     0.2              0.4                       0.6           0.8
+                    Weights ActivationsKV Cache                       Weights ActivationsKV Cache
+                                                                                                                                                      Mask Token Counts / Total Counts
+   (a) Llama3-8B decoding (AR).                                   (b) LLaDA-8B (dLLM).
+                                                                                                                                                               (a) LLaDA-8B.
+               Figure 2. Memory breakdown of AR models and dLLMs.
+
+
+
+
+                                                                                                                     Memory Usage (GB)
+                                                                                                                                              Input   Q Proj    V Proj                Out Proj    Residual     FFN
+                                                                                                                                              Norm    K Proj    Attention             Add+Norm    Final Add    Logits
+
+                                                                                                                                         30
+3. Observations                                                                                                                          20
+                                                                                                                                         10
+As discussed in §2.1, efficient memory management is criti-                                                                               0     0.2              0.4                       0.6           0.8
+cal for long-context inference. However, existing techniques                                                                                          Mask Token Counts / Total Counts
+(§2.2), largely designed for autoregressive (AR) models, do                                                                                                    (b) Dream-7B.
+not translate to diffusion-based LLMs (dLLMs). Through
+empirical analysis, we identify four observations that reveal                                           Figure 3. Dynamic memory bottleneck shift across varying mask
+fundamental mismatches between conventional memory                                                      ratio rm at 128k context length.
+management and dLLM inference.                                                                                             12                         11.07GB                         4000
+
+                                                                                                        Memory Size (GB)
+                                                                                                                           10       Reserved Memory                                           Without Cache
+
+
+
+
+                                                                                                                                                                       Latency (ms)
+Observation #1: The memory bottleneck shifts from                                                                           8       Theoretical Peak                                  3000    With Cache
+                                                                                                                            6             5.58GB       7.72GB
+KV-Cache to transient activations. We first compare the                                                                     4                                                         2000
+                                                                                                                            2 0.43GB         3.86GB                                   1000
+memory breakdown of AR and diffusion inference as con-                                                                      0 0.24GB
+text length increases. In AR decoding, transient activations                                                                    1K 8K 16K 24K 32K                                        0 2K      4K       6K  8K
+                                                                                                                                   Context Length(tokens)                                   Context Length(tokens)
+are computed only for the newly generated token at each
+step, while the KV-Cache grows monotonically and domi-                                                      Figure 4. Reserved memory vs. Figure 5. Latency w/ and w/o
+nates memory usage (Figure 2a).                                                                             theoretical peak.             segment caching.
+
+In contrast, dLLMs employ bidirectional attention, causing
+key and value tensors to change across steps. This pre-                                                 masked tokens). At low rm , FFN activations dominate,
+vents caching and requires recomputing activations for all                                              whereas at high rm , logits dominate. This behavior is con-
+tokens at every step. As a result, transient activations dom-                                           sistent across models such as LLaDA-8B (Nie et al., 2025)
+inate memory consumption in dLLMs (Figure 2b). This                                                     and Dream-7B (Ye et al., 2025).
+fundamental shift indicates that dLLM inference requires a
+                                                                                                        This dynamic arises from two factors: (1) large feature
+transient-activation–centric memory design rather than the
+                                                                                                        dimensions, where both FFN intermediate sizes and logits
+KV-Cache–centric paradigm used in AR systems.
+                                                                                                        vocabulary sizes significantly exceed the hidden dimension;
+Observation #2: Logits computation wastes memory on                                                     and (2) computation asymmetry, where FFNs operate on full
+unmasked tokens. Given dominance of transient activa-                                                   sequence while logits are computed only for masked tokens.
+tions, we observe that existing dLLM inference systems                                                  As rm varies, the relative contribution of these components
+still compute logits for all tokens at each step, though only                                           shifts, forcing systems to provision memory for worst-case
+masked tokens are sampled (Nie et al., 2025; Ye et al., 2025;                                           peak and thereby limiting achievable context length.
+Ma et al., 2025). This eager computation introduces substan-
+                                                                                                        Observation #4: Myopic memory planning causes severe
+tial unnecessary memory overhead from unmasked logits.
+                                                                                                        fragmentation. Unlike specialized AR inference engines,
+Analogous to how KV-Cache avoids redundant recompu-                                                     dLLM frameworks typically rely on torch.compile
+tation in AR models, a natural optimization is mask-only                                                and a generic caching allocator (Paszke et al., 2019). We find
+logits, which restricts logits computation to masked tokens.                                            that this combination incurs substantial memory overhead.
+However, this is non-trivial in practice, as logits computa-                                            As shown in Figure 4, at a 32k context length, reserved
+tion requires memory-contiguous inputs (Gale et al., 2020),                                             memory exceeds the theoretical peak by 43.19%.
+while masked tokens are typically scattered.
+                                                                                                        The root cause is myopic memory planning induced by
+Observation #3: dLLM inference exhibits dynamic mem-                                                    graph partitioning. Due to greedy grouping and fragile dy-
+ory peaks. Even with mask-only logits, inference remains                                                namic graph capture (Ansel et al., 2024; Liang et al., 2025),
+constrained by two transient memory peaks: FFN activa-                                                  torch.compile frequently partitions execution into iso-
+tions and logits. As shown in Figure 3, the dominant peak                                               lated subgraphs (Figure 6(a)). Each subgraph independently
+shifts dynamically with the mask ratio rm (the fraction of                                              requests contiguous memory, preventing global reuse across
+
+                                                                                                    3
+
+===== PDF p.4 =====
+M OSAIC : Unlocking Over 30× Context Length for Diffusion LLMs Inference
+
+                                                                                                                 Total tokens[L]     2                    On-chip processing                         6
+        Inductor                           SubGraph                       Caching Allocator                                         Load                     Parallel unit 1   5                Tile write
+                                                           Memory                                            1                                  3
+                  Greedy Dynamic                                                                                                   indices                             Loop over K
+                                                           Requests                     segment 1                Mask indices[M]
+                  Grouped Planning                                                                               1 3 4    L-2 L
+                                                                                                                                                1 3                 Tile 1                Ot1
+                                                                                        segment 2                                            Indirectly
+                                                           Request 1
+                                                                                                             Input matrix X[L×K]                           Xt1 × Wt1 =         Ct1
+                   Graph Break                             Request 2                                                                          address                                                        Otn
+                                              GPU                                                                                              row 1,3                           Buffer
+                                                                …                                                                    4                                           reuse
+                                                                                        segment n                                  Gather
+                                                           Request n
+                                                                                                                                   X rows
+                                                                                                                                                             Parallel unit n    5                   7
+           (a) Myopic memory reuse planning in torch.compile                                                                                     3                                        Output matrix[M×N]
+         Initial      Caching                       External                                                 Input matrix W[K×N]
+                                                                                                                                               L-2 L
+                                                                                                                                                                    Tile n
+                                 Split & Reuse                                                                                               Indirectly
+       Allocation     Segment                    Fragmentation                                                                     Load        address Xtn     × Wtn = Ctn
+                                                                                                                                    W         row L-2,L
+       Tensor 1               segment1              Tensor 3                    384MB         128MB                                  4                                                     Mask-only logits
+        512MB                                           384MB
+                                  512MB                                  288MB             224MB
+       Tensor 2               segment2              Tensor 4
+                                                                                                                           Figure 8. M OSAIC’s mask-only logits kernel.
+        512MB                     512MB             288MB                256MB                256MB
+                                                                                             Tensor 5
+                             tensor free                               trigger new allocations
+  (b) Fragmentation issue due to PyTorch’s segment mechanism                                                four tightly integrated components: (1) a mask-only logits
+Figure 6. Illustration of (a) myopic memory reuse planning and (b)                                          kernel that computes logits only for masked tokens without
+the resulting memory fragmentation within the caching allocator.                                            auxiliary buffering; (2) a graph registrar that explicitly
+                                                                                                            defines a parameterized computation graph to enable whole-
+                                                        Inference Requests
+                                                                                                            graph visibility; (3) a lazy chunking optimizer that adaptively
+        Graph Registry
+                                                                Frontend
+                                                                                                            chunks memory-intensive operators (FFN and logits) to
+                                                                                                            reduce peak memory with minimal latency overhead; and (4)
+  Phase 1：offline phase                          Lazy Chunking Optimizer
+      Computation                                                                                           a global memory manager that maps tensors into a virtually
+  1                                        FFN Node
+                                                                         Memory Usage
+
+
+
+
+         Graph
+                                                                                            High            contiguous workspace to eliminate fragmentation.
+                                           Logits Node                                      Peak
+  Phase 2：online phase
+                                                                                                            As shown in Figure 7, M OSAIC operates in two phases. In
+      Reserve                                                                            Low Peak
+ 2 Virtual                           3       Chunk Strategy
+                                                                                                            the offline phase, the graph registrar constructs a parame-
+      Address               GPU                                                             Time            terized graph template using symbolic primitives once per
+                                   Global Memory Manager                                                    model 1 . In the online phase, the global memory manager
+                              4           Single-Request Plan                                               reserves a contiguous virtual address space 2 . Upon receiv-
+        5                                                                         Inference
+                                                                                                            ing an inference request, the lazy chunking optimizer selects
+                                                                                  Execution 6
+            Memory Pages
+            Bind Physical
+
+
+
+
+                                    placement map
+                                                                                                            a chunking configuration via a bottleneck-driven search 3 .
+                                      Offset 1 Size 1
+                                                                                                            The memory manager then derives a global tensor place-
+                                      Offset 2 Size 2
+                                                                                                            ment map 4 , binds physical pages according to the planned
+                                      Offset N Size N
+                                                                                 A         Result           peak memory 5 , and executes inference 6 .
+                                                                                                            We next describe the four components in detail.
+
+                              Figure 7. M OSAIC overview.                                                   4.2. Mask-only Logits Kernel
+                                                                                                            To realize mask-only logits (Observation #2), M OSAIC must
+                                                                                                            address a key challenge: logits computation is a GEMM
+the full execution.
+                                                                                                            operation that requires memory-contiguous inputs, whereas
+This fragmentation propagates to the physical allocator. Dy-                                                masked tokens are typically scattered. A naive gather-
+namic allocation (e.g., via cudaMalloc) incurs high run-                                                    then-compute approach necessitates a temporary contiguous
+time overhead, increasing latency by 46%–72% (Figure 5).                                                    buffer for the masked hidden states, introducing a memory
+Although the allocator caches segments to reduce alloca-                                                    overhead of O(Nmask × D), where Nmask is the number of
+tion cost, it preferentially reuses cached segments rather                                                  masked tokens and D is the hidden dimension, creating
+than allocating exact-sized buffers when handling sequential                                                significant redundancy.
+memory requests. This leaves behind non-contiguous frag-
+                                                                                                            M OSAIC addresses this with a fused gather–GEMM kernel.
+ments (Figure 6(b)) that cannot satisfy large tensor requests,
+                                                                                                            As illustrated in Figure 8, the kernel first extracts mask
+forcing extra allocations and inflating reserved memory.
+                                                                                                            indices 1 and loads them into on-chip memory 2 . Using
+                                                                                                            indirect addressing 3 , it gathers scattered input rows and
+4. Design of M OSAIC                                                                                        fetches weight tiles 4 directly into on-chip memory for
+                                                                                                            iterative matrix multiplication 5 . The accumulated results
+4.1. Overview
+                                                                                                            are written back directly to the output 6 , forming the final
+We propose M OSAIC, a system that enables long-context                                                      logits 7 without intermediate buffering. Furthermore, the
+inference for diffusion-based LLMs. M OSAIC consists of                                                     kernel reduces end-to-end latency by skipping non-masked
+
+                                                                                                        4
+
+===== PDF p.5 =====
+M OSAIC : Unlocking Over 30× Context Length for Diffusion LLMs Inference
+
+                            Graph Registrar                                                            4K        16K       32K                       4K       16K     32K
+
+
+
+
+                                                                                    Latency (%)
+
+
+
+
+                                                                                                                                 Latency (%)
+                                                                                                  3                                            30
+      add_op
+                     Constructs                                                                   2                                            20
+     add_input
+                     Operators
+                                       In     MatMul        Add_          Out
+                                                                                                  1                                            10
+   add_subgraph
+                                                   W             B
+                                                            Zero Overhead
+                                                                                                  02 4       8              16                  02 4      8            16
+    add_alias
+   mark_inplace
+                      Enforces          Tensor A
+                                                           Shared Memory
+                                                                                                      Logits Chunk Count                            FFN Chunk Count
+                       Reuse            Tensor B
+    bind_view
+                                                       Barrier                                     (a) Impact on logits.                         (b) Impact on FFN.
+                                        Chunk1     Chunk2            Chunk3
+    add_barrier        Enable
+    force_sync        Chunking              Tensor Liveness                            Figure 10. Impact of context length and chunk count on the latency
+                                                     Held until Barrier
+                                                                                       of logits and FFN.
+                  Figure 9. M OSAIC’s graph registrar.
+
+
+
+tokens, with details in §5.2.
+                                                                                       long contexts. For instance, at 32K context with 4 chunks,
+4.3. Graph Registrar                                                                   the overhead is less than 0.5% for logits and 2% for FFNs.
+                                                                                       This is because at long contexts, the execution time is domi-
+Supporting lazy chunking and global memory planning re-                                nated by massive matrix computations, rendering the fixed
+quires a complete view of the computation graph. However,                              kernel launch overhead negligible by comparison.
+compiler-level dynamic capture is often fragile and prone to
+graph breaks (Ansel et al., 2024; Liang et al., 2025). M O -                           Lazy chunking strategy. Based on this observation, we
+SAIC therefore introduces a graph registrar that explicitly
+                                                                                       introduce a lazy chunking strategy. To minimize overhead,
+defines a parameterized graph template.                                                we only activate chunking when physical memory is insuf-
+                                                                                       ficient. Since memory shortages primarily occur at long
+As shown in Figure 9, the registrar uses symbolic primitives                           context, chunking is low-overhead.
+(e.g., add op) to construct a template that captures model
+structure and memory dependencies, while leaving input-                                When activated, this strategy partitions the logits and FFN
+dependent dimensions (e.g., sequence length) symbolic and                              computations into smaller segments to reduce peak mem-
+instantiated at runtime. This guarantees an unbroken, whole-                           ory. We denote the number of chunks for these operations as
+graph view. The registrar also provides constraint primitives,                         Klogits and KFFN , respectively. To ensure efficiency, we must
+such as add alias, to enforce memory aliasing between                                  identify the minimal configuration that exactly supports the
+operators, and chunking-related primitives to define chun-                             target context. However, determining this configuration is
+ked execution. Control primitives (e.g., add barrier)                                  non-trivial because the memory bottleneck shifts dynami-
+extend tensor lifetimes across chunk loops, preventing pre-                            cally with the mask ratio rm . Consequently, we employ an
+mature memory reclamation before all chunks complete.                                  online bottleneck-driven search to solve this dilemma.
+                                                                                       Online bottleneck-driven search. To instantiate the lazy
+4.4. Lazy Chunking Optimizer                                                           chunking strategy, we need to find a feasible chunk setting.
+                                                                                       A naive solution is to brute-force search all combinations.
+As shown in §3, the memory bottleneck in dLLM inference
+                                                                                       However, this incurs prohibitive overhead. Crucially, we
+shifts dynamically between logits and FFN depending on
+                                                                                       observe that due to memory reuse, the footprint is dictated
+the mask ratio rm . While chunking these operators along
+                                                                                       by the peak and reducing non-peak components yields zero
+the sequence dimension can reduce peak memory, naive
+                                                                                       gain. Leveraging this insight, we prune the search space
+chunking suffers from two issues: (1) Latency overhead, as
+                                                                                       via a bottleneck-driven heuristic. To ensure consistency
+decomposing a single kernel into multiple launches adds
+                                                                                       with runtime execution, we simulate exact buffer sizes by
+execution cost. (2) Misaligned configuration, where static
+                                                                                       invoking the global memory planner on the registrar’s graph.
+policies might chunk the wrong component as the bottleneck
+moves (e.g., chunking FFN when logits is the peak).                                    As detailed in Algorithm 1, the search takes the number of
+                                                                                       masks and total tokens as inputs. The search iteratively iden-
+To address these two challenges, M OSAIC proceeds in three
+                                                                                       tifies the current peak component, increases its chunk count,
+stages. First, it analyzes the latency impact to identify the
+                                                                                       and re-evaluates memory usage using the global memory
+opportunity to chunk at long context. Second, guided by this,
+                                                                                       planner. The process terminates once the peak fits within
+it introduces a lazy chunking strategy to minimize latency
+                                                                                       available memory or no further chunking is possible. As
+overhead. Third, to materialize this strategy under dynamic
+                                                                                       validated in §5.3, M OSAIC with this heuristic matches the
+bottlenecks, we devise an online bottleneck-driven search
+                                                                                       maximum supportable context length of M OSAIC with brute-
+to find the minimal sufficient chunk configuration.
+                                                                                       force search, while the search latency of this heuristic is only
+Opportunity to chunk at long context. Figure 10 reveals                                0.28%–0.32% of the brute-force search. The derived Klogits
+that latency increase incurred by chunking diminishes at                               and KFFN are applied to runtime execution.
+
+                                                                                5
+
+===== PDF p.6 =====
+M OSAIC : Unlocking Over 30× Context Length for Diffusion LLMs Inference
+
+     Algorithm 1: Online Bottleneck-Driven Search                           achieving the same supportable context length.
+     Input: Sequence length T , mask number Nmask , memory                  VMM-based allocator. Since the planner maps all tensors
+            capacity Mcap                                                   into a unified address space, the workspace buffer must
+     Output: Chunk configuration (Klogits , KFFN ) or failure
+                                                                            be contiguous to support it. However, a naive static pre-
+1    Initialize Klogits ← 1, KFFN ← 1;                                      allocation would lead to substantial memory waste when
+2    P ← S IMULATE P EAK(T, Nmask , Klogits , KFFN );
+                                                                            handling short sequences. To resolve this, M OSAIC lever-
+3  while P > Mcap do                                                        ages a virtual memory management (VMM) allocator.
+      // Identify component causing the peak
+ 4     Identify component Cpeak causing the current peak P ;                Specifically, during initialization, we only reserve a large
+      // Check if the peak component supports chunking                      range of contiguous virtual addresses occupying no phys-
+ 5              / {L OGITS, FFN} then
+       if Cpeak ∈
+           // Insufficient memory capacity                                  ical memory. At runtime, once the planned peak size is
+ 6         return failure;                                                  known, we dynamically bind physical pages to this virtual
+         // Adjust configuration based on bottleneck                        range using low-level page mapping APIs. This ensures that
+ 7       if Cpeak = L OGITS then                                            the execution sees a contiguous buffer while the physical
+ 8           Klogits ← Klogits + 1;                                         consumption is strictly limited to the actual needs.
+ 9       else if Cpeak = FFN then
+                                                                            With the physical memory being ready, M OSAIC executes
+10            KFFN ← KFFN + 1;
+                                                                            inference following the tensor placement map. However,
+11       P ← S IMULATE P EAK(T, Nmask , Klogits , KFFN );
+                                                                            standard PyTorch operators employ opaque memory man-
+   // Return valid configuration                                            agement (e.g., implicitly allocating internal buffers and lack-
+12 return (Klogits , KFFN );
+                                                                            ing support for explicit output placement) that obstructs the
+                                                                            strict execution of our placement map. To resolve this, we
+                                                                            replace them with customized placement-aware operators
+     4.5. Global Memory Manager                                             to enforce absolute control over memory allocation. These
+                                                                            operators not only write directly to pre-determined memory
+     To eliminate the memory fragmentation described in §3, we              locations but also eliminate redundant internal buffering.
+     identify the root cause of this fragmentation as issuing mul-          For instance, it places Dream (Ye et al., 2025)’s logits shift
+     tiple memory requests. This mechanism implicitly delegates             and concatenation with a token-level kernel that writes par-
+     the mapping of logical requests to physical segments to the            tial results directly to their final positions, which reduces
+     underlying allocator. As the allocator lacks a global view,            memory usage.
+     this delegation inevitably leads to fragmentation.
+     To avoid fragmentation, we issue a one-shot global alloca-             5. Evaluation
+     tion to explicitly bypass the dynamic segment mapping of
+     the underlying allocator. To enable this one-shot allocation,          5.1. Experimental Setup
+     we treat the workspace as a unified address space and pre-             Implementation. We implemented M OSAIC based on
+     calculate a tensor placement map specifying the offset and             vLLM 0.10.1 (Kwon et al., 2023) to use its robust serv-
+     size for every tensor to direct the runtime execution.                 ing capability. To enable dLLM inference, we integrated
+     M OSAIC implements this via two core components: (1) a                 the official PyTorch model and bypassed vLLM’s KV-
+     single-request planner, which performs whole-graph analy-              Cache components, replacing them with dLLM-specific
+     sis to derive a tensor placement map; and (2) a VMM-based              logic. M OSAIC supports variable-length inference to elimi-
+     allocator, which dynamically maps physical pages to the                nate padding and implements iteration-level scheduling for
+     planned addresses.                                                     efficient execution. M OSAIC comprises approximately 11k
+                                                                            lines of code, consisting of 9.5k lines of Python, 1.3k lines
+     Single-request planner. Constructing a unified placement               of C++/CUDA, and 0.5k lines of Triton.
+     map requires tracking tensor lifecycles. We achieve this
+     by deriving the computation graph from the registrar’s tem-            Hardware Setup and Models. We evaluated M OSAIC on
+     plates with lazy chunking. This visibility enables us to               an NVIDIA RTX 3090 with 24GB VRAM and an NVIDIA
+     perform reuse planning, determining all tensors’ offsets.              A100 with 40GB VRAM. We select three mainstream
+                                                                            dLLMs: LLaDA-8B (Nie et al., 2025), Dream-7B (Ye et al.,
+     While finding the optimal offsets is an NP-hard problem                2025), and LLaDA-MoE (Zhu et al., 2025). As M OSAIC
+     solvable via integer linear programming (ILP) (Steiner et al.,         targets low-level memory management, its performance is
+     2023), our evaluation (§5.3) indicates that ILP solvers incur          associated with computation graphs and tensor shapes, re-
+     prohibitive latency. Therefore, we adopt a first-fit heuristic,        maining agnostic to semantic content. Therefore, we evalu-
+     similar to existing works (Chen et al., 2018; Lin et al., 2020),       ate workloads composed of varying prompt and total lengths
+     which reduces planning time to 0.1%-4.3% of the ILP while
+
+                                                                        6
+
+===== PDF p.7 =====
+M OSAIC : Unlocking Over 30× Context Length for Diffusion LLMs Inference
+
+to cover diverse memory patterns.                                         abling a larger Lmax .
+Baselines. We compare M OSAIC against three baselines:                    Besides, M OSAIC incurs no compromise on latency. It
+(1) P Y NATIVE: The unmodified official PyTorch code for                  achieves a 2.5%–24.9% reduction compared to M OSAIC-
+dLLM inference. This measures the raw performance with-                   T ORCH and M OSAIC-C OMPILE, attributed to the mask-
+out any serving infrastructure; (2) M OSAIC-T ORCH: The                   only logits kernel eliminating redundant computations and
+PyTorch model code ported onto the vLLM framework to                      the graph registration system bypassing the dynamic graph
+leverage its robust serving infrastructure, but without mem-              capture overhead inherent in torch.compile. Further-
+ory optimizations; (3) M OSAIC-C OMPILE: This baseline                    more, M OSAIC reduces latency by 5.9%–55.4% compared
+integrates torch.compile into the M OSAIC-T ORCH.                         to P Y NATIVE; this significant gain stems from the afore-
+                                                                          mentioned optimizations combined with the inherent engi-
+Key Metrics. We evaluate M OSAIC and baselines on two
+                                                                          neering efficiencies of the vLLM framework.
+metrics: (1) Per-step latency1 , the average time per step;
+(2) Maximum context length Lmax , the largest context size
+supportable before an out-of-memory error.                                5.3. Ablation Study
+                                                                          We ablate M OSAIC ’s components to quantify their contribu-
+5.2. End-to-end Evaluation                                                tions to maximum context length Lmax and latency. Due to
+                                                                          space limits, we report results for the prompt-to-total ratio
+For a comprehensive evaluation, we selected requests with
+                                                                          rp =0.5; other rp show similar trends.
+varying ratios of prompt length over total length, denoted
+as rp , for each model. Figure 11 illustrates the maximum                 Breakdown of Lmax improvements. To quantify each com-
+supportable context length of M OSAIC and the baselines.                  ponent’s contribution to Lmax , we performed a cumulative
+As validated in Appendix A.1, our porting to vLLM incurs                  breakdown of the performance gains. For each baseline, we
+no performance penalty; separately, we note that M OSAIC-                 averaged improvements across models and hardware. The
+C OMPILE extends Lmax but suffers from compilation latency.               reported ranges span the results across the three baselines
+Against this backdrop, M OSAIC consistently outperforms all               by incrementally integrating the global memory manager,
+alternatives in Lmax . On average across the three evaluated              mask-only kernel, and lazy chunking optimizer.
+models and two hardware configurations, its Lmax is 32.34,
+                                                                          As shown in Figure 13, the global manager increases Lmax
+25.41, and 15.30 times that of P Y NATIVE, M OSAIC-T ORCH,
+                                                                          to 1.41×–3.00× that of the baselines through global mem-
+and M OSAIC-C OMPILE, respectively. To understand the
+                                                                          ory reuse coupled with optimized placement-aware opera-
+Lmax difference, we conjecture that M OSAIC’s advantage
+                                                                          tors. Incorporating the mask-only kernel further elevates the
+arises from two key factors as follows.
+                                                                          capacity to 3.68×–8.04× relative to the baselines by elimi-
+First, existing systems fail to handle memory peaks, thereby              nating redundant logits memory for unmasked tokens, while
+bounding the context capacity. In contrast, M OSAIC em-                   lazy chunking ultimately boosts Lmax to 15.30×–32.34×
+ploys lazy chunking to mitigate this issue by chunking peak               over the baselines by mitigating memory spikes.
+activations when memory is insufficient for longer contexts.
+                                                                          Impact of chunking strategy. M OSAIC employs a lazy
+As shown in §A.2, we utilize the memory’s peak-to-average
+                                                                          chunking strategy to mitigate the latency overhead induced
+ratio to quantify the fluctuation of activation memory usage.
+                                                                          by chunking operations while maintaining the same Lmax .
+M OSAIC exhibits an average 2.71× reduction in ratio when
+                                                                          To evaluate this, we compare M OSAIC against M OSAIC-FC,
+chunking is enabled; notably, the ratio is lower even before
+                                                                          a baseline that statically applies the configuration supporting
+chunking activates because the mask-only kernel reduces
+                                                                          Lmax across all context lengths.
+logits memory. This effectively resolves spikes, which di-
+rectly translates to a higher Lmax .                                      Our evaluation confirms that both strategies achieve iden-
+                                                                          tical Lmax . As shown in Figure 14, M OSAIC achieves a
+Second, existing systems rely on myopic memory plan-
+                                                                          5.5%–21.5% latency reduction within the 32k context range
+ning, leading to external fragmentation and inflated reserved
+                                                                          compared to M OSAIC-FC. This reduction is particularly
+memory compared to the theoretical peak, evidenced by
+                                                                          pronounced at shorter context lengths, where the relative
+a 21.78%–78.33% inflation rate in Figure 12. In contrast,
+                                                                          overhead of chunking is higher. By dynamically disabling
+M OSAIC employs a global manager to eliminate external
+                                                                          chunking for short contexts, M OSAIC effectively eliminates
+fragmentation and optimize operators for placement-aware
+                                                                          this unnecessary overhead.
+execution (e.g., replacing Dream’s unique logits shift with
+a memory-saving, token-level alternative), collectively en-               Efficiency of bottleneck-driven search. We compare M O -
+   1
+                                                                          SAIC ’s bottleneck-driven search with M OSAIC -BF, which
+     Unlike autoregressive models, dLLMs operate via iterative de-
+                                                                          uses brute-force search. Both reach the same Lmax , while
+noising steps without distinct prefill and decode phases, rendering
+metrics like TTFT and TPOT inapplicable.                                  M OSAIC ’s search latency is only 0.28%–0.32% of brute-
+
+
+                                                                      7
+
+===== PDF p.8 =====
+M OSAIC : Unlocking Over 30× Context Length for Diffusion LLMs Inference
+
+                                                                         PyNative        Mosaic-Torch              Mosaic-Compile  Mosaic
+                                                                                                               1024k
+                  Max Length
+
+
+
+
+                                                                                                      Max Length
+                           256k                                                                                 256k
+                            64k                                                                                  64k
+                            16k                                                                                  16k
+                             4k 0.1 0.5 0.9 rp 0.1 0.5 0.9 rp 0.1 0.5 0.9 rp                                      4k 0.1 0.5 0.9 rp 0.1 0.5 0.9 rp 0.1 0.5 0.9 rp
+                                   LLaDA            Dream      LLaDA-MoE                                                 LLaDA          Dream       LLaDA-MoE
+                                              (a) RTX3090-24GB                                                                      (b) A100-40GB
+                               Figure 11. End-to-end performance evaluation comparing Lmax of M OSAIC and baselines across prompt-to-total ratios rp .
+
+
+                                          LLaDA             Dream               LLaDA-MoE                                                              Mosaic-ILP    Mosaic
+
+
+
+
+                                                                                                               Latency (ms)
+                                                                                                                               103
+  Inflation Rate
+
+
+
+
+                                                                                                                 Planning
+                    0.75            RTX3090-24GB           RTX3090-24GB             RTX3090-24GB                               102
+                    0.50                                                                                                       101
+                    0.25                                                                                                       100
+                    0.00                                                                                                      10 1   LLaDA    Dream   LLaDA-MoE     LLaDA      Dream   LLaDA-MoE
+                                                                                                                                         (a)RTX3090-24GB                    (b)A100-40GB
+                          1k
+                            k
+                            k
+                            k
+                            k
+                                                     1k
+
+                                                             k
+
+                                                                     k
+
+                                                                             1k
+                                                                                  k
+                                                                                         k
+                                                                                             k
+                         16
+                         32
+                         48
+                         64
+
+
+
+                                                           16
+
+                                                                   32
+
+
+
+                                                                                 16
+                                                                                      32
+                                                                                            48
+                               Context Length(tokens) Context Length(tokens) Context Length(tokens)
+                                                                                                                                      Figure 16. Comparison of planning latency.
+                                      Figure 12. Inflation rates of baselines.
+
+                     +Global Manager       +Mask-Only  +Lazy Chunking
+Lmax multiplier
+
+
+
+
+              64x                              64x                                                                 tion confirms that both achieve the same Lmax , while first-fit
+              16x                              16x
+               4x                               4x                                                                 reduces planning latency to 0.1%–4.3% of ILP (Figure 16).
+               1x PyNative Mosaic- Mosaic- 1x PyNative Mosaic- Mosaic-                                             This translates to a 7.1%–36.7% reduction in overall latency
+                              Torch    Compile             Torch    Compile
+                        (a) RTX3090-24GB              (b) A100-40GB                                                versus M OSAIC-ILP (Figure 14).
+   Figure 13. Impact of the global memory manager, mask-only
+   kernel, and lazy chunking on Lmax .                                                                             5.4. Scalability and Compatibility
+                                                                                                                   Having demonstrated the effectiveness of M OSAIC’s core
+                                   Mosaic-FC        Mosaic-BF      Mosaic-ILP      Mosaic
+                  10                LLaDA                   Dream                 LLaDA-MoE                        components, we further evaluate its robustness in broader,
+                                                                                                                   real-world deployment scenarios. Specifically, to verify
+ Latency(s)
+
+
+
+
+                    1                                                                                              M OSAIC’s scalability across hardware configurations and
+                  0.1                                                                                              high-concurrency workloads, as well as its compatibility
+                               1k 4k 8k 16k            1k 4k 8k 16k             1k 4k 8k 16k                       with existing tailored inference stacks, we extend our evalu-
+                         Context Length (tokens) Context Length (tokens) Context Length (tokens)
+                                                       (a) RTX3090-24GB                                            ation to the following three advanced settings.
+ Latency(s)
+
+
+
+
+                    1                                                                                              Scalability to Multi-GPU Settings. We extended M OSAIC
+                                                                                                                   to support multi-GPU inference environments. Evaluated
+                  0.1
+                                                                                                                   on the LLaDA model across 2 GPUs, M OSAIC achieves a
+                               1k 4k 8k 16k            1k 4k 8k 16k             1k 4k 8k 16k
+                         Context Length (tokens) Context Length (tokens) Context Length (tokens)                   12.30× and 14.92× context length extension under Tensor
+                                                         (b) A100-40GB                                             Parallelism (TP2) and Pipeline Parallelism (PP2), respec-
+   Figure 14. Impact of search, planning, and chunking strategies on                                               tively, compared to the P Y NATIVE baseline.
+   end-to-end latency.
+                                                                                                                   In distributed inference settings, the overall expansion ra-
+                                                                                                                   tio is naturally influenced by the necessary communication
+                                                       Mosaic-BF      Mosaic
+Latency (ms)
+
+
+
+
+                       103                                                                                         buffers. As the context scales to extreme lengths, the mem-
+                       102
+   Search
+
+
+
+
+                       101                                                                                         ory footprint of these fixed communication buffers (e.g.,
+                       100
+                      10 1        LLaDA     Dream    LLaDA-MoE       LLaDA       Dream   LLaDA-MoE                 for inter-GPU tensor passing) grows linearly. While M O -
+                                       (a)RTX3090-24GB                       (b)A100-40GB                          SAIC effectively eliminates the computation activation bot-
+                                    Figure 15. Comparison of search latency.                                       tleneck, these unoptimizable communication buffers eventu-
+                                                                                                                   ally consume a significant proportion of the GPU memory,
+                                                                                                                   inherently bounding the theoretical upper limit of the cur-
+    force (Figure 15). This reduces short-context latency by                                                       rent context extension. Nevertheless, M OSAIC still delivers
+    22.3%–70.7% relative to M OSAIC-BF (Figure 14); the gap                                                        meaningful capacity gains, demonstrating its robustness
+    narrows at long contexts where computation dominates.                                                          under distributed environments.
+    Efficiency of first-fit planning. M OSAIC employs a first-fit                                                  Compatibility with KV-Cache Frameworks. While M O -
+    strategy to determine tensor offsets. We compare it against                                                    SAIC achieves maximum context extensions of over 32×
+    M OSAIC-ILP, a baseline utilizing integer linear program-                                                      on standard lossless baselines where intermediate activa-
+    ming (ILP) for theoretically optimal planning. Our evalua-                                                     tions form the strict memory bottleneck, it remains highly
+
+                                                                                                        8
+
+===== PDF p.9 =====
+M OSAIC : Unlocking Over 30× Context Length for Diffusion LLMs Inference
+
+complementary to tailored KV-cache stacks. Unlike stan-             triggers “graph breaks” (Ansel et al., 2024) that produce
+dard lossless execution, integrating KV caching into dLLMs          isolated sub-graphs, resulting in suboptimal reuse.
+typically requires lossy approximations. This structurally
+                                                                    Persistent State Memory Optimization. Systems like
+shifts the memory bottleneck from transient activations to
+                                                                    vLLM (Kwon et al., 2023) and vAttention (Prabhu et al.,
+persistent KV states, inherently reducing the optimization
+                                                                    2025) optimize AR inference by managing the persistent
+scope for activation memory management.
+                                                                    KV-Cache via paging or virtual memory. Additionally, KV-
+Nevertheless, by porting M OSAIC to specialized frame-              Cache offloading alleviates the memory pressure (Hu et al.,
+works, namely Fast-dLLM (Wu et al., 2025), dInfer (Ma               2025a), while prefix-aware attention accelerates inference
+et al., 2025), and Elastic-Cache (Nguyen-Tri et al., 2025),         by aggregating KV states (Yi et al., 2025). However, these
+we demonstrate its robust compatibility. Evaluated on an            are ill-suited for bidirectional dLLMs.
+NVIDIA RTX 3090 with 24GB VRAM using the LLaDA-
+8B model, M OSAIC still extends the supported context               7. Conclusion
+lengths by 3.75×, 3.00×, and 2.27×, respectively. Fur-
+thermore, M OSAIC achieves these capacity extensions un-            In this paper, we identified the fundamental mismatch be-
+der identical hardware configurations without incurring any         tween conventional memory management and the unique re-
+latency degradation.                                                quirements of dLLMs, specifically the shift from KV-Cache
+                                                                    to transient activations and dynamic memory peaks. To
+Performance on Batched Workloads. To validate the prac-
+                                                                    bridge this gap, we proposed M OSAIC, a system that harmo-
+tical utility of M OSAIC under real-world serving scenarios,
+                                                                    nizes mask-only computation, global graph planning, and
+we further evaluate its scalability with batched workloads.
+                                                                    adaptive lazy chunking. It effectively eliminates redundancy
+In high-concurrency environments, the memory footprint
+                                                                    and fragmentation, enabling 15.30–32.34× longer context
+of intermediate activations scales linearly with the total
+                                                                    length and 2.5%–55.4% lower latency. Crucially, M OSAIC
+number of processed tokens. Consequently, under a fixed
+                                                                    is training-free and preserves exact model outputs. Our
+hardware memory ceiling and a uniform sequence length
+                                                                    work paves the way for scalable dLLM inference, making
+across all requests, extending the maximum context length
+                                                                    long-context applications more accessible and efficient.
+mathematically equates to expanding the batch capacity.
+Our empirical evaluations confirm this theoretical equiv-           Acknowledgements
+alence. Specifically, when testing with identically sized
+requests, M OSAIC increases the maximum supported batch             This work was supported by the National Natural Science
+size by the exact same multipliers observed in the single-          Foundation of China under Grant 62572341.
+request context extensions, achieving an average increase
+of 32.34×, 25.41×, and 15.30× over P Y NATIVE, M OSAIC-             Impact Statement
+T ORCH, and M OSAIC-C OMPILE, respectively. Furthermore,
+within the executable range of these baselines, M OSAIC             This paper presents work whose goal is to advance the field
+gracefully handles batched execution without incurring any          of Machine Learning. There are many potential societal
+latency penalty.                                                    consequences of our work, none which we feel must be
+                                                                    specifically highlighted here.
+6. Related Work
+                                                                    References
+Diffusion Language Models and Optimization. Text diffu-
+sion has evolved from continuous approximations (Li et al.,         Ansel, J., Yang, E., He, H., Gimelshein, N., Jain, A., Voz-
+2022; Gong et al., 2022) to discrete token-space formula-             nesensky, M., Bao, B., Bell, P., Berard, D., Burovski, E.,
+tions (Austin et al., 2021; Han et al., 2023), culminating            et al. Pytorch 2: Faster machine learning through dynamic
+in Transformer-based dLLMs (Nie et al., 2025; Ye et al.,              python bytecode transformation and graph compilation.
+2025) that leverage bidirectional attention. While one line           In Proceedings of the 29th ACM International Conference
+of work uses KV-Cache (Wu et al., 2025) to accelerate infer-          on Architectural Support for Programming Languages
+ence, it re-introduces the persistent KV bottleneck and may           and Operating Systems, Volume 2, pp. 929–947, 2024.
+compromise generation quality (Wu et al., 2025; Liu et al.,
+2025b; Hu et al., 2025b). In contrast, we target the standard       Austin, J., Johnson, D. D., Ho, J., Tarlow, D., and Van
+bidirectional dLLMs to ensure strict global consistency.              Den Berg, R. Structured denoising diffusion models in
+                                                                      discrete state-spaces. Advances in neural information
+Activation Memory Reuse. Mainstream frameworks opti-                  processing systems, 34:17981–17993, 2021.
+mize memory via liveness analysis (Pisarchyk & Lee, 2020;
+Ansel et al., 2024). However, fragile dynamic capture often         Chen, T., Moreau, T., Jiang, Z., Zheng, L., Yan, E., Shen, H.,
+
+                                                                9
+
+===== PDF p.10 =====
+M OSAIC : Unlocking Over 30× Context Length for Diffusion LLMs Inference
+
+  Cowan, M., Wang, L., Hu, Y., Ceze, L., et al. {TVM}: An                Li, X., Thickstun, J., Gulrajani, I., Liang, P. S., and
+  automated {End-to-End} optimizing compiler for deep                      Hashimoto, T. B. Diffusion-lm improves controllable
+  learning. In 13th USENIX Symposium on Operating Sys-                     text generation. Advances in neural information process-
+  tems Design and Implementation (OSDI 18), pp. 578–594,                   ing systems, 35:4328–4343, 2022.
+  2018.
+                                                                         Liang, W., Liu, T., Wright, L., Constable, W., Gu, A.,
+Gale, T., Zaharia, M., Young, C., and Elsen, E. Sparse gpu                 Huang, C.-C., Zhang, I., Feng, W., Huang, H., Wang,
+  kernels for deep learning. In SC20: International Con-                   J., Purandare, S., Nadathur, G., and Idreos, S. Torchtitan:
+  ference for High Performance Computing, Networking,                      One-stop pytorch native solution for production ready
+  Storage and Analysis, pp. 1–14. IEEE, 2020.                              LLM pretraining. In The Thirteenth International Confer-
+                                                                           ence on Learning Representations, 2025. URL https:
+Gong, S., Li, M., Feng, J., Wu, Z., and Kong, L. Diffuseq:                 //openreview.net/forum?id=SFN6Wm7YBI.
+  Sequence to sequence text generation with diffusion mod-
+  els. arXiv preprint arXiv:2210.08933, 2022.                            Lin, J., Chen, W.-M., Lin, Y., Gan, C., Han, S., et al. Mcunet:
+                                                                           Tiny deep learning on iot devices. Advances in neural
+Grattafiori, A., Dubey, A., Jauhri, A., Pandey, A., Kadian,                information processing systems, 33:11711–11722, 2020.
+  A., Al-Dahle, A., Letman, A., Mathur, A., Schelten, A.,
+  Vaughan, A., et al. The llama 3 herd of models. arXiv                  Liu, X., Song, Y., Liu, Z., Huang, Z., Guo, Q., He, Z., and
+  preprint arXiv:2407.21783, 2024.                                         Qiu, X. Longllada: Unlocking long context capabilities in
+                                                                           diffusion llms. arXiv preprint arXiv:2506.14429, 2025a.
+Han, X., Kumar, S., and Tsvetkov, Y. Ssd-lm: Semi-
+  autoregressive simplex-based diffusion language model                  Liu, Z., Yang, Y., Zhang, Y., Chen, J., Zou, C., Wei, Q.,
+  for text generation and modular control. In Proceed-                     Wang, S., and Zhang, L. dllm-cache: Accelerating diffu-
+  ings of the 61st Annual Meeting of the Association for                   sion large language models with adaptive caching. arXiv
+  Computational Linguistics (Volume 1: Long Papers), pp.                   preprint arXiv:2506.06295, 2025b.
+ 11575–11596, 2023.                                                      Ma, Y., Du, L., Wei, L., Chen, K., Xu, Q., Wang, K., Feng,
+He, G., Nie, S., Zhu, F., Zhao, Y., Bai, T., Yan, R., Fu, J., Li,         G., Lu, G., Liu, L., Qi, X., et al. dinfer: An efficient in-
+  C., and Yuan, B. Ultrallada: Scaling the context length to              ference framework for diffusion language models. arXiv
+ 128k for diffusion large language models. arXiv preprint                 preprint arXiv:2510.08666, 2025.
+  arXiv:2510.10481, 2025.                                                Minaee, S., Mikolov, T., Nikzad, N., Chenaghlu, M., Socher,
+Hu, Y., Liu, X., Yang, G., Li, L., Zeng, K., Zhao, Z., Chen,              R., Amatriain, X., and Gao, J. Large language models: A
+  S., Zhao, L., Li, W., and Li, K. Tightllm: Maximiz-                     survey. arXiv preprint arXiv:2402.06196, 2024.
+  ing throughput for llm inference via adaptive offloading               Nguyen-Tri, Q., Ranjan, M., and Shen, Z. Attention is all
+  policy. IEEE Transactions on Computers, 2025a.                          you need for kv cache in diffusion llms. arXiv preprint
+Hu, Z., Meng, J., Akhauri, Y., Abdelfattah, M. S., Seo, J.-s.,             arXiv:2510.14973, 2025.
+  Zhang, Z., and Gupta, U. Accelerating diffusion language               Nie, S., Zhu, F., You, Z., Zhang, X., Ou, J., Hu, J., Zhou, J.,
+  model inference via efficient kv caching and guided dif-                 Lin, Y., Wen, J.-R., and Li, C. Large language diffusion
+  fusion. arXiv preprint arXiv:2505.21467, 2025b.                          models. arXiv preprint arXiv:2502.09992, 2025.
+Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu,                  Paszke, A., Gross, S., Massa, F., Lerer, A., Bradbury, J.,
+ C. H., Gonzalez, J., Zhang, H., and Stoica, I. Efficient                  Chanan, G., Killeen, T., Lin, Z., Gimelshein, N., Antiga,
+ memory management for large language model serving                        L., et al. Pytorch: An imperative style, high-performance
+ with pagedattention. In Proceedings of the 29th sym-                      deep learning library. Advances in neural information
+ posium on operating systems principles, pp. 611–626,                      processing systems, 32, 2019.
+ 2023.
+                                                                         Pisarchyk, Y. and Lee, J. Efficient memory manage-
+Lamprou, I., Zhang, Z., de Juan, J., Yang, H., Lai, Y., Filhol,            ment for deep neural net inference. arXiv preprint
+  E., and Bastoul, C. Safe optimized static memory alloca-                 arXiv:2001.03288, 2020.
+  tion for parallel deep learning. Proceedings of Machine
+  Learning and Systems, 5:305–324, 2023.                                 Prabhu, R., Nayak, A., Mohan, J., Ramjee, R., and Panwar,
+                                                                           A. vattention: Dynamic memory management for serv-
+Li, H., Li, Y., Tian, A., Tang, T., Xu, Z., Chen, X., Hu, N.,              ing llms without pagedattention. In Proceedings of the
+  Dong, W., Li, Q., and Chen, L. A survey on large lan-                    30th ACM International Conference on Architectural Sup-
+  guage model acceleration based on kv cache management.                   port for Programming Languages and Operating Systems,
+  arXiv preprint arXiv:2412.19442, 2024.                                   Volume 1, pp. 1133–1150, 2025.
+
+                                                                    10
+
+===== PDF p.11 =====
+M OSAIC : Unlocking Over 30× Context Length for Diffusion LLMs Inference
+
+Sahoo, S., Arriola, M., Schiff, Y., Gokaslan, A., Marroquin,
+  E., Chiu, J., Rush, A., and Kuleshov, V. Simple and
+  effective masked diffusion language models. Advances
+  in Neural Information Processing Systems, 37:130136–
+  130184, 2024.
+Steiner, B., Elhoushi, M., Kahn, J., and Hegarty, J. Model:
+  memory optimizations for deep learning. In International
+  Conference on Machine Learning, pp. 32618–32632.
+  PMLR, 2023.
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+  L., Gomez, A. N., Kaiser, Ł., and Polosukhin, I. At-
+  tention is all you need. Advances in neural information
+  processing systems, 30, 2017.
+Wu, C., Zhang, H., Xue, S., Liu, Z., Diao, S., Zhu, L., Luo,
+ P., Han, S., and Xie, E. Fast-dllm: Training-free acceler-
+ ation of diffusion llm by enabling kv cache and parallel
+ decoding. arXiv preprint arXiv:2505.22618, 2025.
+
+Xie, Z., Ye, J., Zheng, L., Gao, J., Dong, J., Wu, Z., Zhao,
+  X., Gong, S., Jiang, X., Li, Z., et al. Dream-coder 7b: An
+  open diffusion language model for code. arXiv preprint
+  arXiv:2509.01142, 2025.
+Yang, A., Li, A., Yang, B., Zhang, B., Hui, B., Zheng, B.,
+  Yu, B., Gao, C., Huang, C., Lv, C., et al. Qwen3 technical
+  report. arXiv preprint arXiv:2505.09388, 2025.
+Ye, J., Xie, Z., Zheng, L., Gao, J., Wu, Z., Jiang, X., Li,
+  Z., and Kong, L. Dream 7b: Diffusion large language
+  models. arXiv preprint arXiv:2508.15487, 2025.
+
+Yi, J., Zhao, Z., Hu, Y., Yan, K., Sun, W., Wang, H., Zhao,
+  L., Zhang, Y., Li, W., and Li, K. Pat: Accelerating llm de-
+  coding via prefix-aware attention with resource efficient
+  multi-tile kernel. arXiv preprint arXiv:2511.22333, 2025.
+Yu, R., Li, Q., and Wang, X. Discrete diffusion in large lan-
+  guage and multimodal models: A survey. arXiv preprint
+  arXiv:2506.13759, 2025.
+Zhao, W. X., Zhou, K., Li, J., Tang, T., Wang, X., Hou, Y.,
+  Min, Y., Zhang, B., Zhang, J., Dong, Z., et al. A survey of
+  large language models. arXiv preprint arXiv:2303.18223,
+  1(2), 2023.
+Zhu, F., You, Z., Xing, Y., Huang, Z., Liu, L., Zhuang, Y.,
+  Lu, G., Wang, K., Wang, X., Wei, L., et al. Llada-moe:
+  A sparse moe diffusion language model. arXiv preprint
+  arXiv:2509.24389, 2025.
+
+
+
+
+                                                                11
+
+===== PDF p.12 =====
+M OSAIC : Unlocking Over 30× Context Length for Diffusion LLMs Inference
+
+A. Appendix
+A.1. Porting Validation and Latency Analysis
+
+                                                              PyNative                          Mosaic-Torch              Mosaic-Compile           Mosaic (rp = 0.1)           Mosaic (rp = 0.5)        Mosaic (rp = 0.9)
+  A100-40GB RTX3090-24GB
+
+
+
+                                                      1.0                                                                  1.0                                                      1.0
+                      Relative Latency (× PyNative)
+
+
+
+
+                                                      0.5                                                                  0.5                                                      0.5
+
+                                                      0.0   1k                                 4k             8k           0.0         1k                 4k             8k         0.0          1k             4k          8k
+                                                      1.0                                                                  1.0                                                      1.0
+
+                                                      0.5                                                                  0.5                                                      0.5
+
+                                                      0.0   1k                                 4k             16k          0.0         1k                 4k             16k        0.0          1k             4k          16k
+                                                            Context Length (tokens)                                                   Context Length (tokens)                                   Context Length (tokens)
+                                                                    LLaDA                                                                     Dream                                                  LLaDA-MoE
+Figure 17. Latency comparison validating that the porting to vLLM incurs no performance penalty, while M OSAIC-C OMPILE trades
+latency for increased context length.
+
+Porting validation. As shown in Figure 17, M OSAIC-T ORCH significantly outperforms P Y NATIVE. Leveraging vLLM’s
+efficient infrastructure such as operator optimizations, it not only reduces latency by 3.1%–41.2% but also increases the
+maximum context length Lmax by 7.7%–48.1%, as shown in Figure 11. These results confirm that our porting to vLLM
+incurs no performance penalty and yields comprehensive performance gains.
+Latency analysis. When further enabling torch.compile on M OSAIC-T ORCH, we observe a trade-off. Although
+M OSAIC-C OMPILE extends Lmax by 45.5%–97.1%, it suffers from latency regression due to the overhead associated with
+dynamic graph capture and compilation, causing its latency to exceed that of M OSAIC-T ORCH. In contrast, M OSAIC incurs
+no compromise on latency. It achieves a 2.5%–24.9% reduction compared to M OSAIC-T ORCH and M OSAIC-C OMPILE, and
+a 5.9%–55.4% reduction compared to P Y NATIVE. This significant gain stems from the mask-only logits kernel eliminating
+redundant computations and the graph registration system bypassing the dynamic graph capture overhead inherent in
+torch.compile, combined with the inherent engineering efficiencies of the vLLM framework.
+
+A.2. Peak-to-Average Ratio Analysis
+To further analyze the memory characteristics of dLLMs, we utilize the memory’s peak-to-average ratio (PAR) to quantify the
+fluctuation of activation memory usage. A higher PAR indicates severe memory spikes that limit the maximum supportable
+context length Lmax .
+
+                                                                                              Baselines without chunking              Mosaic (rp = 0.1)        Mosaic (rp = 0.5)        Mosaic (rp = 0.9)
+                                                            A100-40GB RTX3090-24GB
+
+
+
+
+                                                                                 10
+                                                               Peak-to-Average Ratio
+
+
+
+
+                                                                                       5
+
+                                                                                       01k       4k     16k         64k          1k         4k     16k         64k   256k 1k        4k       16k      64k   256k
+                                                                                 10
+
+                                                                                       5
+
+                                                                                       01k     4k     16k     64k 256k           1k       4k     16k 64k 256k               1k     4k      16k 64k 256k 1024k
+                                                                                             Context Length (tokens)                  Context Length (tokens)                    Context Length (tokens)
+                                                                                                     LLaDA                                    Dream                                   LLaDA-MoE
+Figure 18. Comparison of activation memory peak-to-average ratio (PAR) across context lengths. Baselines without chunking refer to
+P Y NATIVE, M OSAIC-T ORCH, and M OSAIC-C OMPILE.
+
+
+                                                                                                                                                 12
+
+===== PDF p.13 =====
+M OSAIC : Unlocking Over 30× Context Length for Diffusion LLMs Inference
+
+As shown in Figure 18, M OSAIC exhibits a significantly lower ratio when chunking is enabled compared to baselines.
+Notably, the ratio is lower even before chunking activates because the mask-only kernel reduces logits memory. This
+reduction in PAR confirms that M OSAIC effectively smooths out memory spikes, allowing the system to support significantly
+longer contexts within the same memory budget.
+
+
+
+
+                                                           13

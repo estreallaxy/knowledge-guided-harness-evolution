@@ -1,0 +1,247 @@
+#!/bin/bash
+# ParaCodex Environment Setup Script
+# This script helps set up the environment for running the ParaCodex pipeline
+
+set -e
+
+echo "=== ParaCodex Environment Setup ==="
+echo ""
+
+# Function to check if command exists
+command_exists() {
+    command -v "$1" &> /dev/null
+}
+
+# Check Node.js
+echo "Checking Node.js..."
+if command_exists node; then
+    NODE_VERSION=$(node --version)
+    echo "✅ Node.js $NODE_VERSION found"
+else
+    echo "❌ Node.js not found."
+    echo "   Install with nvm (recommended):"
+    echo "     curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
+    echo "     source ~/.bashrc"
+    echo "     nvm install 22"
+    echo "   Or with apt:"
+    echo "     curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -"
+    echo "     sudo apt-get install -y nodejs"
+fi
+
+# Check npm
+echo "Checking npm..."
+if command_exists npm; then
+    NPM_VERSION=$(npm --version)
+    echo "✅ npm $NPM_VERSION found"
+else
+    echo "❌ npm not found. Install Node.js first (includes npm)."
+fi
+
+# Check and install Codex CLI
+echo ""
+echo "Checking Codex CLI..."
+if command_exists codex; then
+    CODEX_VERSION=$(codex --version 2>&1 | head -1)
+    echo "✅ Codex CLI found: $CODEX_VERSION"
+else
+    echo "❌ Codex CLI not found."
+    if command_exists npm; then
+        echo "   Installing Codex CLI..."
+        npm install -g @openai/codex
+        if [ $? -eq 0 ]; then
+            echo "✅ Codex CLI installed successfully"
+        else
+            echo "❌ Failed to install Codex CLI"
+        fi
+    else
+        echo "   Install npm first, then run: npm install -g @openai/codex"
+    fi
+fi
+
+# Check Python
+echo ""
+echo "Checking Python..."
+if command_exists python3; then
+    PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
+    echo "✅ Python $PYTHON_VERSION found"
+else
+    echo "❌ Python 3 not found. Please install Python 3.8 or later."
+    exit 1
+fi
+
+# Check pip
+echo "Checking pip..."
+if command_exists pip || command_exists pip3; then
+    echo "✅ pip found"
+else
+    echo "❌ pip not found. Installing pip..."
+    sudo apt-get update
+    sudo apt-get install -y python3-pip
+fi
+
+# Install Python dependencies
+echo ""
+echo "Installing Python dependencies from requirements.txt..."
+if [ -f "requirements.txt" ]; then
+    # Use pip3 if available, otherwise use pip
+    PIP_CMD=""
+    if command_exists pip3; then
+        PIP_CMD="pip3"
+    elif command_exists pip; then
+        PIP_CMD="pip"
+    else
+        echo "❌ Neither pip nor pip3 found. Please install pip first."
+        PIP_CMD=""
+    fi
+    
+    if [ -n "$PIP_CMD" ]; then
+        if $PIP_CMD install -r requirements.txt; then
+            echo "✅ Python dependencies installed"
+        else
+            echo "⚠️  Some Python dependencies may have failed to install"
+        fi
+    fi
+else
+    echo "⚠️  requirements.txt not found in current directory"
+fi
+
+# Check NVIDIA HPC SDK
+echo ""
+echo "Checking NVIDIA HPC SDK..."
+if command_exists nvc++; then
+    NVC_VERSION=$(nvc++ --version 2>&1 | head -1)
+    echo "✅ NVIDIA HPC SDK found: $NVC_VERSION"
+else
+    echo "❌ NVIDIA HPC SDK (nvc++) not found"
+    echo "   To install automatically, run:"
+    echo "     sudo ./install_nvidia_hpc_sdk.sh"
+    echo "   Or install manually from: https://developer.nvidia.com/hpc-sdk"
+    echo "   After installation, add to PATH:"
+    echo "     export PATH=/opt/nvidia/hpc_sdk/Linux_x86_64/25.7/compilers/bin:\$PATH"
+fi
+
+# Check Nsight Systems
+echo ""
+echo "Checking NVIDIA Nsight Systems..."
+if command_exists nsys; then
+    NSYS_VERSION=$(nsys --version 2>&1 | head -1)
+    echo "✅ Nsight Systems found: $NSYS_VERSION"
+else
+    echo "❌ Nsight Systems (nsys) not found"
+    echo "   Note: Nsight Systems is bundled with NVIDIA HPC SDK."
+    echo "   If you have HPC SDK installed, ensure it's in your PATH."
+    echo "   Otherwise, install HPC SDK: sudo ./install_nvidia_hpc_sdk.sh"
+    echo "   Or install separately from: https://developer.nvidia.com/nsight-systems"
+fi
+
+# Check GPU
+echo ""
+echo "Checking GPU..."
+if command_exists nvidia-smi; then
+    GPU_INFO=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+    echo "✅ GPU found: $GPU_INFO"
+else
+    echo "❌ nvidia-smi not found. GPU may not be accessible."
+fi
+
+# Install pipeline Node.js dependencies
+echo ""
+echo "Installing pipeline Node.js dependencies..."
+if command_exists npm; then
+    if [ -f "pipeline/package.json" ]; then
+        (cd pipeline && npm install)
+        if [ $? -eq 0 ]; then
+            echo "✅ Pipeline Node.js dependencies installed"
+        else
+            echo "⚠️  Some pipeline Node.js dependencies may have failed to install"
+        fi
+    else
+        echo "⚠️  pipeline/package.json not found — skipping"
+    fi
+else
+    echo "⚠️  npm not found — skipping pipeline Node.js dependencies"
+fi
+
+# Install webapp Python dependencies
+echo ""
+echo "Installing webapp Python dependencies..."
+if [ -f "pipeline/webapp/requirements.txt" ]; then
+    PIP_CMD=""
+    if command_exists pip3; then
+        PIP_CMD="pip3"
+    elif command_exists pip; then
+        PIP_CMD="pip"
+    fi
+    if [ -n "$PIP_CMD" ]; then
+        if $PIP_CMD install -r pipeline/webapp/requirements.txt; then
+            echo "✅ Webapp Python dependencies installed"
+        else
+            echo "⚠️  Some webapp dependencies may have failed to install"
+        fi
+    fi
+else
+    echo "⚠️  pipeline/webapp/requirements.txt not found — skipping"
+fi
+
+# Install ParaCodex skills for Codex CLI
+echo ""
+echo "Installing ParaCodex skills..."
+if [ -d "paracodex_skills/paracodex" ]; then
+    mkdir -p ~/.codex/skills
+    cp -r paracodex_skills/paracodex ~/.codex/skills/paracodex
+    if [ $? -eq 0 ]; then
+        echo "✅ ParaCodex skills installed to ~/.codex/skills/paracodex"
+    else
+        echo "❌ Failed to install ParaCodex skills"
+    fi
+else
+    echo "⚠️  paracodex_skills/ not found — skipping skills installation"
+fi
+
+# Check OpenAI API Key / Codex Login
+echo ""
+echo "Checking OpenAI API Access..."
+if [ -z "$OPENAI_API_KEY" ]; then
+    # Check if codex is logged in
+    if command_exists codex; then
+        CODEX_LOGIN_STATUS=$(codex login status 2>&1)
+        if echo "$CODEX_LOGIN_STATUS" | grep -qi "logged in\|authenticated"; then
+            echo "✅ Codex CLI is logged in"
+        else
+            echo "⚠️  OPENAI_API_KEY not set and Codex not logged in"
+            echo "   Option 1 (Pro Users): Login with: codex login"
+            echo "   Option 2: Set API key: export OPENAI_API_KEY='your-api-key'"
+            echo "   Add to ~/.bashrc for persistence"
+        fi
+    else
+        echo "⚠️  OPENAI_API_KEY not set"
+        echo "   Set it with: export OPENAI_API_KEY='your-api-key'"
+        echo "   Or login with Codex: codex login (for Pro users)"
+    fi
+else
+    echo "✅ OPENAI_API_KEY is set"
+fi
+
+# Summary
+echo ""
+echo "=== Setup Summary ==="
+MISSING=0
+
+if ! command_exists node; then ((MISSING++)); fi
+if ! command_exists npm; then ((MISSING++)); fi
+if ! command_exists codex; then ((MISSING++)); fi
+if ! command_exists python3; then ((MISSING++)); fi
+if ! command_exists nvc++; then ((MISSING++)); fi
+if ! command_exists nsys; then ((MISSING++)); fi
+if [ -z "$OPENAI_API_KEY" ]; then ((MISSING++)); fi
+
+if [ $MISSING -eq 0 ]; then
+    echo "✅ All required dependencies are installed!"
+    echo "   You can now run the ParaCodex pipeline."
+else
+    echo "⚠️  $MISSING required dependencies are missing."
+    echo "   Please install the missing dependencies listed above."
+fi
+
+echo ""
+echo "Run './verify_environment.sh' to verify your setup."

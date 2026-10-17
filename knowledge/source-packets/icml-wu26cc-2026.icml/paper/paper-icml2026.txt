@@ -1,0 +1,1108 @@
+===== PDF p.1 =====
+Securing Multi-Agent Systems Against Corruptions via
+                            Node Contribution Backpropagation
+
+
+                  Chengcan Wu 1 * Zhixin Zhang 1 * Mingqian Xu 1 Zeming Wei 1 † Meng Sun 1 †
+
+
+                         Abstract                                  However, due to the increased structural complexity of
+                                                                   MAS, agents are exposed to more complex and frequent
+      Multi-Agent Systems (MAS) have become a
+                                                                   information exchanges, making the system more vulnera-
+      prevalent paradigm for Large Language Model
+                                                                   ble to attacks. Unlike attacks targeting individual LLMs,
+      (LLM) applications. However, the complex multi-
+                                                                   attacks in MAS exhibit contagious characteristics (Wang
+      agent design in MAS introduces unique trust-
+                                                                   et al., 2025a; He et al., 2025b): by manipulating the output
+      worthiness concerns: adversarial agents can in-
+                                                                   of one LLM to introduce harmful content, the malicious in-
+      ject misleading information that propagates conta-
+                                                                   fluence propagates to adjacent LLMs, resulting in cascading
+      giously through the system, corrupting benign
+                                                                   failures across the system (Tianjie et al.; Zheng et al., 2025).
+      agents and leading to false outputs. Existing
+                                                                   Other strategies achieve similar effects by analyzing histori-
+      graph-based defenses model agents as nodes
+                                                                   cal interaction traces to craft adversarial prompts targeting
+      and communications as edges, yet are limited
+                                                                   specific agents (Lee et al., 2025). In this paper, we refer to
+      to static-graph defenses. In this paper, we pro-
+                                                                   such contagious, propagation-based attacks as corruption
+      pose a dynamic defense paradigm that models
+                                                                   attacks against MAS.
+      MAS communication as a signed directed acyclic
+      graph and computes each agent’s contribution                 To defend against these attacks, several strategies have
+      to the final decision via backward propagation,              been proposed. Output-based defenses such as BlockA-
+      enabling accurate identification and isolation of            gents (Chen et al., 2024a) employ multi-round debate, while
+      malicious agents to secure multi-agent task col-             AgentForest (Li et al., 2024) identifies compromised agents
+      laboration. Experimental results in complex                  by comparing output similarity; yet these methods remain
+      and dynamic MAS environments demonstrate                     vulnerable to subtle textual perturbations (Lin et al., 2024;
+      that our method notably outperforms existing                 Böke et al., 2025; Xu et al., 2026) and can be bypassed
+      MAS defense mechanisms, providing an effective               when attackers directly target the evaluator (Chen et al.,
+      guardrail for trustworthy MAS deployment. Our                2024a). A complementary line of work models MAS from
+      code is available at https://github.com/                     a graph perspective, treating agents as nodes and interac-
+      ChengcanWu/BPD.                                              tions as directed edges (Liu et al., 2026; Bei et al., 2025).
+                                                                   Within this framework, Huang et al. (2025) empirically
+                                                                   compare topologies to identify robust configurations, but
+1. Introduction                                                    such static designs cannot adapt to evolving attacks or dy-
+                                                                   namic environments (Yan et al., 2026; Liu et al., 2026).
+Large Language Models (LLMs) have been integrated with             G-Safeguard (Wang et al., 2025b) moves toward dynamic
+external tools to form autonomous agents (Wang et al.,             defense by training a classifier on each agent’s internal states
+2024a). To enhance the functionality of LLMs, research             and local communications, yet it relies solely on local sig-
+has shifted from single-agent architectures to Multi-Agent         nals and fails to capture how corrupted information propa-
+Systems (MAS) (Yan et al., 2025), leading to significant           gates to the final decision, thus lacking the global verifica-
+progress across domains such as software engineering (He           tion needed for reliable detection.
+et al., 2025a), market analysis (Chudziak & Wawer, 2024),
+and web task execution (Zhang et al., 2025).                       To address these limitations, we propose Backward Prop-
+                                                                   agation Detection (BPD), a dynamic defense that reasons
+  *
+   Equal contribution 1 Peking University. † Correspondence        about agent influence globally over the MAS interaction
+to: Zeming Wei <weizeming@stu.pku.edu.cn>, Meng Sun                graph. As outlined in Figure 1, we first reformulate MAS
+<sunm@pku.edu.cn>.
+                                                                   communication as a signed directed acyclic graph (DAG),
+Proceedings of the 43 rd International Conference on Machine       where temporal nodes represent agents at each communi-
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026       cation round, and each edge carries a contribution score
+by the author(s).
+
+                                                               1
+
+===== PDF p.2 =====
+Securing Multi-Agent Systems Against Corruptions via Node Contribution Backpropagation
+
+
+                  Step1：Graph Reconstruction                                                     Step2：Graph Operation
+                     Alice                                                       Answer is                        Carol is
+                                                                                 A, becase...                     wrong...             My
+                                                                                                                                       answer:A
+                                                                                                  1                     1
+ Bob                     reconstruct                                             Answer is                                             My         Final
+                                                                                 A, since...
+                                                                                                 -1                                    answer:B   Answer: B
+                         Carol                                                                                       -1
+                                                                                 Answer is
+                                                                                                                                       My
+                                                                                 B, since...      -1                1                  answer:B
+                                                                                                                                                      Malicious
+            Answer                                                                                                                                    Agent
+            Suggestion                     time 1        time 2         time 3
+                                                                                                 Answer’s          Suggestion’s                       Infetected
+                                                        timeline                                 Score             Score                              Agent
+
+                   Step3：Score Backward                                                          Step4：Graph Repair
+    Score at         Score at        Score at
+                                                                                  Answer is
+    time 1           time 2          time 3   Final  Average Score                A, becase...                                         My
+       -1                -1             -1    Answer Score   Difference                                                                answer:A
+
+
+                                                    A       -1      4/3                                                                           Final
+       -1                -1                 1                                                                                                     Answer: A
+
+                                                    B      -1/3         1                                                                         Deleted
+       1                 1                  1                                                                                                     Answer
+                                                                                                                                                  Deleted
+                                                    B        1     5/3                                                                            Suggestion
+             Malicious        Infetected                                                              Malicious           Infetected
+             Agent            Agent             Malicious Agent：Carol                                 Agent               Agent
+
+
+Figure 1. An overview of our method BPD. In step 1, we reconstruct the MAS as a directed acyclic graph (DAG). In steps 2 and 3, we
+extract the contribution of each agent to the final decision using the contribution score on each edge and backward propagation from the
+final decision. This helps determine the latent malicious agents. We then repair the MAS by removing information sent from the detected
+malicious agents in step 4. The dashed line indicates that the communication edge has been deleted.
+
+indicating whether the receiver disagrees with, ignores, or                      More importantly, under dynamic MAS scenarios where
+agrees with the sender. Given this signed DAG, we compute                        the graph structure and attacker identity change over time,
+every agent’s contribution to the final decision by backward                     competing defenses degrade by an average of 3% while
+propagation from the terminal answer: a PageRank-style                           BPD preserves its static-graph performance, confirming the
+recursion mechanism (Brin et al., 1998; Page et al., 1999),                      benefit of our adaptive analysis. Finally, our defense method
+which exploits the chain-rule structure of the DAG to ag-                        incurs less than 10% additional time overhead while ensur-
+gregate both local agreement and its downstream impact in                        ing the security of the multi-agent system, demonstrating
+a single efficient pass. Under this modeling, agents whose                       strong practical value.
+contribution scores deviate substantially from the majority
+                                                                                 In summary, our contributions in this research are as follows:
+are flagged as latent malicious nodes, and the communica-
+tions they originate are removed to repair the graph. Since
+detection and repair are performed per query rather than                           1. We propose a signed DAG formulation of MAS com-
+through a fixed trained classifier, BPD can immediately                               munication that enables principled, global analysis of
+detect agents exhibiting abnormal behavior after a query,                             agent influence — addressing the key limitation of
+making it adaptive to evolving attacks and dynamic MAS                                existing defenses that rely solely on local signals.
+topologies.                                                                        2. We propose a novel backward propagation method to
+We evaluate BPD across two MAS structures (Flat (Li                                   reliably evaluate the contribution of different agents
+et al., 2023a) and Hierarchical (Chen et al., 2024b)), multi-                         in MAS to detect latent malicious agents and restore
+ple LLM backbones, and benchmarks spanning knowledge                                  system integrity.
+question answering and open-ended generation, under five
+representative corruption attacks against MAS. Through                             3. We demonstrate through comprehensive experiments
+these evaluations, BPD identifies malicious agents with over                          that BPD achieves superior defensive performance
+90% average accuracy, exceeding the strongest baseline, and                           across diverse MAS architectures, attack types, and
+improves task accuracy by 3% to 7% across benchmarks.                                 backbone models, with particular advantage in dy-
+                                                                                      namic scenarios where static defenses degrade signifi-
+Further, the margin widens to around 10% on semantic-
+modification attacks that existing methods struggle to detect.                        cantly.
+
+
+                                                                             2
+
+===== PDF p.3 =====
+Securing Multi-Agent Systems Against Corruptions via Node Contribution Backpropagation
+
+2. Related Work                                                          3.1. MAS Graph
+Corruption Attacks Against MAS. With the rise of multi-                  Temporal DAG Construction. We first introduce modeling
+agent systems, security concerns have attracted increasing at-           an MAS as a graph. Consider a multi-agent system com-
+tention. Existing attacks generally fall into three categories:          posed of n agents, i.e. A = {A(1), . . . , A(n)}. Due to the
+agent compromise, safety manipulation, and perturbation-                 complexity of the MAS structure, its communication graph
+based strategies. Agent compromise inject harmful prompts                can vary widely. However, appropriate processing can trans-
+and fine-tune agents to produce logically rigorous yet in-               form it into a directed acyclic graph (DAG) (Digitale et al.,
+correct explanations, misleading collaborators and derail-               2022). To achieve this, we split the discussion by times-
+ing collective reasoning (Amayuelas et al., 2024). Safety                tamps. Specifically, assume an MAS goes through T rounds
+manipulation exploit safety defenses by falsely flagging                 of chats; we introduce temporal nodes At (i) representing
+benign queries as dangerous, triggering excessive refusal                A(i) at round t, where t = 1, . . . , T and i = 1, . . . , n. An
+responses (He et al., 2025b). Perturbation-based strategies              edge et (i, j) indicates that a message is sent from A(i) to
+pursues covert influence by steering agents toward subop-                A(j) at round t, i.e. from At (i) to At+1 (j) (see Figure 1).
+timal choices or subtly shifting discussion objectives (Xie              Since each directed edge connects consecutive time steps,
+et al., 2025), or by applying imperceptible textual perturba-            no cycle can be formed, ensuring the reconstructed graph is
+tions that evade content filters (Lin et al., 2024). Collectively,       a DAG.
+these attacks propagate malicious influence through agent
+                                                                         Graph Notation. For convenience, we write the graph as
+interactions, inducing cascading errors and system-wide
+                                                                         G = (V, E), where
+corruption.
+Defense for MAS. In response, existing defenses adopt out-                       V = {At (i) | t = 1, . . . , T ; i = 1, . . . , n}
+                                                                                                                                      (1)
+put monitoring, graph-based detection, and collaborative                            = {C1 , . . . , CN },   N = nT,
+verification. Output-centric methods track psychometric
+scores to flag harmful content (Xie et al., 2025), but they                                                      +
+                                                                         E = {eij | i, j = 1, . . . , N }, and Nt,i  = {At+1 (j) |
+are labor-intensive to calibrate and can be evaded if attack-                                                   +
+                                                                         et,i→j ∈ E} with out-degree kt,i = |Nt,i |.
+ers manipulate the affective or persuasive tone of messages.
+Graph-based approaches model the MAS a graph neural net-
+                                                                         3.2. Extract Connections with Signed Edge Scoring
+work (GNN) and train a classifier on agent outputs (Wang
+et al., 2025b); however, they rely on local signals, lack a              Based on the MAS graph, we employ a signed network
+global view of how corrupted information propagates to the               to analyze communication. An edge eij with a positive
+final decision, and struggle to detect stealthy perturbations            sign represents agreement or trust of Cj toward Ci , while a
+such as lightweight textual modifications. Collaborative de-             negative sign indicates distrust or disagreement.
+fenses enhance resilience via peer challenging or dedicated
+inspector agents (Huang et al., 2025), but fail once attackers           Specifically, on edge eij , the receiver Cj obtains mes-
+deceive the reviewers. Furthermore, most existing defenses               sage si from sender Ci and outputs sj . We compute
+assume static communication graphs and cannot adapt to                   gij = f (si , sj ) ∈ {−1, 0, 1}, where f is implemented by an
+dynamically evolving attacks or agent interactions. How-                 LLM independent of the MAS (prompts in Appendix A.3).
+ever, both output-centric and graph-based methods require                Scores −1/0/1 indicate contradiction, low contribution, or
+retraining when the topology changes, making it difficult to             positive contribution, respectively. If Ci is malicious and
+resist contagious corruption.                                            successfully attacks Cj , then gij = 1; if detected, gij = −1.
+                                                                         Reliability is validated in Appendix B.4.
+
+3. Methodology                                                           3.3. Determine Node Contribution
+To identify malicious agents in the MAS, we first model                  Signed Influence Operator. Let G ∈ RN ×N denote the
+the MAS as a graph for subsequent computational conve-                   signed edge-weight matrix with Gij = gij if eij ∈ E,
+nience in Section 3.1, which captures the communication                  and Gij = 0 otherwise. Define the out-degree diagonal
+topology among agents. Then, we assess the influence of                  matrix D = diag(k1 , . . . , kN ) with ki = |N + (Ci )|. The
+each agent by building a signed network to score inter-agent             row-normalized signed propagation operator is
+communication in Section 3.2. Finally, we perform back-
+ward propagation to quantify node contributions and identify                                      B = D−1 G,                          (2)
+nodes exhibiting abnormal contribution scores, thereby re-
+pairing the MAS by removing information sent from the                    where D−1 uses 1/ki only for ki > 0 and 0 otherwise. En-
+detected malicious agents in Section 3.3. We summarize                   try Bij quantifies the signed influence of Cj on Ci through
+and discuss the pipeline in Section 3.4.                                 edge eij , normalized by Ci ’s out-degree.
+
+                                                                     3
+
+===== PDF p.4 =====
+Securing Multi-Agent Systems Against Corruptions via Node Contribution Backpropagation
+
+Backward Score Propagation. Let S(Ci ) denote the con-                  where ϵ > 0 is a threshold. Intuitively, if an attack fails,
+tribution score of node Ci . BPD propagates scores backward             negative edge signs yield low S for attackers; if it succeeds,
+in time from round T to 1, aggregating signed influence from            contagion inflates their scores—both produce large ∆(i).
+each node’s successors:
+                                                                        Mitigation via Communication Pruning. Given M, let
+                                                                        EM = {et,i→j ∈ E | A(i) ∈ M}. We repair the graph
+          
+                                       N
+          1
+                  P
+                         gij S(Cj ) =
+                                      P
+                                          Bij S(Cj ), ki > 0,
+ S(Ci ) =   k iCj ∈N (Ci )
+                    +                 j=1                     (3)       via:
+                                                                                            G′ = (V, E \ EM ).
+          
+          0,                                         ki = 0.                                                                    (11)
+
+In vector form, S(t) = [S(At (1)), . . . , S(At (n))]⊤ ,                This blocks further propagation of corrupted information.
+                                                                        Empirically, BPD achieves 93% detection success; pruning
+          S(t) = P(t) S(t+1) ,     t = T − 1, . . . , 1,     (4)        the most affected agents in remaining cases still improves
+                                                                        security.
+where P(t) ∈ Rn×n is the layer-wise operator with
+                 (
+                                        +                               3.4. Summary and Discussion
+             (t)   gt,i→j /kt,i , j ∈ Nt,i ,
+           Pij =                                             (5)
+                   0,             otherwise.                            The overall procedure of BPD is summarized in Algorithm 1.
+                                                                        We also highlight the key features of BPD as a lightweight
+Terminal-layer initialization serves as a boundary condition:           and adaptive defense mechanism in the following:
+                            (
+                              +1, yi = yfinal ,                            • No Training Required. BPD performs detection and
+            S(AT (i)) =                                   (6)
+                              −1, otherwise,                                 repair per query through signed backward propagation.
+                                                                             This eliminates the need for offline training and allows
+where yi and yfinal are answers of A(i) and the MAS. Since                   BPD to efficiently adapt different MAS topologies.
+G is a DAG, Eq. (4) admits a unique solution obtained by a
+single backward pass (no iterative convergence), i.e.,                     • Efficiency. The backward propagation requires only a
+                                                                             single topological pass over the DAG (Eq. (7)), avoid-
+            S(t) = P(t) P(t+1) · · · P(T −1) S(T ) .         (7)
+                                                                             ing iterative convergence or expensive LLM-based
+Thus BPD traces each agent’s signed cumulative influence                     scoring at each step.
+toward the final decision (Figure 1).
+                                                                           • Interpretability. The signed propagation operator
+Connection to PageRank. Classic PageRank (Brin et al.,                       (Eq. (2)) provides a transparent mechanism for trac-
+1998; Page et al., 1999) iteratively updates                                 ing influence: each node’s contribution score directly
+                                                                             reflects its signed cumulative impact on the final deci-
+             r(ℓ+1) = (1 − d) N
+                              1
+                                + d W⊤ r(ℓ) ,                (8)             sion.
+where d ∈ (0, 1) is the damping factor and Wji = 1/kj
+if j → i exists, else 0. BPD can be viewed as a signed,
+                                                                        Algorithm 1 Backward Propagation Detection (BPD)
+layer-wise PageRank on a DAG: P(t) generalizes W⊤
+with gt,i→j ∈ {−1, 0, 1}, replaces damping/teleportation                Require: G = (V, E): DAG of MAS with temporal nodes
+by boundary initialization (Eq. (6)), and replaces power                    C1 , . . . , CN ; gij ∈ {−1, 0, 1}: signed contribution
+iteration with one topological backward pass (Eq. (7)).                     score on edge eij ; ϵ: threshold for outlier detection.
+                                                                        Ensure: Set of detected malicious agents M.
+Agent-Level Aggregation and Outlier Detection. Let                       1: Step 1: Initialization. Set S(AT (i)) = +1 if agent i
+T (i) = {t | At (i) produces an output}. The agent-level                    matches final decision, else −1.
+contribution and pairwise deviation are                                  2: Step 2: Backward Propagation.         For t = T − 1 down
+                                                                            to 1, compute S(Ci ) = k1i j:eij ∈E gij · S(Cj ).
+                                                                                                           P
+                       1    X
+       Ŝ(A(i)) =             S(At (i)),                                 3: Step 3: Aggregation. Compute per-agent average
+                    |T (i)|
+                            t∈T (i)                                         Ŝ(A(i)) across all rounds.
+                                                             (9)
+                   1 X                                                   4: StepP4: Outlier Detection.             M ← {A(i) |
+           ∆(i) =      Ŝ(A(i)) − Ŝ(A(j)) .                                  1
+                  n−1                                                       n−1        j̸=i |Ŝ(A(i)) − Ŝ(A(j))| ≥ ϵ}.
+                            j̸=i
+                                                                         5: Step 5: Mitigation. Remove all outgoing messages
+The detected malicious-agent set is                                         from agents in M.
+                                                                         6: return M
+                   
+             M = A(i) ∈ A ∆(i) ≥ ϵ ,                        (10)
+
+                                                                    4
+
+===== PDF p.5 =====
+Securing Multi-Agent Systems Against Corruptions via Node Contribution Backpropagation
+
+4. Experiment                                                         below 2%. Table 1 shows BPD’s standard deviation is only
+                                                                      0.6% for both structures, indicating high stability, while its
+In this section, we evaluate BPD from multiple perspectives           average accuracy (85.4% and 87.5%) substantially exceeds
+to validate its effectiveness, adaptability, and efficiency.          the best baseline (83.7% and 85.5%). Table 2 shows that
+                                                                      BPD outperforms G-Safeguard in detection accuracy by 2%
+4.1. Experiment Set-up                                                and 6%, respectively, despite requiring no model training.
+MAS Tasks and Datasets. For knowledge question-                       Results on DeepSeek-V3 are in Appendix B.1.
+answering, we used the MMLU dataset (Son et al., 2025)                On text-based response datasets (Table 3), attacks de-
+with subdomains including mathematics, chemistry, com-                grade BRT scores by 15.7%–15.8% and GPT scores
+puter science, and security, each containing 100 test samples.        by 8.8%–11.9%. With BPD, the drops reduce to only
+For open-ended generation, we employed three datasets: Al-            1.3%–1.5% (BRT) and 0.6%–0.8% (GPT). Table 4 shows
+paca (Taori et al., 2023) for commonsense questions, Sam-             BPD achieves 95% average detection success. Results on
+sum (Gliwa et al., 2019) for the summarization task, and              DeepSeek-V3 are in Appendix B.2.
+ChatDoctor (Li et al., 2023b) for medical questions.
+Evaluation Set-up. We adopted a two-dimensional evalua-               4.3. Robustness Against Corruption Attacks
+tion: (i) Bleurt (Sellam et al., 2020) to measure similarity          To validate BPD’s defense capability, we evaluated several
+between model outputs and reference answers, and (ii) GPT-            attack techniques: Harmful (Amayuelas et al., 2024), Sub-
+4 (Achiam et al., 2023) to score responses from 1 to 5.               optimal, Reframing (Xie et al., 2025), Trigger (He et al.,
+Base LLMs. We tested DeepSeek-V3 (Liu et al., 2024)                   2025b), and Modification (Lin et al., 2024). Their descrip-
+and GPT-4o (Hurst et al., 2024) to evaluate state-of-the-art          tions are as follows:
+models.                                                                  • None: No attack is implemented.
+MAS Design. For fixed graph structures, we used two con-                 • Harmful: The attacker inputs harmful prompts to ex-
+figurations: Flat (Li et al., 2023a; Wang et al., 2024b), where            plain incorrect answers logically, disrupting MAS and
+all agents are equal and collaborate, and Hierarchy (Chen                  guiding other agents to wrong outputs.
+et al., 2024b; Liang et al., 2024), where agents assume dis-
+tinct roles such as answerers and reviewers. Detailed MAS                • Suboptimal: The attacker selects a suboptimal answer
+configurations are in Appendix A.1.                                        while avoiding the correct one, making the attack more
+                                                                           covert.
+Corruption Attacks. We adopted the attack method from
+(Amayuelas et al., 2024) as our default setting.                         • Reframing: The attacker deliberately misinterprets
+                                                                           the question by reframing it, disrupting other agents’
+Baselines. We compared against G-Safeguard (Wang et al.,
+                                                                           responses.
+2025b), AGENTXPOSED (Xie et al., 2025), Challenger,
+and Inspector (Huang et al., 2025). Detailed baseline set-               • Trigger: The attacker excessively triggers the agent’s
+tings are in Appendix A.2.                                                 safety defenses by claiming a question is dangerous,
+Hyperparameter. The threshold ϵ was set to 1.5 empiri-                     hindering responses to normal queries.
+cally based on our study in Section 4.5.                                 • Modification: The attacker mimics other agents’ out-
+                                                                           puts with subtle semantic alterations, evading text
+4.2. Results on Fixed Graph Structures                                     similarity-based detection.
+In this experiment, we evaluated MAS with Flat and Hier-              As shown in Table 5, BPD achieves accuracy improvements
+archy structures on the MMLU dataset using GPT-4o. In                 of 7% and 6% across the two MAS structures, outperform-
+the Flat structure, 5 agents discuss collaboratively to reach         ing all baselines with the highest baseline gain at only 4%.
+a final answer. In the Hierarchy structure, 5 respondent              Most existing defenses are notably vulnerable to Modifica-
+agents provide initial answers, 2 evaluators offer feedback,          tion attacks, where subtle semantic changes are introduced.
+and respondents revise accordingly. The default attack ma-            Against this challenging attack, BPD secures gains of 16%
+nipulates agents to select incorrect answers with plausible           and 10%, while others achieve only about 5%, with the
+explanations.                                                         best-performing baseline G-Safeguard reaching just 7%.
+Results in Tables 1 and 2 show that BPD improves accu-                Table 6 shows that BPD maintains detection accuracy above
+racy by 10 and 8 percentage points for the two structures,            90% across all scenarios. In contrast, G-Safeguard drops
+respectively. Under attack, BPD maintains robust defense              to 83% and 81% on Modification attacks, confirming that
+with a maximum accuracy drop of 3% and average drop                   existing methods struggle to detect subtle semantic-altering
+                                                                      attacks. BPD’s self-monitoring mechanism, which relies on
+
+                                                                  5
+
+===== PDF p.6 =====
+Securing Multi-Agent Systems Against Corruptions via Node Contribution Backpropagation
+
+Table 1. The Answer Accuracy (ACC) of different methods on the GPT-4o model using the MMLU dataset. We conduct 3 experiments
+and present 1 standard deviation in each experiment.
+
+  Structure        Method                      Algebra                  Math                      Chemistry        Computer        Security         Average
+  Single LLM                                   89.7% ± 0.6%             88.7% ± 0.6%              70.7% ± 1.5%     86.7% ± 1.2%    80.7% ± 1.2%     83.3% ± 0.6%
+                   No Attack                   95.0% ± 1.0%             94.7% ± 1.2%              75.3% ± 0.6%     92.0% ± 1.0%    85.0% ± 1.0%     88.4% ± 0.6%
+                   Attack                      78.7% ± 0.6%             74.7% ± 0.6%              64.7% ± 0.6%     82.3% ± 1.5%    81.0% ± 1.0%     76.3% ± 0.6%
+                   G-Safeguard                 88.3% ± 0.6%             88.7% ± 0.6%              71.0% ± 2.0%     87.7% ± 1.5%    83.0% ± 2.0%     83.7% ± 1.0%
+  Flat             AGENTXPOSED                 90.0% ± 1.0%             79.0% ± 1.0%              67.0% ± 1.0%     89.0% ± 1.7%    87.3% ± 1.5%     82.5% ± 1.2%
+                   Challenger                  88.7% ± 0.6%             87.3% ± 1.2%              68.3% ± 0.6%     84.0% ± 1.7%    75.3% ± 2.5%     80.7% ± 0.6%
+                   Inspector                   84.0% ± 1.0%             89.0% ± 1.0%              65.7% ± 0.6%     80.7% ± 1.5%    75.7% ± 2.1%     79.0% ± 1.2%
+                   BPD (Ours)                  92.3% ± 0.6%             93.0% ± 1.7%              73.3% ± 1.5%     87.3% ± 2.3%    81.0% ± 2.0%     85.4% ± 0.6%
+                   No Attack                   95.7% ± 1.5%             95.3% ± 1.5%              75.3% ± 2.5%     95.0% ± 1.0%    82.3% ± 0.6%     88.7% ± 1.0%
+                   Attack                      81.7% ± 0.6%             81.7% ± 2.5%              66.7% ± 1.5%     84.7% ± 0.6%    78.0% ± 1.7%     78.6% ± 0.6%
+                   G-Safeguard                 92.0% ± 1.0%             91.7% ± 2.1%              71.3% ± 1.5%     90.3% ± 2.3%    82.3% ± 1.2%     85.5% ± 0.6%
+  Hierarchy        AGENTXPOSED                 85.3% ± 0.6%             83.3% ± 1.2%              68.7% ± 0.6%     90.0% ± 1.0%    82.7% ± 1.5%     82.0% ± 0.0%
+                   Challenger                  86.3% ± 0.6%             87.3% ± 1.2%              67.7% ± 0.6%     86.3% ± 1.5%    78.3% ± 1.2%     81.2% ± 1.2%
+                   Inspector                   87.0% ± 1.0%             89.7% ± 1.5%              68.3% ± 0.6%     88.0% ± 1.7%    79.0% ± 1.7%     82.4% ± 1.0%
+                   BPD (Ours)                  93.3% ± 1.2%             95.7% ± 2.5%              73.7% ± 1.5%     91.0% ± 3.0%    83.7% ± 1.5%     87.5% ± 0.6%
+
+                           Table 2. The Monitor ACC of different methods on the GPT-4o model using the MMLU dataset.
+
+  Structure            Method           Algebra                       Math                      Chemistry        Computer         Security         Average
+                       G-Safeguard      92.3% ± 2.3%                  90.7% ± 2.1%              85.7% ± 1.2%     87.0% ± 1.7% 86.0% ± 0.0%         88.3% ± 1.5%
+  Flat
+                       BPD (Ours)       93.0% ± 1.0%                  90.7% ± 1.5%              91.0% ± 1.0%     88.7% ± 1.5% 89.3% ± 1.2%         90.7% ± 0.6%
+                       G-Safeguard      92.3% ± 1.5%                  89.7% ± 1.5%              86.3% ± 0.6%     85.0% ± 1.0% 85.7% ± 1.2%         87.7% ± 1.2%
+  Hierarchy
+                       BPD (Ours)       97.7% ± 1.5%                  96.3% ± 1.5%              93.3% ± 0.6%     89.0% ± 1.7% 90.7% ± 0.6%         93.3% ± 0.6%
+
+Table 3. The Answer ACC of different methods on the GPT-4o                                            plied across various aspects, necessitating frequent changes
+model using text-based response dataset.
+                                                                                                      to the graph structure. Furthermore, as attackers employ
+ Structure    Method         Alpaca            Samsum           ChatDoctor      Average               increasingly diverse strategies, it is crucial to test whether
+                             BRT      GPT      BRT      GPT     BRT     GPT     BRT       GPT
+                                                                                                      a defense method can sustain protection over an extended
+ Single LLM                  39.4%    97.2%    39.2%    96.6%   40.0%   98.0%   39.5%     97.2%
+              No Attack      39.8%    99.4%    39.5%    97.6%   40.0% 99.4%     39.8%     98.8%
+                                                                                                      period.
+              Attack         32.0%    86.8%    31.9%    87.2%   33.4% 86.6%     32.4%     86.8%
+ Flat         G-Safeguard    38.6%    97.0%    39.7%    93.6%   38.9% 97.0%     39.0%     96.0%       In this experiment, we implement different attack strate-
+              AGENTXPOSED    37.0%    95.2%    36.4%    95.4%   36.4% 97.8%     36.6%     96.2%
+              BPD (Ours)     39.6%    99.6%    38.0%    96.6%   40.8% 99.2%     39.4%     98.4%       gies and gradually alter the graph structure of the MAS
+              No Attack
+              Attack
+                             40.0%
+                             32.0%
+                                      99.4%
+                                      92.6%
+                                               39.6%
+                                               34.2%
+                                                        96.8%
+                                                        89.0%
+                                                                40.2% 98.6%
+                                                                33.3% 86.8%
+                                                                                39.9%
+                                                                                33.2%
+                                                                                          98.2%
+                                                                                          89.6%
+                                                                                                      over the course of the testing period, while also varying
+ Hierarchy    G-Safeguard
+              AGENTXPOSED
+                             38.4%
+                             37.9%
+                                      97.2%
+                                      96.2%
+                                               37.6%
+                                               37.8%
+                                                        97.4%
+                                                        95.0%
+                                                                40.1% 96.8%
+                                                                38.9% 95.0%
+                                                                                38.7%
+                                                                                38.2%
+                                                                                          97.0%
+                                                                                          95.4%
+                                                                                                      which agents are under attack. Our goal is to evaluate the
+              BPD (Ours)     40.2%    98.8%    38.6%    96.4%   39.2% 98.4%     39.3%     97.8%       performance of different defense methods in such a highly
+                                                                                                      dynamic environment.
+Table 4. The Monitor ACC of different methods on the GPT-4o                                           Our results are shown in Table 7 and Table 8. Regarding
+model using text-based response dataset.
+                                                                                                      the response accuracy, in the dynamic scenario, the accu-
+ Structure        Method              Alpaca     Samsum         ChatDoctor        Average             racy drops to 78% after the attacker launches the attack,
+                  G-Safeguard         92%        86%            89%               89%
+                                                                                                      compared to 81% and 80% under static graph attacks. This
+ Flat                                                                                                 indicates that the increased variability of attacks in dynamic
+                  BPD (Ours)          96%        92%            94%               94%
+                  G-Safeguard         93%        87%            92%               91%                 graphs leads to worse model performance. BPD maintains
+ Hierarchy                                                                                            accuracies of 88% and 85%, showing almost no decline
+                  BPD (Ours)          98%        91%            97%               95%
+                                                                                                      compared to its performance in static graph defense. In
+agent scoring rather than external detection, proves signifi-                                         contrast, other defense methods exhibit a significant perfor-
+cantly more effective especially when attacks closely mimic                                           mance drop, with an average decrease of 3% compared to
+benign outputs.                                                                                       their results on static graphs.
+4.4. Dynamic Graph Experiment
+                                                                                                      4.5. Ablation Study
+To validate the effectiveness of BPD in defending dynamic
+                                                                                                      To validate the necessity of backpropagation, we compared
+graphs, we constructed a dynamic multi-agent system. This
+                                                                                                      BPD with an ablated version that monitors attacked agents
+aims to simulate real-world scenarios where a MAS is ap-
+
+                                                                                                  6
+
+===== PDF p.7 =====
+Securing Multi-Agent Systems Against Corruptions via Node Contribution Backpropagation
+
+                                             Table 5. The Answer ACC of different methods against various types of attacks.
+
+        Structure            Method                             None             Harmful              Suboptimal                          Reframing                          Trigger                  Modification                                    Average
+                             Attack                             90%              79%                  77%                                 82%                                77%                      74%                                             81%
+                             G-Safeguard                        87%              85%                  84%                                 86%                                85%                      81%                                             85%
+                             AGENTXPOSED                        86%              83%                  82%                                 86%                                87%                      82%                                             84%
+        Flat
+                             Challenger                         87%              83%                  81%                                 82%                                84%                      81%                                             83%
+                             Inspector                          86%              84%                  83%                                 85%                                82%                      76%                                             83%
+                             BPD (Ours)                         89%              88%                  86%                                 88%                                89%                      90%                                             88%
+                             Attack                             87%              78%                  79%                                 81%                                78%                      76%                                             80%
+                             G-Safeguard                        88%              85%                  85%                                 82%                                81%                      80%                                             83%
+                             AGENTXPOSED                        86%              86%                  85%                                 84%                                81%                      79%                                             83%
+        Hierarchy
+                             Challenger                         87%              84%                  83%                                 82%                                80%                      78%                                             82%
+                             Inspector                          87%              83%                  81%                                 81%                                80%                      77%                                             81%
+                             BPD (Ours)                         89%              86%                  89%                                 85%                                85%                      86%                                             86%
+
+                                          Table 6. The Monitor ACC of different methods against various types of attacks.
+
+                  Structure              Method                      Harmful             Suboptimal           Reframing                                    Trigger                      Modification                                Average
+                                         G-Safeguard                 86%                 87%                  89%                                          92%                          83%                                         87%
+                  Flat
+                                         BPD (Ours)                  87%                 92%                  93%                                          94%                          95%                                         92%
+                                         G-Safeguard                 89%                 86%                  94%                                          90%                          81%                                         88%
+                  Hierarchy
+                                         BPD (Ours)                  89%                 93%                  96%                                          91%                          94%                                         93%
+                                                                                                                                                                Flat                                                                                Hierarchy
+solely based on their raw scores, identifying the agent with                                                                 0.95                                                                                   0.95
+the lowest average score as the predicted attacker, with-                                                                    0.90                                                                                   0.90
+                                                                                                               Answer ACC
+
+
+
+
+                                                                                                                                                                                                      Answer ACC
+                                                                                                                             0.85                                                                                   0.85
+out performing any backward propagation. These ablation                                                                      0.80                                                                                   0.80
+experiments were conducted on the MMLU dataset using                                                                         0.75                                                                                   0.75
+                                                                                                                             0.70                                                                                   0.70
+GPT-4o.                                                                                                                      0.65                Algebra
+                                                                                                                                                 Math
+                                                                                                                                                                 Chemistry
+                                                                                                                                                                 Computer
+                                                                                                                                                                                     Security                       0.65                Algebra
+                                                                                                                                                                                                                                        Math
+                                                                                                                                                                                                                                                        Chemistry
+                                                                                                                                                                                                                                                        Computer
+                                                                                                                                                                                                                                                                            Security
+                                                                                                                             0.60                                                                                   0.60
+                                                                                                                                     1.3             1.4         1.5            1.6             1.7                         1.3             1.4         1.5            1.6             1.7
+Results in Tables 9 and 10 show that without backpropa-
+gation, response accuracy drops by 2%–3%, and monitor-                                                                                                (a) Flat                                                                     (b) Hierarchy
+ing accuracy declines by 6%–8%. This is because distrust                                                                     Figure 2. The Answer ACC under different ϵ on GPT-4o.
+is local information, reflecting only an agent’s immediate                                                                                                      Flat                                                                               Hierarchy
+                                                                                                                             1.0                                                                                    1.0
+neighbors rather than its global contribution across the MAS.                                                                0.9                                                                                    0.9
+                                                                                                                             0.8                                                                                    0.8
+                                                                                                               Monitor ACC
+
+
+
+
+                                                                                                                                                                                                      Monitor ACC
+
+
+
+
+Thus, raw scores cannot function independently and must                                                                      0.7                                                                                    0.7
+be combined with backpropagation to leverage global infor-                                                                   0.6                                                                                    0.6
+                                                                                                                             0.5                                                                                    0.5
+mation.                                                                                                                      0.4           Algebra         Chemistry         Security                               0.4           Algebra         Chemistry         Security
+                                                                                                                                           Math            Computer                                                               Math            Computer
+                                                                                                                             0.3                                                                                    0.3
+                                                                                                                                    1.3              1.4        1.5            1.6              1.7                        1.3              1.4        1.5            1.6              1.7
+Table 9. The Answer ACC of BPD compared with backpropaga-
+tion (bp) ablation.
+                                                                                                                                                      (a) Flat                                                                     (b) Hierarchy
+ Structure   Method         None   Harmful    Suboptimal Reframing    Trigger    Modification   Average                      Figure 3. The Monitor ACC under different ϵ on GPT-4o.
+             Attack         90%    79%        77%        82%          77%        74%            80%
+ Flat        BPD w/o bp     87%    85%        84%        83%          84%        84%            85%           We also explore using different threshold value ϵ, and results
+             BPD (Ours)     89%    88%        86%        88%          89%        90%            88%
+             Attack         87%    78%        79%        81%          78%        76%            80%
+                                                                                                              of answer ACC and monitor ACC are shown in Figure 2
+ Hierarchy   BPD w/o bp     88%    84%        85%        82%          83%        81%            84%           and Figure 3.
+             BPD (Ours)     89%    86%        89%        85%          85%        86%            87%
+
+                                                                                                              As ϵ increases from 1.3 to 1.5, average accuracy improves
+                                                                                                              from 84% to 87%. However, further increasing ϵ to 1.7
+Table 10. The Monitor ACC of BPD compared with backpropa-                                                     drops accuracy to 82%, establishing ϵ = 1.5 as optimal.
+gation (bp) ablation.
+                                                                                                              This is explained by detection behavior: a small ϵ of 1.3
+ Structure     Method        Harmful     Suboptimal   Reframing Trigger Modification            Average       increases detection rate to 96% but removes some valid
+ Flat
+               BPD w/o bp
+               BPD (Ours)
+                             84%
+                             87%
+                                         86%
+                                         92%
+                                                      84%
+                                                      93%
+                                                                 87%
+                                                                 94%
+                                                                                88%
+                                                                                95%
+                                                                                                86%
+                                                                                                92%
+                                                                                                              communication links, degrading accuracy slightly. A large
+               BPD w/o bp    85%         84%          86%        83%            85%             85%           ϵ of 1.7 reduces detection rate to 47%, allowing harmful
+ Hierarchy
+               BPD (Ours)    89%         93%          96%        91%            94%             93%
+                                                                                                              attacks to persist and lowering task performance.
+
+                                                                                                          7
+
+===== PDF p.8 =====
+Securing Multi-Agent Systems Against Corruptions via Node Contribution Backpropagation
+
+                                 Table 7. The Answer ACC of different methods in dynamic graphs.
+    Structure     Method                None    Harmful     Suboptimal          Reframing             Trigger          Modification             Average
+                  Attack                88%     76%         75%                 77%                   76%              72%                      78%
+                  G-Safeguard           89%     81%         81%                 82%                   83%              79%                      83%
+                  AGENTXPOSED           86%     80%         83%                 84%                   84%              80%                      83%
+    Flat
+                  Challenger            85%     78%         80%                 79%                   80%              77%                      80%
+                  Inspector             87%     82%         82%                 80%                   79%              74%                      81%
+                  BPD (Ours)            91%     87%         83%                 90%                   87%              90%                      88%
+                  Attack                88%     74%         77%                 76%                   78%              75%                      78%
+                  G-Safeguard           87%     82%         82%                 78%                   80%              78%                      81%
+                  AGENTXPOSED           86%     82%         82%                 82%                   78%              77%                      81%
+    Hierarchy
+                  Challenger            86%     82%         80%                 81%                   80%              77%                      81%
+                  Inspector             87%     81%         78%                 80%                   74%              74%                      79%
+                  BPD (Ours)            89%     86%         88%                 80%                   83%              87%                      85%
+
+                                Table 8. The Monitor ACC of different methods in dynamic graphs.
+           Structure     Method           Harmful    Suboptimal        Reframing             Trigger        Modification             Average
+                         G-Safeguard      79%        85%               84%                   91%            83%                      84%
+           Flat
+                         BPD (Ours)       86%        92%               95%                   92%            96%                      92%
+                         G-Safeguard      85%        83%               87%                   88%            74%                      83%
+           Hierarchy
+                         BPD (Ours)       87%        96%               99%                   93%            94%                      94%
+
+
+4.6. Defense Performance When Rater Under Attack                       and current neighborhood scores. This enables them to
+                                                                       conduct coordinated, topology-aware, and detector-evasive
+The scoring mechanism is critical for detecting latent attacks
+                                                                       strategies, such as intermittently giving correct and incor-
+in BPD. However, it is also at risk of being attacked. To
+                                                                       rect answers or disrupting scores to hide opposition. Unlike
+study the circumstances where an adaptive attack infects
+                                                                       the chaotic score injection in Section 4.6, the SA attack
+our scoring mechanism, we conducted an attack specifically
+                                                                       represents a stronger and more logical adversary.
+targeting the scoring process, e.g. if the original contribution
+value between two text segments was -1, the compromised                We evaluate our method under two variants of the SA at-
+communication node would deliberately alter the score to               tack: Flat and Hierarchy. The answer accuracy under these
+1 to lie about a detected disagreement, and vice versa. The            attacks is shown in Table 12. Compared to normal con-
+results of the answer ACC after introducing this adaptive              ditions (BPD on Flat/Hierarchy), our method experiences
+attack are as shown in Table 11.                                       only a marginal degradation of 3% to 4%, maintaining an
+                                                                       average accuracy between 83% and 85%. This performance
+Results show that after the adaptive attack, the accuracy
+                                                                       still surpasses most baseline methods under their normal
+of BPD experiences a certain decline. However, since our
+                                                                       (non-attack) conditions.
+algorithm identifies malicious agents based on their score
+deviations from the majority, although the adaptive attack
+                                                                       Table 11. The Answer ACC against adaptive attacks on GPT-4o.
+introduces variations in the scores of individual agents, these
+variations are not sufficient to compromise the robustness              Structure   Method            Algebra   Math     Chemistry   Computer   Security    Average
+
+of our approach.                                                        Flat
+                                                                                    Attack
+                                                                                    Adaptive Attack
+                                                                                                      79%
+                                                                                                      90%
+                                                                                                                75%
+                                                                                                                89%
+                                                                                                                         65%
+                                                                                                                         71%
+                                                                                                                                     82%
+                                                                                                                                     88%
+                                                                                                                                                81%
+                                                                                                                                                83%
+                                                                                                                                                            76%
+                                                                                                                                                            84%
+                                                                                    BPD (Ours)        92%       91%      73%         90%        83%         86%
+                                                                                    Attack            81%       79%      68%         85%        80%         79%
+4.7. Defense Performance Under System-Aware                             Hierarchy   Adaptive Attack   89%       91%      72%         92%        83%         85%
+     Adaptive Attacks                                                               BPD (Ours)        92%       93%      72%         94%        82%         87%
+
+
+While our scoring mechanism is effective at detecting ma-
+licious agents, it may itself become a target of adaptive              Table 12. The Answer ACC against System-Aware (SA) adaptive
+attacks. To evaluate the robustness of our approach under              attacks on GPT-4o.
+more realistic and intelligent adversarial settings, we de-             Structure   Method               Algebra   Math    Chemistry Computer    Security   Average
+sign a System-Aware (SA) adaptive attack. In this attack,               Flat
+                                                                                    SA Attack            89%       90%     70%        87%        80%        83%
+                                                                                    BPD (Ours, normal)   92%       91%     73%        90%        83%        86%
+corrupted agents are provided with detailed system informa-                         SA Attack            91%       90%     71%        90%        81%        85%
+                                                                        Hierarchy
+tion, including the global topology, the scoring mechanism,                         BPD (Ours, normal)   92%       93%     72%        94%        82%        87%
+
+
+
+
+                                                                   8
+
+===== PDF p.9 =====
+Securing Multi-Agent Systems Against Corruptions via Node Contribution Backpropagation
+                                                                                         Table 14. The Answer ACC under combined attacks on GPT-4o.
+We further report the monitor accuracy under adaptive at-
+                                                                                          Structure     Method          None     Harmful+Reframing      Suboptimal+Reframing
+tacks in Table 13. The monitor correctly identifies malicious                                           Attack          90%              78%                       75%
+agents in 81%–82% of cases on average, indicating that only                               Flat          G-Safeguard     87%              83%                       85%
+a few adaptive attacks evade detection. More importantly,                                               BPD (Ours)      89%              87%                       87%
+
+even when the monitor fails, the final answer often remains                                             Attack          87%              77%                       79%
+                                                                                          Hierarchy     G-Safeguard     88%              82%                       83%
+correct. Examining specific cases reveals that our method                                               BPD (Ours)      89%              86%                       88%
+detects not only attackers but also agents that are "easily mis-
+led" (i.e., those propagating erroneous information). Thus,                              4.9. Computational Cost
+isolating these vulnerable agents preserves system security                              We have conducted experiments to measure the time cost of
+even if the exact attacker is missed, explaining why answer                              BPD by comparing the average time required to complete
+accuracy degrades only slightly despite a larger drop in                                 tasks between our approach and a standard MAS. The results
+monitor accuracy.                                                                        are summarized in Table 15.
+Table 13. The Monitor ACC against System-Aware (SA) adaptive                             Table 15. Comparison of Time Cost between BPD and Standard
+attacks on GPT-4o.                                                                       MAS Method.
+                                                                                            Structure   Method        Algebra   Math Chemistry   Computer   Security   Average
+ Structure   Method       Algebra   Math   Chemistry Computer   Security   Average
+                                                                                                        No Attack     2.03      1.89   1.68      1.76       1.52       1.776
+ Flat        SA Attack    86%       88%    69%       84%        78%        81%              Flat
+                                                                                                        BPD (Ours)    2.21      2.03   1.85      1.91       1.68       1.936
+ Hierarchy   SA Attack    88%       87%    67%       88%        80%        82%                          No Attack     1.13      0.98   0.89      0.94       0.87       0.962
+                                                                                            Hierarchy
+                                                                                                        BPD (Ours)    1.21      1.14   0.98      1.03       0.96       1.064
+
+We note that attacks exceeding the Byzantine threshold or                                It shows that the average time consumption of the standard
+those not targeting the scoring mechanism are beyond the                                 MAS under Flat and Hierarchy structures is 1.776 minutes
+scope of this work and are discussed in future extensions.                               and 0.962 minutes, respectively. BPD introduces only 9.0%
+Nevertheless, the results above demonstrate that even under                              and 10.6% additional time overhead. This marginal increase
+strong, system-aware adaptive attacks, our method remains                                stems from the external evaluator scoring only sentence
+robust and outperforms many baselines under normal condi-                                pairs, whose token consumption is negligible compared to
+tions.                                                                                   answering the original questions. Moreover, as shown in Ap-
+                                                                                         pendix B.3, BPD’s time overhead remains within 9% even
+4.8. Defense Performance Under Combined Attacks                                          when the number of agents or dialogue rounds increases,
+                                                                                         further confirming that BPD incurs minimal cost across
+To assess defense robustness under more realistic scenar-
+                                                                                         different MAS structures.
+ios, we further evaluated BPD against combined attacks.
+While not all attack strategies are compatible—for instance,                             Overall, these results demonstrate that our method remains
+Trigger and Suboptimal are inherently incompatible due to                                robust under realistic combined attacks, substantially out-
+conflicting mechanisms—we selected two feasible combi-                                   performing baselines while incurring only small time over-
+nations for evaluation: Harmful+Reframing and Subopti-                                   head.
+mal+Reframing.
+Table 14 presents the results. Under Harmful+Reframing,                                  5. Conclusion
+BPD achieves answer accuracies of 87% and 86% for
+                                                                                         This study tackled the critical security challenge of mali-
+Flat and Hierarchy structures, respectively, compared to
+                                                                                         cious agent propagation in Multi-Agent Systems (MAS).
+89% under normal (no attack) conditions. Under Subopti-
+                                                                                         We introduced a signed graph modeling approach combined
+mal+Reframing, BPD achieves 87% and 88%, respectively.
+                                                                                         with backpropagation to dynamically detect compromised
+These results represent only a marginal degradation of 2%
+                                                                                         agents through interaction analysis. By representing agent
+to 3% relative to the normal setting. In contrast, baseline
+                                                                                         communications as a weighted directed graph and evaluat-
+methods suffer substantially larger drops. For example, the
+                                                                                         ing contribution distributions, our method effectively identi-
+undefended attack baseline degrades from 90% to 75%–
+                                                                                         fies anomalous nodes across various topologies and attack
+78%, while G-Safeguard drops to 83%–85% under the same
+                                                                                         scenarios. Experimental results on multiple benchmarks
+combined attacks.
+                                                                                         confirm that the proposed framework outperforms existing
+The resilience of BPD stems from its decomposed judgment                                 defense mechanisms in both detection accuracy and overall
+mechanism. By evaluating concise local messages rather                                   system resilience. These findings highlight the importance
+than relying on global information, our method mitigates                                 of structural and dynamic analysis in securing MAS and
+the "needle in a haystack" bottleneck, enabling more ef-                                 pave the way for more robust, topology-aware protection
+fective identification of well-hidden attacks. This design                               strategies in collaborative AI systems. Future work will
+explains why BPD consistently outperforms baselines under                                explore adaptive threshold mechanisms and real-time detec-
+combined attack scenarios.                                                               tion in larger-scale deployments.
+
+                                                                                     9
+
+===== PDF p.10 =====
+Securing Multi-Agent Systems Against Corruptions via Node Contribution Backpropagation
+
+Acknowledgments                                                       Chudziak, J. A. and Wawer, M. Elliottagents: A natural
+                                                                        language-driven multi-agent system for stock market anal-
+This work was supported by the National Natural Sci-                    ysis and prediction. In Proceedings of the 38th Pacific
+ence Foundation of China (Grant Nos.         62572013,                  Asia Conference on Language, Information and Compu-
+92582102, 62172019) and Beijing Natural Science Founda-                 tation, pp. 961–970, 2024.
+tion (QY24035, QY26045).
+                                                                      Digitale, J. C. et al. Tutorial on directed acyclic graphs.
+Impact Statement                                                        Journal of Clinical Epidemiology, 142:264–267, 2022.
+
+The focus of this work is to develop a multi-agent secure col-        Gliwa, B. et al. SAMSum corpus: A human-annotated
+laboration framework for LLM that does not involve human                dialogue dataset for abstractive summarization. In Pro-
+subjects, sensitive personal data, or high-risk real-world              ceedings of the 2nd Workshop on New Frontiers in Sum-
+deployments. Our work has many potential social conse-                  marization, pp. 70–79, 2019.
+quences, which we believe do not need to be emphasized
+here.                                                                 He, J. et al. LLM-based multi-agent systems for software
+                                                                        engineering: Literature review, vision, and the road ahead.
+                                                                       ACM Transactions on Software Engineering and Method-
+References                                                              ology, 34(5):1–30, 2025a.
+Achiam, J. et al. GPT-4 technical report. arXiv preprint
+  arXiv:2303.08774, 2023.                                             He, P. et al. Red-teaming LLM multi-agent systems
+                                                                        via communication attacks. In Findings of the As-
+Amayuelas, A. et al. MultiAgent collaboration attack: In-               sociation for Computational Linguistics: ACL 2025,
+ vestigating adversarial attacks in large language model                pp. 6726–6747. Association for Computational Lin-
+ collaborations via debate. In Findings of the Asso-                    guistics, 2025b. doi: 10.18653/v1/2025.findings-acl.
+ ciation for Computational Linguistics: EMNLP 2024,                     349. URL https://aclanthology.org/2025.
+ pp. 6929–6948. Association for Computational Lin-                      findings-acl.349/.
+ guistics, 2024. doi: 10.18653/v1/2024.findings-emnlp.
+ 407. URL https://aclanthology.org/2024.                              Huang, J.-T. et al. On the resilience of LLM-based
+ findings-emnlp.407/.                                                   multi-agent collaboration with faulty agents. In Pro-
+                                                                        ceedings of the 42nd International Conference on Ma-
+Bei, Y. et al. Graphs meet AI agents: Taxonomy,                         chine Learning, volume 267 of Proceedings of Ma-
+  progress, and future opportunities. arXiv preprint                    chine Learning Research, pp. 26202–26226. PMLR,
+  arXiv:2506.18019, 2025.                                               2025. URL https://proceedings.mlr.press/
+                                                                       v267/huang25ay.html.
+Böke, E. et al. “digital camouflage”: The LLVM chal-
+  lenge in LLM-based malware detection. arXiv preprint                Hurst, A. et al. GPT-4o system card. arXiv preprint
+  arXiv:2509.16671, 2025.                                               arXiv:2410.21276, 2024.
+
+Brin, S. et al. The anatomy of a large-scale hypertextual             Lee, D. et al. Prompt infection: LLM-to-LLM prompt injec-
+  web search engine. Computer Networks and ISDN                         tion within multi-agent systems. In European Symposium
+  Systems, 30(1):107–117, 1998.        ISSN 0169-7552.                  on Research in Computer Security, pp. 511–520. Springer,
+  doi: https://doi.org/10.1016/S0169-7552(98)00110-X.                   2025.
+  URL          https://www.sciencedirect.com/
+  science/article/pii/S016975529800110X.                              Li, G. et al. Camel: Communicative agents for “mind”
+  Proceedings of the Seventh International World Wide                   exploration of large language model society. Advances
+  Web Conference.                                                       in Neural Information Processing Systems, 36:51991–
+                                                                        52008, 2023a.
+Chen, B. et al. Blockagents: Towards Byzantine-robust
+  LLM-based multi-agent coordination via blockchain.                  Li, J. et al. More agents is all you need. Transactions
+  In Proceedings of the ACM Turing Award Celebration                    on Machine Learning Research, 2024. URL https:
+  Conference-China 2024, pp. 187–192, 2024a.                            //openreview.net/forum?id=bgzUSZ8aeg.
+
+Chen, W. et al. Agentverse: Facilitating multi-agent collabo-         Li, Y. et al. Chatdoctor: A medical chat model fine-tuned on
+  ration and exploring emergent behaviors. In International              a large language model meta-ai (LLaMA) using medical
+  Conference on Learning Representations, volume 2024,                   domain knowledge. Cureus, 15(6):e40895, 2023b. doi:
+  pp. 20094–20136, 2024b.                                               10.7759/cureus.40895.
+
+                                                                 10
+
+===== PDF p.11 =====
+Securing Multi-Agent Systems Against Corruptions via Node Contribution Backpropagation
+
+Liang, T. et al. Encouraging divergent thinking in large lan-         Papers), pp. 7261–7276. Association for Computational
+  guage models through multi-agent debate. In Proceedings             Linguistics, 2025b. doi: 10.18653/v1/2025.acl-long.
+  of the 2024 Conference on Empirical Methods in Natural              359. URL https://aclanthology.org/2025.
+  Language Processing, pp. 17889–17904. Association for               acl-long.359/.
+  Computational Linguistics, 2024. doi: 10.18653/v1/2024.
+  emnlp-main.992. URL https://aclanthology.                         Wang, Z. et al. Unleashing the emergent cognitive synergy
+  org/2024.emnlp-main.992/.                                          in large language models: A task-solving agent through
+                                                                     multi-persona self-collaboration. In Proceedings of the
+Lin, G. et al. Large language model sentinel: LLM agent for          2024 Conference of the North American Chapter of the
+  adversarial purification. arXiv preprint arXiv:2405.20770,         Association for Computational Linguistics: Human Lan-
+  2024.                                                              guage Technologies (Volume 1: Long Papers), pp. 257–
+                                                                     279. Association for Computational Linguistics, 2024b.
+Liu, A. et al. Deepseek-V3 technical report. arXiv preprint          doi: 10.18653/v1/2024.naacl-long.15. URL https://
+  arXiv:2412.19437, 2024.                                            aclanthology.org/2024.naacl-long.15/.
+Liu, Y. et al. Graph-augmented large language model agents:         Xie, Y. et al. Who’s the mole? modeling and detecting
+  Current progress and future prospects. IEEE Intelligent             intention-hiding malicious agents in LLM-based multi-
+  Systems, 41(2):45–55, 2026.                                         agent systems, 2025. URL https://arxiv.org/
+Page, L. et al. The pagerank citation ranking: Bring order            abs/2507.04724.
+  to the web. In Proc. of the 7th International World Wide          Xu, H. et al. Silentstriker: Toward stealthy bit-flip attacks on
+  Web Conf.–1998, 1999.                                               large language models. Advances in Neural Information
+Sellam, T., Das, D., and Parikh, A. BLEURT: Learning                  Processing Systems, 38:51981–52002, 2026.
+  robust metrics for text generation. In Proceedings of the         Yan, B. et al. Beyond self-talk: A communication-centric
+  58th annual meeting of the association for computational            survey of LLM-based multi-agent systems. arXiv preprint
+  linguistics, pp. 7881–7892, 2020.                                   arXiv:2502.14321, 2025.
+Son, G. et al. KMMLU: Measuring massive multitask                   Yan, B. et al. Attack the messages, not the agents: A multi-
+  language understanding in Korean. In Proceedings of                 round adaptive stealthy tampering framework for LLM-
+  the 2025 Conference of the Nations of the Americas                  MAS. In Proceedings of the AAAI Conference on Artifi-
+  Chapter of the Association for Computational Linguis-               cial Intelligence, volume 40, pp. 29784–29792, 2026.
+  tics: Human Language Technologies (Volume 1: Long
+  Papers), pp. 4076–4104. Association for Computational             Zhang, Y. et al. Webpilot: A versatile and autonomous
+  Linguistics, 2025. doi: 10.18653/v1/2025.naacl-long.                multi-agent system for web task execution with strategic
+  206. URL https://aclanthology.org/2025.                             exploration. In Proceedings of the AAAI Conference
+  naacl-long.206/.                                                    on Artificial Intelligence, volume 39, pp. 23378–23386,
+                                                                      2025.
+Taori, R. et al.   Stanford alpaca: An instruction-
+  following llama model. https://github.com/                        Zheng, C. et al. Demonstrations of integrity attacks in multi-
+  tatsu-lab/stanford_alpaca, 2023.                                    agent systems. arXiv preprint arXiv:2506.04572, 2025.
+
+Tianjie, J. et al. Flooding spread of manipulated knowl-
+  edge in LLM-based multi-agent communities. SCIENCE
+  CHINA Information Sciences.
+
+Wang, K. et al. A comprehensive survey in LLM (-agent)
+ full stack safety: Data, training and deployment. arXiv
+ preprint arXiv:2504.15585, 2025a.
+
+Wang, L. et al. A survey on large language model based
+ autonomous agents. Frontiers of Computer Science, 18
+ (6):186345, 2024a.
+
+Wang, S. et al. G-safeguard: A topology-guided security
+ lens and treatment on LLM-based multi-agent systems.
+ In Proceedings of the 63rd Annual Meeting of the Asso-
+ ciation for Computational Linguistics (Volume 1: Long
+
+                                                               11
+
+===== PDF p.12 =====
+Securing Multi-Agent Systems Against Corruptions via Node Contribution Backpropagation
+
+A. More Details on Experiments
+A.1. MAS Design Details
+This section describes the multi-agent system (MAS) used in our experiments. Each MAS instance processes one ques-
+tion through three synchronous dialogue rounds. Agents share the same backbone LLM but differ in system prompts.
+Communication is logged as a temporal directed acyclic graph (DAG) for subsequent BPD analysis.
+
+A.1.1. F LAT S TRUCTURE
+The Flat MAS uses three rounds with five agents per round, yielding N = 15 temporal nodes. Let T0 (i), T1 (i), and T2 (i)
+denote agent A(i) at Rounds 0, 1, and 2, respectively.
+Round 0 (Independent answering). Each A(i) receives the question and four choices, and outputs an initial answer
+formatted as the correct answer is X together with a brief rationale.
+Round 1 (Peer review). For each target agent A(j), every other agent A(i) (i ̸= j) reads A(j)’s Round 0 answer and
+provides a peer suggestion. This yields 5 × 4 = 20 directed messages per question. Each suggestion is stored and later used
+to construct signed edges from T0 (j) to T1 (i).
+Round 2 (Final synthesis). Each A(i) revisits the question with its Round 0 answer and the four peer suggestions addressed
+to it, then produces a revised final answer. During this step, an external LLM scorer assigns gij ∈ {−1, 0, 1} to each
+incoming suggestion edge based on agreement between the suggestion and A(i)’s revised output (Appendix A.3).
+
+A.1.2. H IERARCHY S TRUCTURE
+The Hierarchy MAS also uses three rounds but with [5, 2, 5] agents per round (N = 12 nodes): five respondents, two
+advisors, and five respondents again.
+Round 0 (Independent answering). Identical to the Flat setting: each of the five respondents independently answers the
+multiple-choice question.
+Round 1 (Advisor feedback). For each respondent A(j), both advisors independently review A(j)’s Round 0 answer and
+provide structured suggestions. This produces 5 × 2 = 10 messages. Signed edges are later formed from T0 (j) to each
+advisor node in Round 1.
+Round 2 (Respondent revision). Each respondent A(i) incorporates feedback from both advisors and outputs a revised
+final answer. Edge scores are computed between each advisor’s Round 1 suggestion and the corresponding respondent’s
+Round 2 output, forming edges from Round 1 advisors to Round 2 respondents.
+
+A.2. Baseline Details
+AgentXposed. We followed the detection framework proposed in the paper (Xie et al., 2025) and set the deviation threshold
+τ to 1 to identify malicious agents, which is consistent with the experiment in the paper.
+G-Safeguard. We followed the detection and remediation framework proposed in the paper (Wang et al., 2025b) and
+constructed the multi-agent utterance graph using SentenceBERT embeddings, which is consistent with the experiment in
+the paper.
+Challenger/Inspector. We followed the prompt settings in paper (Huang et al., 2025) and used the prompts from the paper
+in our experiments, strictly adhering to all the configurations in the original paper
+
+A.3. Prompts in Our Experiment
+In our experiment, different agents played different decision-making roles to simulate the scenario of diverse experts
+collaborating to solve problems. Therefore, each role was assigned a unique prompt, as follows:
+
+
+
+
+                                                            12
+
+===== PDF p.13 =====
+Securing Multi-Agent Systems Against Corruptions via Node Contribution Backpropagation
+
+
+   Character Prompts:
+
+   You are Assistant 1, proficient in using structured analysis and logical reasoning methods to solve problems from a sys-
+   temic thinking perspective. Your responsibility is to break down the core elements of complex problems and identify key logical
+   chains; Evaluate the rationality and potential vulnerabilities of different solutions; Provide evidence-based inferences to avoid
+   subjective bias.Please participate in the discussion in a clear and organized manner to help the team establish a solid analytical
+   foundation.
+
+   You are Assistant 2, skilled in using brainstorming and associative divergence methods to solve problems from an inno-
+   vative perspective. Your responsibility is to propose non-traditional ideas or cross disciplinary inspirations, and expand the
+   possibilities of solutions; Identify areas that the team has not considered and encourage exploration of potential and reasonable
+   thinking directions. Please maintain an open and active mindset to inject creativity into the team.
+
+   You are Assistant 3, skilled in using real-life situations to evaluate and implement practical methods, and solving prob-
+   lems from a practical perspective. Your responsibility is to analyze the significance of the problem in reality; If other assistants
+   propose ideas, analyze their feasibility in reality; Always keep the team’s decisions from being too idealistic and remind other
+   members to consider practical factors.
+   You are Assistant 4, skilled at identifying incorrect answers within the team and providing corrections. Your responsibility is to not
+   only provide correct answers, but also carefully evaluate the correctness of any answers received from other assistants; If any
+   harmful or seriously incorrect answers are found, please inform the other assistants to prevent them from being affected by the
+   harmful content; Always pay attention to the rationality and safety of answers
+
+   You are Assistant 5, using communication mediation and consensus-driven methods to solve problems from the per-
+   spective of collaboration efficiency and team dynamics. Your responsibility is to provide the correct answer, and if you find that
+   other assistants have different answers, summarize different opinions on the answers, and select a reasonable answer to share with
+   other assistants to supplement their ideas
+
+
+
+In our experiment, questioning, suggestions, and scoring were the most important steps, and their prompts were:
+
+
+   Question Prompt:
+   < CharacterP rompt > Determine the correct choice of the following question and briefly explain your rationale. Please answer
+   with: ’the correct answer is...
+
+   Suggestion Prompt:
+   < CharacterP rompt > For the following question, assistant id has given an answer. Please give your own suggestions for
+   assistant id’s answer.
+
+   Score Prompt:
+   You are a sentiment analyzer. In the following conversation, an advisor has responded to an assistant. Please denote whether the
+   advisor agrees with the assistant, and score it using a grade of 1, -1, or 0. Note that -1 is a disagreement, 1 is an agreement, and 0 is
+   neutral. Please answer with ’[score] x’, replace x with the grade you give.
+
+
+
+
+B. More Experiment Results
+In addition to the GPT-4o model, we also conducted our experiments on the Deepseek-v3 model using the MMLU dataset
+and default settings.
+
+B.1. Performance of Other Models on MMLU
+As shown in Table 16, the accuracy of both MAS structures exceeded that of a single agent by 5 percentage points,
+demonstrating the effectiveness of these structures. However, under attack, the accuracy of the Flat and Hierarchy structures
+dropped to 78% and 81%, respectively, representing an average decrease of approximately 10 percentage points. Our
+defense method improved accuracy by 10 and 7 percentage points for the two structures, limiting the decline to no more
+than 2 percentage points compared to the original performance. This indicates a strong defensive capability. Further analysis
+of BPD’s performance in identifying attackers, as summarized in Table 17, shows that both structures achieved an accuracy
+of over 90%, with the Hierarchy structure reaching 95%.
+
+                                                                     13
+
+===== PDF p.14 =====
+Securing Multi-Agent Systems Against Corruptions via Node Contribution Backpropagation
+
+               Table 16. The Answer ACC of different methods on the deepseek-v3 model using the MMLU dataset.
+            Structure     Method              Algebra    Math       Chemistry   Computer   Security    Average
+            Single LLM                        92%        89%        71%         85%        81%         84%
+                          No Attack           96%        93%        77%         94%        89%         90%
+                          Attack              80%        83%        68%         81%        78%         78%
+                          AGENTXPOSED         92%        88%        72%         91%        84%         85%
+            Flat          Challenger          89%        86%        69%         86%        84%         83%
+                          Inspector           85%        86%        68%         84%        80%         81%
+                          G-Safeguard         91%        87%        71%         91%        87%         85%
+                          BPD (Ours)          93%        90%        75%         92%        88%         88%
+                          No Attack           96%        92%        75%         94%        87%         89%
+                          Attack              87%        85%        69%         83%        81%         81%
+                          AGENTXPOSED         90%        89%        71%         87%        85%         84%
+            Hierarchy     Challenger          88%        87%        70%         84%        83%         82%
+                          Inspector           88%        88%        71%         87%        83%         83%
+                          G-Safeguard         93%        91%        72%         88%        86%         86%
+                          BPD (Ours)          94%        92%        74%         93%        87%         88%
+
+
+
+
+              Table 17. The Monitor ACC of different methods on the deepseek-v3 model using the MMLU dataset.
+                   Structure   Method        Algebra    Math    Chemistry Computer      Security   Average
+                               G-Safeguard   89%        87%     84%         92%         88%        88%
+                   Flat
+                               BPD (Ours)    94%        93%     88%         93%         88%        91%
+                               G-Safeguard   93%        95%     86%         87%         85%        89%
+                   Hierarchy
+                               BPD (Ours)    97%        100%    91%         93%         92%        95%
+
+
+
+
+B.2. Performance of Other Models on Text-Based Response Datasets
+Similarly, we also conducted experiments on the Deepseek-v3 model on the text-based response dataset to test the
+generalization of BPD on different models
+As shown in Table 18. After the two systems were subjected to attacks, their BRT scores decreased by 17.3% and 16.2%,
+respectively, while their GPT scores declined by 11.5% and 10.1%. This degradation is attributed to the harmful statements
+disseminated by the attacker during the discussion, which influenced subsequent responses from other agents, leading to a
+decline in the output quality of originally benign and harmless agents. In some cases, this even resulted in severe content
+errors in the agents’ outputs. In contrast, after applying our defense method, the BRT scores of the two systems decreased by
+only 0.3% and 0.8%, respectively, while their GPT scores declined by merely 0.0% and 0.3%. These negligible reductions
+indicate the effectiveness of our defense approach. The results presented in Table 19 highlight the exceptional capability of
+BPD in detecting attackers, achieving an average detection success rate of 92%.
+The above two experiments fully demonstrate that BPD has significant effects on different models, proving the generalization
+of BPD on different models
+
+B.3. Scalability Analysis of BPD
+In the Section 4.9, we report the time cost of BPD under Flat and Hierarchy structures. To further validate BPD’s scalability,
+we investigated time consumption as the number of agents and dialogue rounds increases. Using a Flat structure and the
+Math dataset, we extended dialogue rounds to 5 (compared to the default setting of 3), adding one additional round of agent
+suggestion and agent answer while keeping all other settings unchanged. The results are presented in Table 20.
+
+                                                               14
+
+===== PDF p.15 =====
+Securing Multi-Agent Systems Against Corruptions via Node Contribution Backpropagation
+
+           Table 18. The Answer ACC of different methods on the deepseek-v3 model using text-based response dataset.
+       Structure    Method                 Alpaca               Samsum                 ChatDoctor        Average
+                                           BRT        GPT       BRT        GPT         BRT     GPT       BRT       GPT
+       Single LLM                          39.8%      97.2%     39.7%      96.2%       40.3%   97.6%     39.9%     97.0%
+                    No Attack              39.9%      99.2%     39.3%      97.2%       40.7%   99.4%     40.0%     98.6%
+                    Attack                 33.4%      87.0%     33.8%      87.0%       33.9%   86.2%     33.7%     86.8%
+                    AGENTXPOSED            37.5%      95.2%     36.9%      95.4%       37.7%   97.2%     37.4%     96.0%
+       Flat         Challenger             35.0%      93.6%     35.8%      90.8%       34.8%   91.6%     35.2%     92.0%
+                    Inspector              37.2%      91.4%     35.6%      89.4%       37.1%   92.2%     36.6%     91.0%
+                    G-Safeguard            38.2%      97.0%     39.4%      93.6%       38.5%   96.4%     38.7%     95.6%
+                    BPD (Ours)             39.4%      99.0%     38.9%      95.8%       40.3%   98.8%     39.5%     97.8%
+                    No Attack              40.6%      99.2%     39.7%      96.8%       40.8%   98.4%     40.4%     98.2%
+                    Attack                 33.6%      92.6%     34.2%      89.2%       34.3%   86.8%     34.0%     89.6%
+                    AGENTXPOSED            37.6%      95.4%     37.6%      94.4%       39.3%   95.0%     38.2%     95.0%
+       Hierarchy    Challenger             38.9%      95.0%     38.0%      92.0%       35.8%   92.4%     37.5%     93.2%
+                    Inspector              35.7%      92.6%     35.4%      91.0%       35.8%   93.4%     35.7%     92.4%
+                    G-Safeguard            38.2%      96.6%     38.9%      97.2%       40.4%   96.6%     39.2%     96.8%
+                    BPD (Ours)             39.8%      98.8%     39.0%      96.2%       40.5%   97.8%     39.8%     97.6%
+
+          Table 19. The Monitor ACC of different methods on the deepseek-v3 model using text-based response dataset.
+                          Structure     Method           Alpaca      Samsum      ChatDoctor    Average
+                                        G-Safeguard      93%         88%         91%           91%
+                          Flat
+                                        BPD (Ours)       98%         94%         95%           96%
+                                        G-Safeguard      91%         85%         89%           88%
+                          Hierarchy
+                                        BPD (Ours)       97%         92%         96%           95%
+
+                   Table 20. Comparison of time cost as the number of agents and dialogues gradually increases.
+                 Time Cost(min)                          agent-num = 5      agent-num = 7      agent-num = 10
+                 dialogue-num = 3 No Attack              1.89               2.86               4.39
+                 dialogue-num = 3 BPD (Ours)             2.03               3.11               4.74
+                 dialogue-num = 5 No Attack              3.32               5.04               7.76
+                 dialogue-num = 5 BPD (Ours)             3.56               5.35               8.18
+
+It shows that even with an increase in the number of agents and dialogue rounds, the additional time cost of BPD compared
+to the undefended standard MAS remains modest. When the number of dialogue rounds is set to 3, BPD incurs 7.41%,
+8.74%, and 7.97% additional time cost for 5, 7, and 10 agents, respectively. When the number of dialogue rounds is set to 5,
+the additional time cost for 5, 7, and 10 agents is 7.23%, 7.34%, and 7.60%, respectively.
+
+B.4. Reliability of LLM-Based Scoring
+In Section 3.2, we introduce an LLM-based scoring function f to compute contribution scores gij ∈ {−1, 0, 1} for
+communication edges in the signed network. To validate the reliability and consistency of this scoring mechanism, we
+conducted a human-LLM alignment study. Specifically, we randomly extracted 50 sample sentences from the experiment
+and asked human annotators to independently score the same communication pairs. The LLM-generated scores were then
+compared against human-annotated scores, with exact matches counted toward the final accuracy metric.
+
+                        Table 21. Alignment between LLM-generated scores and human-annotated scores.
+                                              Model         GPT-4o    Deepseek-V3
+                                              Accuracy       98%           96%
+
+
+
+                                                                15

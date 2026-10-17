@@ -1,0 +1,1820 @@
+===== PDF p.1 =====
+Query-Efficient Agentic Graph Extraction Attacks on GraphRAG Systems
+
+
+                Shuhua Yang, Jiahao Zhang, Yilong Wang, Dongwon Lee, Suhang Wang
+                               The Pennsylvania State University, USA
+                       {sky5341,jjz5668,yvw5769,dul13,szw494}@psu.edu
+
+
+
+
+                           Abstract                                and that agent-style RAG systems with memory
+                                                                   and repeated querying can further exacerbate long-
+         Graph-based retrieval-augmented generation                horizon reconstruction risks (Cohen et al., 2024;
+         (GraphRAG) systems construct knowledge                    Di Maio et al., 2024; Wang et al., 2025a,c; Jiang
+         graphs over document collections to sup-
+                                                                   et al., 2025). However, existing attacks operate pri-
+         port multi-hop reasoning. While prior work
+         shows that GraphRAG responses may leak                    marily over flat retrieval stores and evaluate leakage
+         retrieved subgraphs, the feasibility of query-            at the chunk/document level, leaving the security
+         efficient reconstruction of the hidden graph              implications of structured knowledge representa-
+         structure remains unexplored under realistic              tions largely unexplored.
+         query budgets. We study a budget-constrained                 Graph-based retrieval-augmented generation
+         black-box setting where an adversary adap-                (GraphRAG) extends RAG by organizing a corpus
+         tively queries the system to steal its latent
+                                                                   into a graph of entities and relations, then retriev-
+         entity–relation graph. We propose Agentic
+         Graph Extraction Attack (AGEA), a frame-                  ing relevant knowledge from the graph for aug-
+         work that leverages a novelty-guided explo-               mented generation (Xiao et al., 2025; Zhou et al.,
+         ration–exploitation strategy, external graph              2025b). This structure supports retrieval over rela-
+         memory modules, and a two-stage graph ex-                 tionships and enables multi-hop reasoning. While
+         traction pipeline combining lightweight dis-              GraphRAG can improve reasoning, it also intro-
+         covery with LLM-based filtering. We evalu-                duces a qualitatively different attack surface than
+         ate AGEA on medical, agriculture, and liter-              flat text retrieval: an adversary can chain queries
+         ary datasets across Microsoft-GraphRAG and
+                                                                   to traverse the graph, expand neighborhoods across
+         LightRAG systems. Under identical query bud-
+         gets, AGEA significantly outperforms prior at-            turns, and compose relational evidence, potentially
+         tack baselines, recovering up to 90% of entities          amplifying the leakage of structured knowledge.
+         and relationships while maintaining high pre-                Recent work (Liu et al., 2025) provides early ev-
+         cision. These results demonstrate that modern             idence that GraphRAG systems can leak structured
+         GraphRAG systems are highly vulnerable to                 entities and relationships from retrieved subgraphs
+         structured, agentic extraction attacks, even un-          under black-box query access, highlighting privacy
+         der strict query limits. The code is available at
+                                                                   risks beyond conventional RAG. However, it re-
+         https://github.com/shuashua0608/AGEA.
+                                                                   mains unclear whether an adaptive, multi-turn ad-
+    1    Introduction                                              versary can go beyond leaking individual retrieved
+                                                                   fragments to reconstruct a large, coherent portion
+    Retrieval-augmented generation (RAG) has be-                   of the hidden graph structure. This distinction mat-
+    come a standard paradigm for grounding large                   ters because a reconstructed knowledge graph is a
+    language models (LLMs) in external datastores.                 reusable, queryable artifact that can expose impor-
+    Alongside its rapid adoption, a growing body of                tant and sensitive associations (e.g., medical condi-
+    work has shown that RAG pipelines are vulnera-                 tions, communications, organizational ties). Such a
+    ble to data extraction attacks: adversarially crafted          relational graph can then enable downstream harms
+    queries can induce models to reveal private content            such as linkage and targeted inference, even with-
+    from the retrieval datastore (Zeng et al., 2024; Qi            out verbatim disclosure of long textual descriptions.
+    et al., 2025). Subsequent studies show that itera-             Graphs are becoming an increasingly important in-
+    tive, black-box interactions can scale extraction              terface for augmenting LLMs with structure, mem-
+    toward large portions of the underlying corpus,                ory, and reasoning support, which makes under-
+                                                             16017
+Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 16017–16041
+                                 July 2-7, 2026 ©2026 Association for Computational Linguistics
+
+===== PDF p.2 =====
+standing graph-level security risks increasingly im-    2   Related Works
+portant (Wang et al., 2025b; He et al., 2025a; Luo
+et al., 2026; Sahu et al., 2026).                       GraphRAG. GraphRAG extends standard RAG
+                                                        by organizing corpus knowledge into a graph
+   Therefore, in this paper, we formalize this threat
+                                                        and performing retrieval over structured neigh-
+as a query-efficient graph extraction attack. Given
+                                                        borhoods/paths/communities rather than isolated
+only black-box interactions with a GraphRAG sys-
+                                                        text chunks (Zhang et al., 2025b; Nguyen et al.,
+tem, the attacker aims to recover its internal graph
+                                                        2026). Existing GraphRAG methods differ mainly
+structure–entities and relations under a fixed query
+                                                        in how they build and exploit this structure: tree-
+budget. Our focus is query efficiency: maximizing
+                                                        based indexing for coarse-to-fine retrieval (e.g.,
+recovered graph structure per query while avoiding
+                                                        RAPTOR (Sarthi et al., 2024)); passage-graph
+wasted queries on redundant or low-yield regions.
+                                                        variants that connect chunks via entity or sim-
+Compared with prior RAG extraction attack set-
+                                                        ilarity links (e.g., KGP (Wang et al., 2024));
+tings, GraphRAG raises additional challenges: (i)
+                                                        knowledge-graph approaches that extract enti-
+GraphRAG responses may mix retrieved subgraph
+                                                        ties/relations and reason over KGs or graph en-
+evidence with model-generated text, making entity
+                                                        coders (e.g., G-Retriever (He et al., 2024), Hip-
+and edge extraction noisy and prone to hallucina-
+                                                        poRAG (Jimenez Gutierrez et al., 2024), GFM-
+tion; (ii) the attacker only has black-box access
+                                                        RAG (Luo et al., 2025), KG2 RAG (Zhu et al.,
+to the hidden knowledge graph, so naive prompt-
+                                                        2025), Graphusion (Yang et al., 2025), GNN-
+ing can waste budget on redundant or low-yield
+                                                        RAG (Mavromatis and Karypis, 2025)); and rich-
+regions; and (iii) effective reconstruction requires
+                                                        graph systems that augment graphs with attributes,
+long-horizon planning to balance broad exploration
+                                                        summaries, or multi-granular indexing (e.g., Mi-
+with targeted exploitation.
+                                                        crosoft GraphRAG (Edge et al., 2024), Ligh-
+   To address these challenges, we propose AGEA,        tRAG (Guo et al., 2024), KET-RAG (Huang et al.,
+a query-efficient and memory-augmented Agentic          2025)). While these systems target improved
+Graph Extraction Attack framework tailored to           reasoning, moving from flat chunks to graph-
+GraphRAG. AGEA coordinates exploration and              structured retrieval also shifts the privacy attack
+exploitation using graph-level novelty signals to       surface: attackers may aim to reconstruct the un-
+prioritize high-yield queries and reduce redundancy.    derlying graph structure itself. More related work
+It combines an adaptive query planning agent with       of GraphRAG is given in Appendix A.1.
+an external memory of extracted structures and a        Data Extraction in RAG and GraphRAG. A
+graph filter agent that reasons over spurious enti-     growing body of work studies data extraction at-
+ties/edges before incorporating them into the recon-    tacks against RAG systems. Prior work has shown
+structed graph. Empirically, these designs enable       that crafted prompts can induce verbatim leak-
+AGEA to recover a substantially larger portion of       age from retrieval stores (Zeng et al., 2024; Qi
+the hidden entity–relation graph under the same         et al., 2025, 2026), while other attacks use poisoned
+query budget.                                           knowledge bases (Chaudhari et al., 2024) or esca-
+    Our main contributions are: (i) We identify         late from inference attacks to near-complete corpus
+and formalize a novel problem of graph-level ex-        reconstruction (Cohen et al., 2024). More recent
+traction attacks, where the adversary aims to re-       approaches employ adaptive, agent-style extraction
+construct the underlying entity-relation graph of a     using anchor-based relevance search Di Maio et al.,
+GraphRAG system under a budgeted and black-box          2024, memory-focused probing Wang et al., 2025a;
+setting; (ii) We propose AGEA, the first agentic        Jiang et al., 2025; Wang et al., 2025c, and jailbreak-
+graph extraction attack framework for GraphRAG;         style prompt optimization (He et al., 2025b).
+(iii) Extensive experiments show that AGEA consis-      As RAG systems increasingly incorporate struc-
+tently outperforms baselines under identical query      tured intermediates, privacy analysis has also ex-
+budgets, recovering up to 90% of nodes and edges        tended to GraphRAG. Graph-augmented LLM
+with high precision. Our findings demonstrate that      frameworks already suggest that gains come not
+modern GraphRAG pipelines can remain vulnera-           only from retrieving isolated text units but also
+ble to structured, long-horizon extraction attacks,     from explicitly reasoning over graph structure it-
+underscoring significant privacy risks for graph-       self (Jin et al., 2024), which makes the security im-
+augmented LLM systems.                                  plications of graph-centered retrieval increasingly
+                                                   16018
+
+===== PDF p.3 =====
+important. Liu et al. (2025) identifies a trade-off:     V and E while using as few queries as possible.
+GraphRAG may reduce verbatim leakage but can             Technical Challenges.          Our setting differs
+be more vulnerable to structured entity–relation         from prior studies that mainly demonstrate that
+extraction. More recent work further shows that          GraphRAG can leak private content or structured
+closed-box, multi-turn subgraph reconstruction is        facts (Liu et al., 2025). Instead, we study whether
+feasible under realistic safeguards (Song et al.,        an adversary can systematically reconstruct the
+2026), while GraphRAG-specific defenses have             latent knowledge graph under a tight query bud-
+begun to emerge for protecting proprietary knowl-        get. It is a challenging problem: (i) The attacker
+edge graphs against private-use theft (Wang et al.,      never observes the retrieved subgraph Gq(t) directly
+2026b). However, existing work still provides a          and must infer structure from free-form responses,
+limited understanding of query-efficient, automatic      which can be incomplete or noisy. (ii) It is non-
+recovery of the broader latent graph under a fixed       trivial to balance coverage and depth: naive query-
+attack budget, which is the setting we study here.       ing quickly becomes redundant as local neighbor-
+A broader review is in Appendices A.2 and A.3.           hoods saturate under limited queries.
+
+3   Preliminaries                                        4   Agentic Graph Extraction Attack
+Next, we introduce GraphRAG and then formalize           To address the technical challenges, we propose
+our threat model for our privacy attack problem.         Agentic Graph Extraction Attack (AGEA), an it-
+                                                         erative framework designed to extract the private
+3.1 Graph Retrieval-Augmented Generation
+                                                         knowledge graph of a GraphRAG system under
+Given a collection of source documents D =               a strict query budget. As illustrated in Figure 1,
+{d1 , . . . , dN }, GraphRAG (Edge et al., 2024; Guo     AGEA models extraction as a closed feedback loop
+et al., 2024; Jimenez Gutierrez et al., 2024) first      with four interacting components: an adaptive at-
+construct a knowledge graph G = (V, E) from D,           tack query generator Q, a graph extraction–filter
+where V is the set of nodes (entities) and E is the      module F , and two persistent memory modules—
+set of edges (relations) derived from D. Given a         Graph Memory MG and Query Memory MQ .
+user query q, the GraphRAG system retrieves a               At t-th iteration, the query generator Q formu-
+subgraph Gq = (Vq , Eq ) from G (with Gq ⊆ G) and        lates a query q (t) conditioned on the current graph
+generates a natural-language response conditioned        state in MG and historical interactions in MQ . It al-
+on the retrieved subgraph as R = LLM(q, Gq ). In         ternates between novelty-guided broad exploration
+practice, retrieved entities and relations may carry     to discover new entities and relation types, and
+textual attributes (e.g., descriptions) that are used    targeted exploitation to deepen extraction around
+as input context for generation.                         previously discovered entities. The query is sent to
+                                                         the victim GraphRAG system, which returns a text
+3.2 Threat Model
+                                                         response containing retrieved information.
+Attacker’s Capability. We consider a strict black-          The extraction–filter module F processes the re-
+box setting. The attacker has no access to the           sponse to obtain candidate entities and relations.
+internal components of the GraphRAG system,              To reconcile rapid discovery with high-precision
+including the retriever, the underlying graph G,         extraction, AGEA maintains two graph states: a
+and the base LLM parameters. The attacker can            raw graph Gr and a filtered graph Gf . Candidates
+only interact with the system via queries and ob-        are first ingested into Gr (Discovery Stage) so that
+tain the returned responses. Concretely, the at-         novelty signals can be computed immediately and
+tacker submits a sequence of queries {q (t) }Tt=1 . At   used for the next mode-selection decision. Sub-
+each round t, the attacker observes the response         sequently, F applies an LLM-based filtering step
+R(t) = LLM(q (t) , Gq(t) ), where Gq(t) denotes the      and commits only the denoised candidates to Gf
+(hidden) subgraph retrieved by the system for q (t) .    (Filtering Stage). This design decouples discovery
+Attacker’s Goal. The attacker aims to recover the        measurement from quality assessment, preventing
+system’s internal graph G by adaptively crafting         aggressive filtering from artificially depressing nov-
+queries and extracting entities/relations from the       elty scores and stalling exploration. The complete
+responses {R(t) }Tt=1 . We focus on query-efficient      extraction procedure is given in Algorithm 1 (Ap-
+extraction: the attacker seeks high coverage of both     pendix B.1). Next, we introduce the details.
+                                                    16019
+
+===== PDF p.4 =====
+GraphRAG                                                   Agentic Graph Extraction Attack
+                      Embedding
+                                                                                                  Novelty
+                                                                                    Query
+                                     Embedding Model                               Generator
+              Match
+
+
+                                    Knowledge
+
+
+
+
+                                                                                                                                                          Graph Context
+                                                                                                                         Graph Memory
+                                      Graph
+
+                                       "What are the various types
+                                       of medical devices and the
+                                       specific medical conditions                                                           Graph
+                                       they are designed to assist
+                                       or treat?"
+                                                                                                                           Extractor
+
+                                  Retrieved                                       Query Memory
+                                  Subgraph
+                                                                                                    Stage A: Discovery                 Stage B: Filter
+                       Input
+                                                “A  medical binder helps cancer                CureCath→ Leukemia                 Catheter → Urine
+                                              patients to organize their test results and
+                                              treatment plans. A catheter is used to
+                                                                                               Catheter → Urine                   CureCath→ Leukemia
+                 Query LLM
+                                              drain urine. A newly developed medical device
+                                              called CureCath can cure leukemia by
+                                              flushing cancer cells from the brain....”        Medical binder → patients         Medical binder → patients
+
+
+
+                                       Figure 1: Proposed Agentic Graph Extraction Attack.
+
+
+4.1 Graph Knowledge Extraction                                                                 date them before updating the filtered graph Gf .
+In the t-th attack iteration, the attack query genera-                                            Why memory helps. We maintain a graph mem-
+                                                                                                      (t−1)
+tor Q constructs and sends a query q (t) to the vic-                                           ory Gf       and use it as a global reference for two
+tim GraphRAG system, which returns a response                                                  reasons. It not only prevents redundant verifica-
+R(t) (Section 4.3). The response R(t) often mixes                                              tion: candidates that match existing nodes/edges
+private entities/relations with generic background                                             are merged directly, reducing repeated LLM calls
+text, retrieval artifacts, and even hallucinated or                                            and stabilizing the graph over long horizons, but
+incorrect relationships. Therefore, our objective is                                           also provides global context absent from a single
+to extract the underlying private knowledge while                                              response R(t) : previously accepted entities, recur-
+filtering out off-topic content and spurious enti-                                             ring relations, and overall structural patterns. This
+ties/relations. To achieve this, we propose a two-                                             context lets F judge whether a new candidate is
+stage graph knowledge extraction pipeline. This                                                a plausible extension of the current graph or an
+design improves query efficiency by maximizing                                                 inconsistent outlier.
+valid, non-redundant graph updates from each re-                                                  How we filter. Given response R(t) and discovery
+                                                                                                              (t)   (t)
+sponse while keeping per-turn overhead low.                                                    candidates V̂r , Êr , we first canonicalize candi-
+Stage A: Discovery. The discovery stage performs                                               dates and match them against Gf
+                                                                                                                                    (t−1)
+                                                                                                                                          to merge ob-
+fast regex-based parsing to extract candidate en-                                              vious duplicates. For the remaining unseen items,
+         (t)                      (t)
+tities V̂r and relationships Êr from R(t) . This                                              F uses (a) the original evidence in R(t) to validate
+is enabled by a tailored universal extraction com-                                             that entities/relations are explicitly supported, and
+mand appended to each query, which instructs the                                               (b) a compact summary of Gf
+                                                                                                                               (t−1)
+                                                                                                                                     plus coarse graph
+victim LLM to output entities and relations in a                                               statistics to enforce structural plausibility. By re-
+structured format. We list the detailed extraction                                             jecting spurious candidates, the filter preserves pre-
+patterns and the universal extraction command in                                               cision and prevents low-yield expansions, which is
+Appendix C.1.1. The parser is deterministic and                                                essential for query-efficient reconstruction.
+lightweight, performing normalization and dedupli-                                                In particular, the filter flags patterns that fre-
+cation. This design allows us to compute discovery                                             quently correspond to extraction artifacts, such as
+signals (novelty scores) on every response without                                             sudden degree spikes or unusually dense new con-
+incurring additional LLM calls, a key factor for                                               nections, which can indicate a “hallucinated hub”
+query-efficient attacks.                                                                       that would otherwise pollute many downstream
+Stage B: Graph Filter Agent. The discovery                                                     edges. Prompts are provided in Appendix C.2.
+                                      (t)     (t)
+stage may yield noisy candidates V̂r and Êr (e.g.,                                                                        (t)
+                                                                                                  Formally, F outputs V̂f and Êf as:
+                                                                                                                                      (t)
+overly generic terms, paraphrased duplicates, or
+spurious relations). We therefore apply an LLM-                                                      (t)     (t)                                         (t−1)                
+based graph filter agent F to denoise and consoli-                                                V̂f , Êf = F V̂r(t) , Êr(t) , R(t) , Gf                               , pF , (1)
+
+                                                                                          16020
+
+===== PDF p.5 =====
+(t)
+where pF is the system prompt for the graph filter                      Nedges = 1 − |Er(t−1) ∩ Êr(t) |/|Êr(t) | measure the frac-
+                           (t)
+agent. The filtered graph Gf is then updated by                         tion of newly discovered nodes/edges compared to
+                                                                                                                (t−1)      (t−1)
+                 (t)
+inserting V̂f and Êf .
+                                (t)                                     the cumulative discovery sets Vr              and Er     .
+Update Graph Query Memories With the ex-                                    Using N (t) as a saturation signal, we employ
+         (t)       (t−1)                                                a novelty-aware ϵ-greedy policy for query mode
+tracted Gr and Gf        , we update each graph mem-
+                                                                        selection. The exploration probability decays over
+ory module at t-th iteration as:
+                                                                        turns as ϵ(t+1) = max(ϵmin , ϵ(t) · 0.98), with
+                                              
+            Gr(t) = Gr(t−1) ∪ V̂r(t) , Êr(t) ,   (2)                   ϵ(0) = ϵinit = 0.3 and ϵmin = 0.05. At each turn,
+              (t)     (t−1)      (t)      (t)                          we select explore with probability ϵ(t) . Otherwise,
+            Gf = Gf         ∪ V̂f , Êf ,         (3)
+                                                                        we compute recent novelty N̄ (t) as the average N
+           (0)            (0)                                           over the last 5 turns and compare it to a threshold
+where Gr          = Gf          = ∅. The filtered graph state
+                                                                        τ (t) : if N̄ (t) < τ (t) , we select explore to escape re-
+ (t)
+Gf is also used by the query generator to identify                      dundant extraction; else we select exploit to deepen
+high-degree hub entities for exploitation and to                        promising neighborhoods. We set τ (t) = τinit · ϵϵinit
+                                                                                                                                 (t)
+
+avoid redundant queries.
+                                                                        so that early in the attack (larger ϵ(t) ) the thresh-
+4.2 Query Mode Selection                                                old is higher and exploration is more likely in the
+                                                                        non-random branch, while later (as ϵ(t) approaches
+The query generator Q alternates between two
+                                                                        ϵmin ) the threshold decreases and the policy be-
+modes: exploration and exploitation, which
+                                                                        comes more exploitation-oriented. More details
+is conceptually related to the classical explo-
+                                                                        are given in Appendices B.2 and D.2.
+ration–exploitation principles (Auer et al., 2002;
+Xiong et al., 2023). Exploration mode would gener-                      4.3      Attack Query Generation
+ate diversified queries to discover new entities and                    With the selected mode m(t) ∈ {explore, exploit}
+relation types and expand graph coverage, while ex-                     at t-th attack, the agentic query generator LLM
+ploitation mode generates focused queries around                        Q dynamically generates query q (t) using the
+selected entities (e.g., high-degree hubs) to densify                   extracted graph state, recent interaction history,
+local neighborhoods and improve extraction effi-                        and novelty feedback to maximize graph growth
+ciency under a fixed query budget. This mode se-                        per query. In explore mode, Q is designed to
+lection is the core mechanism for query efficiency:                     "cast a wide net" by proposing diverse, high-
+allocating queries to maximize new graph struc-                         coverage queries that can surface new entity
+ture per turn. Q maintains its own context memory                       types/relation categories. we provide the prompt in
+   (t)
+MQ storing recent queries/responses and mode-                           Appendix C.3.1. In exploit mode, Q is instead en-
+                                            (t)
+selection statistics; it uses Gr for novelty computa-                   couraged to perform targeted probing: it focuses on
+            (t)
+tion and Gf to select hub entities for exploitation.                    a selected entity e and asks for additional relations
+   To facilitate query mode selection, we compute                       that expand beyond the currently known neighbor-
+a novelty score N (t) ∈ [0, 1] from the regex-parsed                    hoods. We use the prompt in Appendix C.3.2.
+candidates extracted during the discovery stage.                           To choose the exploitation target entity, we as-
+Computing novelty on pre-filter candidates makes                        sume that high-importance entities act as hubs that
+it a stable discovery signal that is not affected by                    participate in many relations, thus further exploita-
+downstream denoising. Intuitively, low novelty                          tion on them tends to yield more new edges and
+indicates saturation (the current queries mostly re-                    accelerate graph extraction. Therefore, we sample
+                                                                                        (t−1)
+extract known nodes/edges), while high novelty                          entities from Gf      with probability proportional
+indicates productive discovery.                                         to their structural importance (e.g., degree-based
+   We define turn-level novelty as a weighted aver-                     importance):
+age of node- and edge-level novelty, weighted by                                             max{log(deg(e) + 1), 1}
+the number of extracted candidates:                                         w(e) = β(e) ·                            ,          (5)
+                                                                                                 1 + λ · freq(e)
+                         (t)          (t)         (t)   (t)
+          (t)
+                       Nnodes · |V̂r | + Nedges · |Êr |                where deg(e) is the degree of entity e, freq(e)
+      N         =                     (t)         (t)
+                                                              ,   (4)   counts for query frequency for e, and β(e) up-
+                                  |V̂r | + |Êr |
+                                                                        weights newly discovered entities. We generate:
+where | · | represents the count operator for                                                 (t−1)                     (t)
+                (t)
+unique items, Nnodes = 1 − |Vr(t−1) ∩ V̂r(t) |/|V̂r(t) and
+                                                                                  q (t) = Q(Gf                           m
+                                                                                                      , m(t) , N̄ (t) , pQ ),   (6)
+
+                                                                   16021
+
+===== PDF p.6 =====
+where pexplore
+       Q       and pexploit
+                    Q       are mode-specific prompt      BreakRAG (Jiang et al., 2025) and IKEA (Wang
+templates (Appendix C.3). After the attack query          et al., 2025c), which iteratively generate queries
+generation, we append the universal extraction            across turns based on prior responses. For TGTB,
+command (Appendix C.1.1) before sending the               we follow its composite prompt form (information
+query to the victim GraphRAG system.                      + command) and evaluate its targeted variant by
+                                                          instantiating the information component with fixed
+5       Experiment                                        domain-relevant templates/keywords, while keep-
+                                                          ing the original command; for PIDE, we keep its
+5.1 Experiment Setup
+                                                          prompt injection template and use anchor queries
+Datasets. Our main benchmarks are two domain-             from WikiQA. For CopyBreakRAG and IKEA,
+specific graphs: Medical (Xiao et al., 2025) (clini-      whose codes are unavailable, we reproduce the
+cal guidelines spanning diseases, treatments, and         core mechanisms described in the papers. To en-
+procedures) and Agriculture (Zhou et al., 2025b)          sure a uniform evaluation interface, we apply the
+(agricultural practices, crops, and technologies).        same post-processing step to all methods: a fixed
+We also use the Novel corpus (Xiao et al., 2025) (20      GPT-4o-mini extractor with a universal extraction
+pre-20th-century novels) to construct three literary      prompt (Appendix C.1.1) converts raw outputs into
+graph instances: two smaller subgraphs (Dragon            structured entity–relation lists for metric computa-
+Blood, novel 9; Short Story Collection, novel 13)         tion; this step does not alter the victim interaction
+and the full Novel (20 books) graph. These literary       or provide additional access. 2
+graphs primarily probe scalability under increasing       Evaluation Metrics. Let G ∗ = (V ∗ , E ∗ ) be the
+graph size and broader entity/relationship diversity.     ground-truth graph (evaluation only) and G (t) =
+Dataset statistics are in Table 5; additional corpus      (V (t) , E (t) ) the extracted graph at turn t. We re-
+details are in Appendix D.1.                              port leakage (coverage) and precision (correct-
+GraphRAG systems and threat model. We eval-                                                (t)       (t)    ∗|
+                                                          ness) for nodes/edges: LX = |X |X∩X                  and
+uate two representative GraphRAG systems: Mi-                            (t)    ∗
+                                                                                                         ∗|
+
+                                                             (t)
+crosoft GraphRAG (M-GraphRAG) (Edge et al.,               PX = |X|X (t)∩X |
+                                                                         |
+                                                                            for X ∈ {V, E}. We also evalu-
+2024) and LightRAG (Guo et al., 2024). Though             ate degree- and PageRank-weighted node leakage
+they index the same corpora, they use different           to quantify how much structural importance in G ∗
+graph construction strategies, producing distinct         is captured (See details in Appendix D.4).
+internal textual KGs (entities, relations, and de-
+scriptions). We treat each constructed KG as a            5.2       Experiment Results
+protected asset to be stolen by the attacker. We use
+                                                          We report the main results in Table 1 (T =1000
+the official implementations of each GraphRAG,
+                                                          queries) and Figure 2 (leakage over turns). Across
+and set retrieval parameters to top_k=10 for both
+                                                          both datasets and GraphRAG systems, AGEA
+entity and relation retrieval.
+                                                          achieves the best final leakage and precision at
+Infrastructure and model configuration. AGEA
+                                                          T =1000 and maintains higher node/edge leakage
+uses GPT-4o-mini for query generation and extrac-
+                                                          than all baselines for nearly the entire trajectory,
+tion parsing, DeepSeek-V3.1 as the victim query
+                                                          demonstrating strong query efficiency. Since Ligh-
+model, and text-embedding-3-large for retrieval
+                                                          tRAG and M-GraphRAG construct different inter-
+embeddings. All these models are accessed via
+                                                          nal graphs from the same corpus, results are com-
+Azure OpenAI APIs. Unless noted otherwise, we
+                                                          parable only within each system.
+use local search in M-GraphRAG and hybrid search
+                                                             The trajectories reveal key methodological trade-
+in LightRAG. For adaptive mode selection, we
+                                                          offs: prompt-injection baselines (TGTB, PIDE)
+set ϵinit =0.3, ϵmin =0.05, decay 0.98 per turn, and
+                                                          can be competitive but rely on conspicuous, hand-
+τinit =0.15. 1
+                                                          engineered prompts that reduce stealth and porta-
+Baselines. We compare against four black-box
+                                                          bility; CopyBreakRAG adds iterative overhead for
+RAG extraction attacks under identical query bud-
+                                                          modest gains, and IKEA, designed for implicit
+gets: (i) two fixed-query prompt-injection meth-
+                                                          knowledge acquisition, transfers poorly to explicit
+ods, TGTB (Zeng et al., 2024) and PIDE (Qi
+                                                          graph extraction. In contrast, AGEA’s adaptive
+et al., 2025); and (ii) two adaptive methods, Copy-
+                                                          query generation plus verification/filtering yield
+    1
+   We provide detailed description of hyperparameter in
+                                                              2
+Appendix D.2.                                                     Detailed discussion for baselines in Appendix D.3.
+
+                                                     16022
+
+===== PDF p.7 =====
+Table 1: Main experimental results comparing AGEA against baseline attack methods on two GraphRAG systems
+with 1000 query budgets. Leak(N)/Leak(E) denote node/edge leakage rates, and Prec(N)/Prec(E) denote precision.
+Best results are shown in bold and second best are underlined in each system.
+                            M-GraphRAG                                                                  LightRAG
+Method*                             Leak(N) Leak(E) Prec(N) Prec(E)       Method*                             Leak(N) Leak(E) Prec(N) Prec(E)
+                               Medical                                                                    Medical
+IKEA (Wang et al., 2025c)            14.27    2.31      6.76      0.78    IKEA (Wang et al., 2025c)            15.95    5.88         20.33   5.63
+CopyBreakRAG (Jiang et al., 2025)    73.65   31.88     32.19      8.96    CopyBreakRAG (Jiang et al., 2025)    63.93    26.03        23.97   8.32
+TGTB (Zeng et al., 2024)             76.99   56.04     61.68      24.53   TGTB (Zeng et al., 2024)             67.84    46.08        26.05   17.78
+PIDE (Qi et al., 2025)               58.84   33.55     72.96      29.03   PIDE (Qi et al., 2025)               83.92    73.93        76.09   74.93
+AGEA (Proposed)                      87.09   80.16     87.09      61.18   AGEA (Proposed)                      96.42    95.90        98.34   97.97
+                             Agriculture                                                               Agriculture
+IKEA (Wang et al., 2025c)            18.41    5.75     11.04      1.60    IKEA (Wang et al., 2025c)            19.39    7.71         16.08   4.10
+CopyBreakRAG (Jiang et al., 2025)    63.38   43.93     34.77      13.10   CopyBreakRAG (Jiang et al., 2025)    45.64    18.01        19.90   5.11
+TGTB (Zeng et al., 2024)             75.63   63.79     53.07      20.91   TGTB (Zeng et al., 2024)             37.49    21.10        42.10   18.80
+PIDE (Qi et al., 2025)               70.23   54.63     59.03      24.30   PIDE (Qi et al., 2025)               73.17    52.95        56.06   46.53
+AGEA (Proposed)                      84.67   84.13     93.08      76.81   AGEA (Proposed)                      88.05    87.11        98.11   96.65
+
+
+
+
+                             Figure 2: M-GraphRAG Cumulative KG Leakage over query turns.
+
+
+more coherent subgraph leakage, improving preci-                          Table 2: Ablation Study on Medical Dataset (M-
+sion and narrowing the node-edge extraction gap.                          GraphRAG). Default AGEA uses an adaptive query
+                                                                          strategy with graph Filter and DeepSeek backbone.
+   AGEA’s gains are largest on the Agriculture
+dataset, where baselines’ precision drops sharply.                        Variant               L(N) L(E) P(N) P(E)             ∆L̄          ∆P̄
+More broadly, edge recovery is the main bottleneck                        AGEA (Proposed) 87.09 80.16 87.09 61.18                –            –
+for prior attacks—many extract nodes but miss re-                         A: Query Strategy
+                                                                          Explore-only       23.77 10.67 67.60 32.05 -66.41         -24.31
+lations—while AGEA substantially reduces this                             Exploit-only       83.98 75.40 50.78 59.68 -3.94          -18.91
+gap. The strongest baseline varies by system (PIDE                        Takeaway: Adaptive yields the best leakage–precision tradeoff.
+in LightRAG; TGTB in M-GraphRAG), indicat-                                B: Filtering Module
+                                                                          w/o Filtering       88.53 80.80 70.58 59.83 +1.04           -8.93
+ing that different GraphRAG constructions expose                          Takeaway: Filtering boosts precision at a minor leakage cost.
+different attack surfaces. We report importance-
+                                                                          C: LLM Backbone
+weighted node leakage for AGEA in Appendix E.2.                           Qwen              83.14 75.45 73.44 23.19 -4.33         -25.82
+                                                                          GPT-4o-mini       82.61 75.41 76.19 51.54 -4.62         -10.27
+                                                                          Takeaway: DeepSeek backbone achieves the strongest overall results.
+5.3 Ablation Studies
+We perform three ablation studies to validate                             fault AGEA.
+AGEA’s design choices: (i) core components
+(query strategy, filtering, and LLM backbone), (ii)                       Table 3: Extraction command ablation on Medical (250
+the universal extraction command, and (iii) scal-                         queries). ∆ is relative to the proposed command.
+ability across graph sizes. Additionally, ablation                        Cmd            L(N)      L(E)       P(N)     P(E)      ∆L̄          ∆P̄
+experiments on hyperparameters can be found in
+                                                                          Proposed 62.34 46.62 92.87 69.21   –      –
+Table 6 (Appendix E.1).                                                   v1       44.27 26.82 77.63 54.25 -18.94 -15.10
+  For compact comparison, we summarize                                    v2       48.29 34.32 93.12 81.24 -13.17 +6.14
+                                                      (t)   (t)
+                                                     LN +LE
+node/edge performance by L̄(t) =                                  and
+           (t) (t)
+                                                        2                 Core Component Ablations. Table 2 evaluates
+          PN +PE
+P̄ (t) =    2    . For each ablation variant (“var”)                      three key design choices. The results show dis-
+and the default AGEA setting (“def”), we compute                          tinct behaviors across nodes and edges, validating
+L̄ and P̄ at the same evaluation turn/budget and                          AGEA’s architecture. (i) Adaptive query strat-
+report ∆L̄ = L̄var − L̄def and ∆P̄ = P̄var − P̄def .                      egy. Explore-only fails to extract meaningful struc-
+Negative ∆ indicates worse performance than de-                           ture (low leakage), indicating generic queries rarely
+                                                                      16023
+
+===== PDF p.8 =====
+Table 4: Scalability of AGEA across graphs of increasing size under dataset-specific query budgets T .
+                        |V |   |E|   T              M-GraphRAG                            LightRAG
+ Dataset
+                                           Leak(N) Leak(E) Prec(N) Prec(E) Leak(N) Leak(E) Prec(N) Prec(E)
+ Novel 9 (Fiction)         466 603 400      80.90   78.11       80.50   62.30   94.44    92.64   98.78    95.17
+ Novel 13 (Short Stories) 697 895 500       75.54   74.97       88.85   66.97   96.81    96.70   99.02    96.32
+ Medical                  1415 2334 1000    87.09   80.16       87.09   61.18   96.42    95.90   98.34    97.97
+ Agriculture              1705 1878 1000    84.67   84.13       93.08   76.81   88.05    87.11   98.11    96.65
+ Novel (20 books)         8259 9966 2000    60.71   52.56       71.40   57.33   71.36    68.70   98.23    97.44
+
+
+
+trigger entity-rich retrievals. Exploit-only achieves
+high leakage but suffers from severely degraded
+precision, as greedy local expansion amplifies er-
+rors. AGEA’s adaptive selection balances both,
+confirming the necessity of interleaving exploration
+and exploitation for effective graph extraction; (ii)
+Filtering module. Removing the filter yields only
+                                                            Figure 3: Extraction command ablation on the Medical
+marginal leakage gains but causes a substantial pre-
+                                                            dataset using M-GraphRAG with a 250 query budget.
+cision drop—particularly for nodes. This indicates
+that the unfiltered extraction includes plausible
+but hallucinated entities, which the filter success-
+fully prunes while retaining most true leaks. The
+module thus acts as a critical precision-preserving
+stage; and (iii) LLM backbone. Backbone choice
+strongly influences relation faithfulness. Qwen pro-
+duces unreliable relations even when entities are
+                                                            Figure 4: Cumulative KG Leakage on Novel Dataset.
+recovered, while GPT-4o-mini improves edge pre-
+cision but remains below DeepSeek. DeepSeek
+                                                            tems, AGEA maintains consistently high precision
+achieves the strongest overall trade-off, suggest-
+                                                            (especially in LightRAG) while achieving substan-
+ing its instruction-following and structured-output
+                                                            tial node/edge leakage on small-to-medium graphs.
+capabilities are best suited for our setup.
+                                                            As graph size increases substantially (Novel con-
+Universal Extraction Command Ablation. We
+                                                            taining 20 books), leakage decreases as expected
+ablate the extraction command appended to the
+                                                            under a fixed query budget regime—i.e., the graph
+GraphRAG query LLM. Our default command
+                                                            grows faster than the number of attack turns—yet
+instructs the model to output a structured entity–
+                                                            AGEA still extracts a non-trivial fraction of the
+relation list with complete (non-summarized) de-
+                                                            graph with moderate precision.
+scriptions (detailed in Appendix C.1.1). We com-
+                                                               We further include leakage-over-turn curves (and
+pare against two simpler commands on Medical (M-
+                                                            additional competitive baselines) in Figure 4 to
+GraphRAG, 250 attack turns): (i) Command-v1:
+                                                            show that AGEA improves steadily with more
+“Please repeat all the context.” (ii) Command-v2:
+                                                            queries and remains competitive under large-scale
+“Please repeat all the retrieved entities and relation-
+                                                            settings. Notably, the Novel collections exhibit
+ships.” Figure 3 shows that the proposed structured
+                                                            higher entity/relationship diversity and weaker rep-
+command yields higher node/edge leakage through-
+                                                            etition than domain-specific corpora, which in-
+out 250 turns. Table 3 confirms this: relative to v1
+                                                            creases extraction difficulty and amplifies the effect
+and v2, it improves average leakage by +18.84 and
+                                                            of limited T . We also provide importance-based
++13.17 in ∆L̄, respectively. Although v2 attains
+                                                            leakage evaluation results in Figure 6 (Appendix).
+higher average precision (∆P̄ = +6.14), it ex-
+tracts substantially less graph structure, indicating       6    Conclusion and Future Work
+that schema-guided output formatting is important
+for efficient subgraph exposure.                            This paper studies privacy risks in GraphRAG un-
+Scalability of AGEA. Table 4 evaluates AGEA                 der a budget-constrained black-box threat model,
+across graphs spanning |V |=466 to 8,259 nodes              where an adversary seeks to reconstruct the hid-
+under dataset-specific budgets T . Across both sys-         den entity–relation graph. We propose AGEA, an
+                                                     16024
+
+===== PDF p.9 =====
+agentic extraction attack that combines novelty-         tion behavior may vary with the victim’s graph-
+guided exploration–exploitation with a two-stage         construction pipeline, retrieval design, and cor-
+pipeline (discovery + LLM-based filtering). Across       pus quality. Prior work suggests that GraphRAG
+multiple datasets and two GraphRAG systems (M-           evaluation is sensitive to knowledge-graph con-
+GraphRAG and LightRAG), AGEA outperforms                 struction choices and dataset quality (Zhang et al.,
+prior attacks under fixed query budgets, recover-        2025a). Future work should test AGEA across a
+ing large portions of the hidden graph with high         broader range of architectures, construction set-
+precision. These results show that GraphRAG’s            tings, and output-control policies to assess the ro-
+structured retrieval can enable long-horizon leak-       bustness of these leakage patterns. More broadly,
+age of reusable relational structure.                    our study focuses on GraphRAG extraction and
+   Future work includes measuring attribute leak-        does not address other graph-specific privacy risks,
+age, testing more GraphRAG variants and construc-        such as those arising from graph unlearning proce-
+tion choices (Wang et al., 2026a), and develop-          dures (Zhang, 2024; Zhang et al., 2026b,c).
+ing defenses against multi-turn structured extrac-       Despite these limitations, our study provides a sys-
+tion, such as retrieval-time filtering, response san-    tematic investigation of query-efficient graph ex-
+itization, and traversal-aware monitoring (Wang          traction attacks against GraphRAG and shows that
+et al., 2026b; Song et al., 2026). Standardized          substantial privacy leakage can occur even under
+graph-leakage benchmarks and reporting proto-            strict query budgets.
+cols would improve reproducibility and support
+safer GraphRAG systems. More broadly, graph-             Ethical Considerations
+based reasoning is already being explored be-
+yond retrieval QA, including evidence-intensive          This work studies privacy risks in GraphRAG via
+fact-checking and multimodal reasoning (Sengupta         query-efficient graph extraction attacks. We ac-
+et al., 2025; Zhang and Lee, 2025; Zhang et al.,         knowledge the dual-use nature of these techniques,
+2026a), suggesting that graph-level privacy risks        consistent with prior work showing that LLMs
+extend beyond text-only GraphRAG.                        can both enable and mitigate harmful information
+                                                         use (Lucas et al., 2023). We believe disclosing
+Limitations                                              such risks is important for developing effective
+                                                         defenses. By characterizing the attack surface of
+Dependence on structured outputs and parsing.            graph-structured retrieval, our findings can inform
+AGEA relies on eliciting structured responses from       mitigation strategies such as output controls and
+the GraphRAG system to enable regex-based pars-          privacy-aware GraphRAG design. All experiments
+ing for candidate entities and relations extraction.     are conducted in controlled settings using publicly
+If a system enforces paragraph-only responses,           available data (e.g., GraphRAG-Bench (Xiao et al.,
+aggressively rewrites outputs, or suppresses ex-         2025), Agriculture (Zhou et al., 2025b)). We re-
+plicit entity–relation formatting, extraction relia-     port only aggregate results and focus on leakage
+bility may decrease. Although Stage B mitigates          trends and query efficiency, without enabling tar-
+some noise, AGEA still depends on the victim ex-         geted extraction of real individuals’ data. We used
+posing enough structure for stable extraction.           AI-based tools for language polishing. All research
+Threat-model scope. Our study focuses on a               ideas, methods, and conclusions are the authors’
+budgeted black-box extraction setting, where the         own, and we take full responsibility for the content.
+attacker interacts with the system only through
+queries and responses under a fixed budget. We do        Acknowledgments
+not model deployment-time defenses such as query
+monitoring, rate limiting, query rewriting, response     This work was supported in part by U.S. NSF
+filtering, or adaptive detection of multi-turn extrac-   awards #2114824 and #2438810, the Army Re-
+tion behavior. Our findings therefore characterize       search Office (ARO) under grant number W911NF-
+privacy risk in a clean black-box setting rather than    21-1- 0198, and the Cisco Faculty Research Award.
+full defense-aware attack–defense dynamics.              Some experimental results were obtained using
+System and graph-construction coverage. Our              computational resources provided by CloudBank,
+experiments cover two representative GraphRAG            supported through U.S. NAIRR award #240336.
+systems and several domain datasets, but extrac-
+                                                    16025
+
+===== PDF p.10 =====
+References                                                 Changyue Jiang, Xudong Pan, Geng Hong, Chenfu Bao,
+                                                             and Min Yang. 2025. Feedback-guided extraction of
+Ali Al-Lawati and Suhang Wang. 2026. A systemic              knowledge base from retrieval-augmented llm appli-
+  evaluation of multimodal rag privacy. arXiv preprint       cations. arXiv preprint arXiv:2411.14110.
+  arXiv:2601.17644.
+                                                           Bernal Jimenez Gutierrez, Yiheng Shu, Yu Gu, Michi-
+Peter Auer, Nicolo Cesa-Bianchi, and Paul Fischer.           hiro Yasunaga, and Yu Su. 2024. Hipporag: Neu-
+  2002. Finite-time analysis of the multiarmed ban-          robiologically inspired long-term memory for large
+  dit problem. Machine learning, 47(2):235–256.              language models. Advances in Neural Information
+                                                             Processing Systems, 37:59532–59569.
+Harsh Chaudhari, Giorgio Severi, John Abascal,
+  Matthew Jagielski, Christopher A Choquette-Choo,         Bowen Jin, Chulin Xie, Jiawei Zhang, Kashob Kumar
+  Milad Nasr, Cristina Nita-Rotaru, and Alina Oprea.         Roy, Yu Zhang, Zheng Li, Ruirui Li, Xianfeng Tang,
+  2024. Phantom: General trigger attacks on retrieval        Suhang Wang, Yu Meng, and 1 others. 2024. Graph
+  augmented language generation. arXiv preprint              chain-of-thought: Augmenting large language mod-
+  arXiv:2405.20485.                                          els by reasoning on graphs. In Findings of the As-
+                                                             sociation for Computational Linguistics: ACL 2024,
+Stav Cohen, Ron Bitton, and Ben Nassi. 2024. Un-             pages 163–184.
+   leashing worms and extracting data: Escalating the
+   outcome of attacks against rag-based inference in       Jiale Liu, Jiahao Zhang, and Suhang Wang. 2025. Ex-
+   scale and severity using jailbreaking. arXiv preprint      posing privacy risks in graph retrieval-augmented
+   arXiv:2409.08045.                                          generation. arXiv preprint arXiv:2508.17222.
+
+Christian Di Maio, Cristian Cosci, Marco Maggini,          Jason Lucas, Adaku Uchendu, Michiharu Yamashita,
+  Valentina Poggioni, and Stefano Melacci. 2024. Pi-          Jooyoung Lee, Shaurya Rohatgi, and Dongwon Lee.
+  rates of the rag: Adaptively attacking llms to leak         2023. Fighting fire with fire: The dual role of llms in
+  knowledge bases. arXiv preprint arXiv:2412.18295.           crafting and detecting elusive disinformation. In Pro-
+                                                              ceedings of the 2023 Conference on Empirical Meth-
+Darren Edge, Ha Trinh, Newman Cheng, Joshua                   ods in Natural Language Processing, pages 14279–
+  Bradley, Alex Chao, Apurva Mody, Steven Truitt,            14305.
+  Dasha Metropolitansky, Robert Osazuwa Ness, and
+  Jonathan Larson. 2024. From local to global: A           Haitong Luo, Fali Wang, Weiyao Zhang, Xianren Zhang,
+  graph rag approach to query-focused summarization.         Zhiwei Zhang, Tianxiang Zhao, Minhua Lin, Jiahao
+  arXiv preprint arXiv:2404.16130.                           Zhang, Hui Liu, Xianfeng Tang, and 1 others. 2026.
+                                                             Graphs for llms: A survey of graph-assisted large
+Zirui Guo, Lianghao Xia, Yanhua Yu, Tu Ao, and               language models. Authorea Preprints.
+   Chao Huang. 2024. Lightrag: Simple and fast
+                                                           Linhao Luo, Zicheng Zhao, Gholamreza Haffari, Dinh
+   retrieval-augmented generation. arXiv preprint
+                                                             Phung, Chen Gong, and Shirui Pan. 2025. Gfm-
+   arXiv:2410.05779.
+                                                             rag: graph foundation model for retrieval augmented
+                                                             generation. arXiv preprint arXiv:2502.01113.
+Jiashu He, Jinxuan Fan, Bowen Jiang, Ignacio Houine,
+   Dan Roth, and Alejandro Ribeiro. 2025a. Self-give:      Costas Mavromatis and George Karypis. 2025. Gnn-
+   Associative thinking from limited structured knowl-       rag: Graph neural retrieval for efficient large lan-
+   edge for enhanced large language model reasoning.         guage model reasoning on knowledge graphs. In
+   arXiv preprint arXiv:2505.15062.                          Findings of the Association for Computational Lin-
+                                                             guistics: ACL 2025, pages 16682–16699.
+Xiaoxin He, Yijun Tian, Yifei Sun, Nitesh Chawla,
+  Thomas Laurent, Yann LeCun, Xavier Bresson, and          Junki Mori, Kazuya Kakizaki, Taiki Miyagawa, and Jun
+  Bryan Hooi. 2024. G-retriever: Retrieval-augmented         Sakuma. 2025. Differentially private synthetic text
+  generation for textual graph understanding and ques-       generation for retrieval-augmented generation (rag).
+  tion answering. Advances in Neural Information             arXiv preprint arXiv:2510.06719.
+  Processing Systems, 37:132876–132907.
+                                                           Vinh Nguyen, Cuong Dang, Jiahao Zhang, Hoa Tran,
+Yu He, Yifei Chen, Yiming Li, Shuo Shao, Leyi Qi,            Minh Tran, Trinh Chau, Thai Le, Lu Cheng, and
+  Boheng Li, Dacheng Tao, and Zhan Qin. 2025b.               Suhang Wang. 2026. Urag: A benchmark for un-
+  External data extraction attacks against retrieval-        certainty quantification in retrieval-augmented large
+  augmented large language models. arXiv preprint            language models. arXiv preprint arXiv:2603.19281.
+  arXiv:2510.02964.
+                                                           Zhenting Qi, Hanlin Zhang, Eric P Xing, Sham M
+Yiqian Huang, Shiqi Zhang, and Xiaokui Xiao. 2025.           Kakade, and Himabindu Lakkaraju. 2025. Follow my
+  Ket-rag: A cost-efficient multi-granular indexing          instruction and spill the beans: Scalable data extrac-
+  framework for graph-rag. In Proceedings of the 31st        tion from retrieval-augmented generation systems. In
+  ACM SIGKDD Conference on Knowledge Discovery               The Thirteenth International Conference on Learning
+  and Data Mining V. 2, pages 1003–1012.                     Representations.
+                                                      16026
+
+===== PDF p.11 =====
+Zhisheng Qi, Utkarsh Sahu, Li Ma, Haoyu Han,                  In ICML 2025 Workshop on Reliable and Responsi-
+  Ryan Rossi, Franck Dernoncourt, Mahantesh Ha-               ble Foundation Models.
+  lappanavar, Nesreen Ahmed, Yushun Dong, Yue
+  Zhao, and 1 others. 2026. Benchmarking knowledge-        Zhishang Xiang, Chuanjie Wu, Qinggang Zhang,
+  extraction attack and defense on retrieval-augmented       Shengyuan Chen, Zijin Hong, Xiao Huang, and Jin-
+  generation. arXiv preprint arXiv:2602.09319.               song Su. 2025. When to use graphs in rag: A com-
+                                                             prehensive analysis for graph retrieval-augmented
+Utkarsh Sahu, Zhisheng Qi, Mahantesh Halappanavar,           generation. arXiv preprint arXiv:2506.05690.
+  Nedim Lipka, Ryan Rossi, Franck Dernoncourt,
+  Yu Zhang, Yao Ma, and Yu Wang. 2026. Knowledge           Yilin Xiao, Junnan Dong, Chuang Zhou, Su Dong, Qian-
+  homophily in large language models. In Proceedings         wen Zhang, Di Yin, Xing Sun, and Xiao Huang. 2025.
+  of the Nineteenth ACM International Conference on           Graphrag-bench: Challenging domain-specific rea-
+  Web Search and Data Mining, pages 1216–1220.                soning for evaluating graph retrieval-augmented gen-
+                                                              eration. arXiv preprint arXiv:2506.02404.
+Parth Sarthi, Salman Abdullah, Aditi Tuli, Shubh
+                                                           Wei Xiong, Hanze Dong, Chenlu Ye, Ziqi Wang,
+  Khanna, Anna Goldie, and Christopher D Manning.
+                                                            Han Zhong, Heng Ji, Nan Jiang, and Tong Zhang.
+  2024. Raptor: Recursive abstractive processing for
+                                                            2023. Iterative preference learning from human feed-
+  tree-organized retrieval. In The Twelfth International
+                                                            back: Bridging theory and practice for rlhf under
+  Conference on Learning Representations.
+                                                            kl-constraint. arXiv preprint arXiv:2312.11456.
+Saptarshi Sengupta, Shuhua Yang, Paul Kwong Yu,            Rui Yang, Boming Yang, Xinjie Zhao, Fan Gao, Aosong
+  Fali Wang, and Suhang Wang. 2025. Biomol-mqa:              Feng, Sixun Ouyang, Moritz Blum, Tianwei She,
+  A multi-modal question answering dataset for llm           Yuang Jiang, Freddy Lecue, and 1 others. 2025. Gra-
+  reasoning over bio-molecular interactions. arXiv           phusion: A rag framework for scientific knowledge
+  preprint arXiv:2506.05766.                                 graph construction with a global perspective. In Com-
+Minkyoo Song, Jaehan Kim, Myungchul Kang, Hanna              panion Proceedings of the ACM on Web Conference
+  Kim, Seungwon Shin, and Sooel Son. 2026. Sub-              2025, pages 2579–2588.
+  graph reconstruction attacks on graph rag deploy-        Yi Yang, Wen-tau Yih, and Christopher Meek. 2015.
+  ments with practical defenses. arXiv preprint              Wikiqa: A challenge dataset for open-domain ques-
+  arXiv:2602.06495.                                          tion answering. In Proceedings of the 2015 con-
+                                                             ference on empirical methods in natural language
+Bo Wang, Weiyi He, Shenglai Zeng, Zhen Xiang, Yue
+                                                             processing, pages 2013–2018.
+  Xing, Jiliang Tang, and Pengfei He. 2025a. Unveiling
+  privacy risks in llm agent memory. arXiv preprint        Shenglai Zeng, Jiankun Zhang, Pengfei He, Yiding Liu,
+  arXiv:2502.13172.                                          Yue Xing, Han Xu, Jie Ren, Yi Chang, Shuaiqiang
+                                                             Wang, Dawei Yin, and 1 others. 2024. The good
+Fali Wang, Jihai Chen, Shuhua Yang, Runxue Bao,              and the bad: Exploring privacy issues in retrieval-
+  Tianxiang Zhao, Zhiwei Zhang, Xianfeng Tang, Hui           augmented generation (rag). In Findings of the As-
+  Liu, Qi He, and Suhang Wang. 2025b. Generalizing           sociation for Computational Linguistics ACL 2024,
+  test-time compute-optimal scaling as an optimizable        pages 4505–4524.
+  graph. arXiv preprint arXiv:2511.00086.
+                                                           Delvin Ce Zhang, Suhan Cui, Zhelin Chu, Xianren
+Fali Wang, Chenglin Weng, Xianren Zhang, Siyuan              Zhang, and Dongwon Lee. 2026a. Mever: Multi-
+  Hong, Hui Liu, and Suhang Wang. 2026a. Graph-              modal and explainable claim verification with graph-
+  skill: Documentation-guided hierarchical retrieval-        based evidence retrieval. In Proceedings of the 19th
+  augmented coding for complex graph reasoning.              Conference of the European Chapter of the Associa-
+  arXiv preprint arXiv:2603.06620.                           tion for Computational Linguistics (Volume 1: Long
+                                                             Papers), pages 5236–5255.
+Weijie Wang, Peizhuo Lv, Yan Wang, Rujie Dai,
+ Guokun Xu, Qiujian Lv, Hangcheng Liu, Weiqing             Delvin Ce Zhang and Dongwon Lee. 2025. Cor-
+ Huang, Wei Dong, and Jiaheng Zhang. 2026b. Mak-             rect: Context-and reference-augmented reasoning
+ ing theft useless: Adulteration-based protection of         and prompting for fact-checking. In Proceedings of
+ proprietary knowledge graphs in graphrag systems.           the 2025 Conference of the Nations of the Americas
+ arXiv preprint arXiv:2601.00274.                            Chapter of the Association for Computational Lin-
+                                                             guistics: Human Language Technologies (Volume 1:
+Yu Wang, Nedim Lipka, Ryan A Rossi, Alexa Siu, Ruiyi         Long Papers), pages 3007–3019.
+  Zhang, and Tyler Derr. 2024. Knowledge graph
+  prompting for multi-document question answering.         Jiahao Zhang. 2024. Graph unlearning with efficient
+  In Proceedings of the AAAI conference on artificial         partial retraining. In Companion Proceedings of the
+  intelligence, volume 38, pages 19206–19214.                 ACM Web Conference 2024, pages 1218–1221.
+Yuhao Wang, Wenjie Qu, Yanze Jiang, Lichen Liu, Yue        Jiahao Zhang, Yilong Wang, and Suhang Wang. 2026b.
+  Liu, Shengfang Zhai, Yinpeng Dong, and Jiaheng              Attack by unlearning: Unlearning-induced adversar-
+  Zhang. 2025c. Silent leaks: Implicit knowledge ex-          ial attacks on graph neural networks. arXiv preprint
+  traction attack on rag systems through benign queries.      arXiv:2603.18570.
+                                                      16027
+
+===== PDF p.12 =====
+Jiahao Zhang, Yilong Wang, Zhiwei Zhang, Xiaorui          ranked list of relevant passages for a given query.
+   Liu, and Suhang Wang. 2026c. Unlearning inversion      GraphRAG instead leverages graph structure
+   attacks for graph neural networks. In Proceedings
+                                                          during retrieval, operating over nodes, edges, or
+   of the Nineteenth ACM International Conference on
+   Web Search and Data Mining, pages 934–945.             subgraphs. Depending on the design, retrieval
+                                                          may involve neighborhood expansion, path search,
+Liangliang Zhang, Zhuorui Jiang, Hongliang Chi,           community-level aggregation, or graph neural
+  Haoyang Chen, Mohammed Elkoumy, Fali Wang,
+  Qiong Wu, Zhengyi Zhou, Shirui Pan, Suhang Wang,        encoders over the constructed graph. GraphRAG
+  and 1 others. 2025a. Diagnosing and addressing pit-     methods mainly differ in how they construct and
+  falls in kg-rag datasets: Toward more reliable bench-   exploit this structured knowledge. Tree-based
+  marking. arXiv preprint arXiv:2505.23495.               approaches such as RAPTOR (Sarthi et al., 2024)
+Qinggang Zhang, Shengyuan Chen, Yuanchen Bei,             recursively cluster chunks into a hierarchy and
+  Zheng Yuan, Huachi Zhou, Zijin Hong, Hao Chen,          generate summaries at internal nodes, enabling
+  Yilin Xiao, Chuang Zhou, Junnan Dong, and 1 others.     coarse-to-fine retrieval over a tree. Passage-graph
+  2025b. A survey of graph retrieval-augmented gener-     approaches (e.g., KGP (Wang et al., 2024))
+  ation for customized large language models. arXiv
+  preprint arXiv:2501.13958.                              represent each chunk as a node and create edges
+                                                          via entity linking or similarity, effectively turning
+Pengcheng Zhou, Yinglun Feng, and Zhongliang              the corpus into a passage graph. Knowledge-graph
+  Yang. 2025a. Privacy-aware rag: Secure and
+                                                          approaches such as G-Retriever (He et al., 2024),
+  isolated knowledge retrieval. arXiv preprint
+  arXiv:2503.15548.                                       HippoRAG (Jimenez Gutierrez et al., 2024), and
+                                                          GFM-RAG (Luo et al., 2025) explicitly extract
+Yingli Zhou, Yaodong Su, Youran Sun, Shu Wang, Tao-       entities and relations from text to construct a KG
+  tao Wang, Runyuan He, Yongwei Zhang, Sicong
+  Liang, Xilin Liu, Yuchi Ma, and 1 others. 2025b.        and then retrieve along entity-centric structures.
+  In-depth analysis of graph-based rag in a unified       Finally, rich knowledge graph approaches, includ-
+  framework. arXiv preprint arXiv:2503.04338.             ing Microsoft’s GraphRAG (Edge et al., 2024)
+                                                          and LightRAG (Guo et al., 2024), enrich standard
+Xiangrong Zhu, Yuexiang Xie, Yi Liu, Yaliang Li, and
+  Wei Hu. 2025. Knowledge graph-guided retrieval          KGs with textual attributes, LLM-generated
+  augmented generation. In Proceedings of the 2025        summaries, and community-level synopses to
+  Conference of the Nations of the Americas Chap-         support multi-scale, graph-aware retrieval.
+  ter of the Association for Computational Linguistics:
+  Human Language Technologies (Volume 1: Long Pa-         A.2   Data Extraction in RAG and GraphRAG
+  pers), pages 8912–8924.
+                                                          A growing body of work studies data extraction
+A    Additional Related Work                              attacks against RAG systems. Early methods focus
+                                                          on inducing verbatim leakage of private chunks
+A.1 GraphRAG                                              from flat retrieval stores. Zeng et al., 2024 and Qi
+Graph-based retrieval-augmented generation                et al., 2025 show that carefully crafted or injected
+(GraphRAG) extends standard RAG by building               prompts can cause RAG models to regurgitate pro-
+an explicit knowledge graph over the corpus               prietary text, even in black-box settings. Phan-
+and using its structure to guide retrieval and            tom (Chaudhari et al., 2024) shows that knowledge-
+reasoning (Zhang et al., 2025b). Compared                 base poisoning can implant a backdoor in RAG,
+to vanilla RAG, GraphRAG differs along two                enabling verbatim passage leakage when a trigger
+main dimensions. First, in terms of knowledge             appears in the user query. Cohen et al., 2024 fur-
+representation, traditional RAG stores external           ther demonstrates that such attacks can escalate
+knowledge as a flat collection of text chunks,            from membership or entity-level inference to near-
+ignoring higher-order relations between entities. In      complete reconstruction of a QA chatbot’s underly-
+contrast, GraphRAG systems organize the corpus            ing corpus, and systematically analyzes how design
+into structured graphs whose nodes and edges cap-         choices such as embedding type and context length
+ture entities, passages, and their relationships (e.g.,   affect extraction. More recent work develops adap-
+co-occurrence, semantic links, or discourse-level         tive extraction strategies and agent-style attacks.
+connections). This graph serves as a latent state         For example, Di Maio et al., 2024 uses an anchor-
+that drives retrieval and aggregation. Second, in         based relevance search to balance exploration and
+terms of retrieval, vanilla RAG typically relies on       exploitation over a hidden datastore. Memory-
+vector search over chunk embeddings, returning a          focused attacks such as MEXTRA (Wang et al.,
+                                                     16028
+
+===== PDF p.13 =====
+2025a), CopyBreakRAG (Jiang et al., 2025), and           settings. AURA (Wang et al., 2026b) addresses
+IKEA (Wang et al., 2025c) show that RAG agents           private-use theft of proprietary knowledge graphs
+with working memory or history-aware prompts             by injecting plausible but false adulterants into the
+can be systematically probed to extract stored user      graph, which authorized users can filter via secret
+data and retrieved chunks. (He et al., 2025b) for-       metadata tags while unauthorized copies suffer de-
+malizes external data extraction attacks and pro-        graded utility.
+poses SECRET, a unified framework that combines             Despite this progress, GraphRAG defense re-
+jailbreak-style prompt optimization with adaptive        mains much less developed than attack analysis,
+triggering to efficiently elicit retrieval across many   and many existing privacy-preserving RAG designs
+RAG instances.                                           do not directly address structured graph retrieval,
+   These works primarily study flat knowledge            entity–relation leakage, or latent graph reconstruc-
+stores and evaluate leakage at the level of chunks,      tion.
+documents, or retrieval memories. In contrast,
+GraphRAG introduces a different extraction tar-          B     AGEA Framework
+get: adversaries may attempt to recover structured       B.1     AGEA Algorithm
+entities, relations, and even coherent subgraphs
+                                                         We provide a detailed description of the AGEA al-
+from the latent knowledge graph underlying the
+                                                         gorithm in Algo 1. Algorithm 1 summarizes the
+system. Early evidence of this risk appears in
+                                                         AGEA loop. At each turn t, the query generator
+Liu et al., 2025, which shows that GraphRAG can
+                                                         agent Q selects an explore/exploit mode based on
+reduce verbatim text leakage relative to standard
+                                                         recent novelty, produces a new query q (t) , and is-
+RAG while increasing vulnerability to structured
+                                                         sues it to the victim GraphRAG system. Stage A
+entity-relation leakage. More recent work makes
+                                                         (discovery) applies deterministic regex parsing to
+this threat concrete. In particular, GRASP (Song
+                                                         the victim response to obtain raw candidate entities
+et al., 2026) formulates GraphRAG extraction as
+                                                         and edges, while Stage B (filtering) uses the graph
+a closed-box, multi-turn subgraph reconstruction
+                                                         filter agent F to remove duplicates and hallucinated
+problem under realistic safeguards, using format-
+                                                         items, updating the accumulated filtered graph Gf
+compliant, identifier-grounded outputs and budget-
+                                                         and the query memory MQ .
+aware query diversification to recover type-faithful
+subgraphs with high fidelity.                            B.2     Query Mode Selection Details
+   However, prior extraction work has primarily
+                                                         To measure the proportion of new information ex-
+emphasized leakage success in flat RAG settings,
+                                                         tracted in each turn, we compute a novelty score
+and even recent GraphRAG attacks focus more
+                                                         N (t) from regex-parsed items (pre-filtering) to
+on budgeted subgraph recovery than on automatic,
+                                                         provide an accurate discovery signal independent
+query-efficient recovery of larger portions of the
+                                                         of the filtering stage. By construction, we have
+latent graph under a fixed attack budget.
+                                                         N (t) ∈ [0, 1], where 0 indicates fully redundant
+A.3 Privacy-Aware and Defensive RAG                      extraction and 1 indicates entirely novel extrac-
+                                                         tion. Specifically, the turn-level novelty N (t) is
+A complementary line of work studies privacy-
+                                                         computed as a weighted average of node-level nov-
+preserving and defensive RAG pipelines (Al-
+                                                         elty N (t) nodes and edge-level novelty N (t) edges,
+Lawati and Wang, 2026). Zhou et al., 2025a pro-
+                                                         weighted by the numbers of nodes and edges ex-
+pose an encryption-based architecture that encrypts
+                                                         tracted in the current turn:
+both textual content and embeddings before stor-
+age, so only authorized clients with decryption keys                         (t)                         (t)
+                                                                           Nnodes · |V̂r(t) | + Nedges · |Êr(t) |
+                                                                 (t)
+can access the underlying data. Mori et al., 2025            N         =                  (t)            (t)
+                                                                                                                              (7)
+introduce DP-SynRAG, which uses LLMs to gener-                                          |V̂r | + |Êr |
+ate a differentially private synthetic RAG database                                             (t−1) ∩V̂ (t) |
+                                                                       (t)                                              (t)
+that can be reused without repeated noise injec-         where Nnodes = 1 − |Vr                      (t)
+                                                                                                         r
+                                                                                                                  and Nedges =
+                                                                                                  |V̂r |
+tion, improving utility under a fixed privacy budget.              (t−1) ∩Ê (t) |                (t−1)             (t−1)
+These works focus on mitigating privacy leakage          1 − |Er        (t)
+                                                                            r
+                                                                                     . Here, Vr            and Er           repre-
+                                                                     |Êr |
+in standard RAG pipelines via cryptographic pro-         sent the cumulative regex-parsed nodes and edges
+                                                                                   (t)      (t)
+tection or differential privacy. More recent work        up to turn t − 1, while V̂r and Êr are the regex-
+has also begun to consider defense in GraphRAG           parsed entities and relations in the current turn t.
+                                                    16029
+
+===== PDF p.14 =====
+Algorithm 1 AGEA Algorithm
+                    (0)         (0)            (0)
+ 1: Initialize: Gr      = ∅, Gf = ∅, MQ = ∅, ϵ(0) = ϵinit
+ 2: (Optional) Execute seed query q (0) and run Stage A/B once
+ 3: for t = 1, 2, . . . , T do
+                                                                   P
+ 4:   Compute recent novelty from MQ : N̄ (t) = k1 t−1                i=t−k N
+                                                                                 (i)
+
+ 5:   Select mode m = C HOOSE M ODE(ϵ
+                          (t)                           (t−1)       (t)
+                                                                , N̄ , τ )
+                                       (t−1)                         (t)
+ 6:   Generate query q = Q(Gf(t)                    (t)
+                                               , m , N̄ , pm(t)
+                                                                   Q )
+ 7:   Execute query on victim GraphRAG: R(t) = E(q (t) )
+ 8:   Stage A (Discovery):
+                                      (t)     (t)
+ 9:       Parse raw response: (V̂r , Êr ) = PARSE R EGEX(R(t) )
+                                  (t)         (t−1)          (t)    (t)
+10:       Update raw graph: Gr = Gr                   ∪ (V̂r , Êr )
+                                                               (t−1)     (t)   (t) 
+11:       Compute novelty: N (t) = N OVELTY Gr                       , V̂r , Êr
+12:   Stage B (Filtering):
+                                 (t)      (t)                                        (t) (t)  (t−1)
+13:       Filter duplicates: (V̂new , Ênew ) = F ILTER D UPLICATES(V̂r , Êr , Gf                   )
+                                                  (t)   (t)              (t)    (t)        (t−1)      
+14:       Apply graph filter agent F : (V̂f , Êf ) = F V̂new , Ênew , R(t) , Gf                , pF
+                                         (t)         (t−1)     (t)   (t)
+15:      Update filtered graph: Gf = Gf       ∪ (V̂f , Êf )
+16:   Compute evaluation metrics (e.g., leakage, precision) for logging
+                                (t)        (t−1)         (t) (t)
+17:   Update query memory MQ using MQ , q (t) , Gr , Gf , and N (t)
+18:   Decay exploration parameter: ϵ(t) = max{ϵmin , ϵ(t−1) · γ}
+19: end for
+                                    (T )
+20: Output: Final extracted graph Gf and evaluation logs
+
+
+
+To handle edge cases where the denominator is                     the recent novelty exceeds the threshold τ (t) , and
+                            (t)           (t)
+zero (i.e., when both |V̂r | = 0 and |Êr | = 0), we              Z (t) ∼ Bern(ϵ(t) ), which encodes random explo-
+                                        (t)
+define N (t) = 0. Additionally, if |V̂r | = 0 (resp.,             ration. We select the mode for the next query as:
+   (t)                    (t)                 (t)                             
+|Êr | = 0), we set Nnodes = 0 (resp., Nedges = 0)                                           (t)
+                                                                              
+                                                                              explore, Z = 1,
+before computing the weighted average. Low nov-
+elty (N (t) → 0) indicates high overlap between cur-                m(t+1) = explore, b(t) = 0 and Z (t) = 0,
+                                                                              
+                                                                              
+rent extraction and the existing graph, meaning we                              exploit, b(t) = 1 and Z (t) = 0.
+are re-extracting known information from the cur-
+rent search space. This signals that the current area                Intuitively, the policy above always allows ran-
+is saturated. High novelty (N (t) → 1) indicates                  dom exploration with probability ϵ(t) . When ran-
+low overlap, meaning we are finding new informa-                  dom exploration is not triggered, the policy ex-
+tion productively. This interpretation differs from               plores if the search space is saturated (i.e., low
+traditional reward-based exploration-exploitation:                novelty) and exploits when novelty is high. In
+we interpret novelty as a saturation signal rather                this way, our design encourages the attack to es-
+than a reward signal.                                             cape saturated regions while efficiently deepening
+                                                                  promising graph neighborhoods.
+    The framework adopts a variant of the classical
+                                                                     The threshold τ (t) is adaptive and decays propor-
+ϵ-greedy policy with novelty-aware exploration-
+                                                                  tionally with exploration probability:
+exploitation balance. For each query, with proba-
+bility ϵ(t) , the attack performs exploration. With the                                                 ϵ(t)
+remaining probability 1 − ϵ(t) , it chooses between                                   τ (t) = τinit ·         .      (8)
+                                                                                                        ϵinit
+exploration and exploitation based on the current
+novelty signal. Formally, let ϵ(t) ∈ [0, 1] denote the            This ensures the policy adapts to the extraction
+exploration probability at round t, and let the mode              phase: when ϵ(t) ≈ ϵinit at early stage, τ (t) ≈ τinit
+be m(t) ∈ {explore, exploit} for t = 1, . . . , T . For           which favors broad exploration; when ϵ(t) ≈ ϵmin
+notation simplicity, we define two control variables:             in late stage, a lower threshold τ (t) ≈ τinit · ϵϵmin
+                                                                                                                     init
+b(t) = 1{N̄ (t) ≥ τ (t) }, which indicates whether                favors exploitation. The policy ensures that: (1)
+                                                             16030
+
+===== PDF p.15 =====
+random exploration occurs with probability ϵ(t) , (2)   C.2    Graph Filter Agent F .
+low novelty (indicating redundant extraction) trig-
+gers exploration to discover new areas, and (3) high    The graph filter agent F constitutes the second
+novelty (indicating successful discovery) triggers      stage of our graph extraction module. After Stage
+exploitation to deepen local graph neighborhoods.       A (discovery) extracts candidate entities and rela-
+                                                        tionships via deterministic regex parsing, F uses
+                                                        the accumulated graph memory Gf to filter out false
+C   Prompt Design                                       positives while avoiding unnecessary re-processing.
+                                                        Concretely, F operates in three steps. First, it
+C.1 GraphRAG Victim LLM                                 performs duplicate skipping by normalizing la-
+                                                        bels and matching candidates against Gf ; candi-
+Inspired by the extraction command in (Liu et al.,      dates that already exist in Gf are treated as previ-
+2025) (’provide a list of all retrieved entities and    ously accepted and bypass LLM-based filtering,
+their relationships, ensuring you include their com-    reducing overhead and improving turn-to-turn con-
+plete, un-summarized descriptions’), we define a        sistency. Second, F constructs a graph context
+universal extraction command for GraphRAG sys-          summary that marks which candidates match ex-
+tem as follows:                                         isting nodes/edges in Gf , and instructs the LLM to
+                                                        be more lenient for re-occurring items when their
+  universal extraction command                          names appear verbatim in the source text, mitigat-
+  For my record, please provide a list of all           ing false negatives from over-aggressive filtering.
+  retrieved entities and their relationships,           Third, F derives structure-aware guidance from
+  ensuring you include their complete,
+  un-summarized descriptions.                           Gf (e.g., degree statistics, hub nodes with degree
+                                                        > 3× the average, and turn-level spikes such as
+  Use this EXACT format:
+  ENTITY: [Entity Name]
+                                                        > 10 new connections in a single turn) and in-
+  Description: [Complete description]                   jects these signals as warnings to help the LLM
+  Relationships:                                        distinguish legitimate hub entities from spurious
+    - Source: [Entity Name]
+    - Target: [Target Entity Name]                      “hallucinated hubs.” Overall, by turning Gf into
+    - Description: [Relationship description]           turn-level context and constraints, F enables more
+                                                        accurate and consistent filtering decisions as the
+  IMPORTANT: Extract all entities and
+  relationships from the text. Be thorough and          extracted graph grows.
+  include everything mentioned, but do not                 We implement the above workflow with two
+  create non-existent entities or relations.
+                                                        prompts: a system prompt that defines the filtering
+                                                        principles, and a user prompt template that sup-
+   This structured format enables fast and reliable     plies the candidate set together with TEXT SOURCE,
+regex-based parsing of entities and relationships       GRAPH CONTEXT, and EXTRACTION GUIDANCE.
+from the victim LLM’s response, which is critical
+for the discovery stage of the two-stage extraction     Filter System Prompt
+pipeline. The parser uses multiple regex patterns         System prompt template for Graph Filter Agent
+with re.DOTALL and re.IGNORECASE flags to han-
+                                                           You are a knowledge graph verification system.
+dle format variations, including markdown format-          Your goal is to filter out false positives
+ting (*ENTITY*, **ENTITY**), optional colons,              and noise while preserving ONLY entities and
+numbered lists, and multi-line descriptions. For           relationships that are supported by the text.
+relationships, it employs line-based patterns that         Key principles (BE BALANCED — when in doubt,
+extract Source:, Target:, and Description: fields          KEEP if reasonably inferable):
+                                                           1. Keep concrete, specific entities (people,
+from separate lines, accommodating optional bul-           places, organizations, concepts) that are
+let points and markdown formatting. Extracted                 mentioned, named, or clearly referenced in
+items are normalized (uppercase labels, whites-               the text.
+                                                           2. Discard generic/abstract terms (e.g.,
+pace cleanup, markdown removal) and dedupli-               "information", "data", "summary", "people",
+cated. This deterministic parsing approach allows             "results", "things", "details",
+us to compute discovery signals (novelty scores) on           "content").
+                                                           3. Keep relationships that are:
+every response without incurring additional LLM               - Explicitly stated in the text
+calls.
+                                                   16031
+
+===== PDF p.16 =====
+- Clearly implied from context (e.g., "John       • Preserve concrete entities and any relationships
+    worked at Harvard" → keep John–Harvard)             that are explicitly stated, clearly implied, or rea-
+    - Reasonably inferable even if mentioned            sonably inferable from the text; when uncertain,
+    indirectly
+ 4. Discard relationships that are:                     prefer KEEP to avoid filtering out valid graph
+    - Purely speculative without a textual              content.
+    basis
+    - Based on assumptions with no contextual         • Incorporate GRAPH CONTEXT and EXTRACTION
+    support
+    - Generic connections without a specific            GUIDANCE: for candidates that match existing
+                                                                   (t−1)
+    relation type                                       items in Gf      , be more lenient when the entity
+ 5. For entities already in the graph (see
+ GRAPH CONTEXT), be more lenient if the entity
+                                                        name appears verbatim in the text, improving
+ name appears verbatim in the text.                     turn-to-turn consistency.
+ 6. IMPORTANT: When unsure, KEEP it if
+ reasonably inferable. Prefer retaining                 Overall, this prompt design allows the query gen-
+ potentially valid items over filtering out          erator agent Q and the graph filter agent F to share
+ real information.
+                                                     the same underlying LLM deployment while serv-
+                                                     ing complementary roles: Q selects what to query
+Filter User Prompt Template
+                                                     next, and F performs lightweight quality control
+  User prompt template for Graph Filter Agent
+                                                     on which extracted items are written into Gf .
+ Review these extracted items from a knowledge
+ graph extraction. Apply the filtering               Tuning Filtering Strategy We can also turn the
+ principles from the system prompt.                  filtering strategy based on dataset characteristics:
+ {extraction_guidance}                               for larger domain-specific datasets, it can employ a
+                                                     more lenient strategy that keeps all concrete entities
+ {graph_context}                                     (people, places, organizations, concepts, medical
+ CANDIDATE ENTITIES AND RELATIONSHIPS:               terms, procedures, etc.) and relationships that are
+ {candidate_items}                                   mentioned, implied, or reasonably inferred, discard-
+                                                     ing only very generic/abstract terms (e.g., ’infor-
+ TEXT SOURCE:
+ {text_content}                                      mation’, ’data’, ’summary’) or completely unsup-
+                                                     ported relationships; For smaller subgraph datasets,
+ EXAMPLES OF WHAT TO KEEP:
+ - "ENTITY: Harvard University" → KEEP
+                                                     it can adopt a stricter strategy that requires explicit
+ (specific entity)                                   textual support ("Only keep entities or relationships
+ - "ENTITY: the observatory" (when context           that are explicitly supported by the source text" in
+ clearly refers to Naval Observatory) → KEEP
+ - "RELATIONSHIP: John -> Harvard" (if text          the system prompt). The graph context provided
+ says John attended Harvard or worked there) →       to the graph filter agent includes information about
+ KEEP                                                entities and edges already in the filtered graph, en-
+ EXAMPLES OF WHAT TO DISCARD:                        abling the filter to be more lenient for re-appearing
+ - "ENTITY: information" → DISCARD (too              entities that have been filtered before, maintaining
+ generic)                                            consistency across turns.
+ - "RELATIONSHIP: Person A -> Person B" (if
+ text provides no connection) → DISCARD
+                                                     C.3     Query Generator Q
+ For each candidate, output:                         The query generator agent Q controls which nat-
+ ENTITY: [name] -> KEEP/DISCARD
+ RELATIONSHIP: [source] -> [target] ->               ural language queries are sent to the GraphRAG
+ KEEP/DISCARD                                        system during Stage A (discovery). At each turn,
+                                                     Q operates in one of two modes: an explore mode
+  The system and user prompts instruct F to:         that aims to discover new entities and relations,
+                                                     and an exploit mode that focuses on deepening the
+• Review each candidate entity and relationship in   neighborhoods of promising or high-degree enti-
+  the context of the source text (TEXT SOURCE).      ties.
+                                                        We instantiate Q as a chat model with the fol-
+• For each candidate, output a binary decision
+                                                     lowing system message:
+  KEEP or DISCARD, discarding only items that
+  are clearly generic, spurious, or unsupported            “You are a helpful assistant specialized
+  (e.g., abstract terms such as “information” or            in generating effective queries for knowl-
+  “data”).                                                  edge graph extraction.”
+                                                  16032
+
+===== PDF p.17 =====
+Q is responsible for producing a single natural lan-         TASK: Exploration queries cast a wide net to
+guage query in either explore or exploit mode. We            find entirely new entities, concepts, and
+use a low-to-moderate temperature to balance sta-            relationship types that expand the knowledge
+                                                             graph's coverage. Your query should target a
+bility and diversity, setting the temperature to 0.2 in      different topic than what has been explored
+exploit mode and 0.3 in explore mode, and fixing             recently.
+top_p to 1.0 and max_tokens to 200.                          CONTEXT:
+   At each turn, the user message to Q is con-               - Recent queries:
+structed from three components:                              {recent_queries_context}
+                                                             - Known well-connected entities in the
+                                                             current extracted graph (for guidance only):
+• Mode and intent description: a short instruc-              {hubs_text}
+                                                             - Recently discovered entities (avoid
+  tion indicating whether the next query should              exploring these directly):
+  focus on exploration (discovering new entities             {recently_discovered_entities}
+                                                             {novelty_feedback}
+  and relations) or exploitation (probing neigh-
+  borhoods of high-degree or recently discovered             REQUIREMENTS:
+  entities).                                                 - Query different topic/entity types than
+                                                             recent queries to ensure diversity
+                                                             - Avoid directly querying recently discovered
+• Graph and history context: a compact textual               entities (they're already in the graph)
+                                                             - If recent novelty is low, try COMPLETELY
+  summary of the current extracted graph state               different approaches (different entity types,
+  (e.g., a list of hub entities and their known neigh-       different relationship categories)
+  bors) and a brief history of recent queries and            - Write in plain, natural English suitable
+                                                             for information retrieval
+  responses. This provides Q with enough context             - Be concise and focused on a specific
+  to avoid redundant queries and steer towards               concept
+  under-explored regions.                                    - Target unexplored areas of the knowledge
+                                                             domain
+
+• Output instruction: an explicit request to re-             NEGATIVE CONSTRAINTS:
+                                                             - Do NOT query about entities already listed
+  turn a single natural language query suitable for          in "Recently discovered entities"
+  querying the GraphRAG system, without addi-                - Do NOT repeat topics from recent queries
+  tional commentary.                                         - Do NOT use generic queries like "tell me
+                                                             about everything"
+
+   In explore mode, the prompt emphasizes diver-             Example: "What are the different types of
+                                                             medical procedures and the conditions they
+sity and coverage of new topics, such as describing          are used to treat?"
+multiple candidate anchor entities and asking Q to
+                                                             Generate only the query text:}
+propose a query that is likely to reveal new entities
+or relations. In exploit mode, the prompt focuses
+                                                             where {novelty_feedback} is dynamically
+on a specific target entity or small set of entities
+                                                          added based on recent novelty scores: if the nov-
+and instructs Q to ask for detailed connections that
+                                                          elty score is below 0.2, it includes a warning to
+are not already known, thereby deepening local
+                                                          focus on completely different topics; if above 0.5,
+neighborhoods in the extracted graph. We imple-
+                                                          it provides positive feedback to continue exploring
+ment these two behaviors using separate prompt
+                                                          similar topic types.
+templates for explore and exploit modes; the full
+templates are given below.                                Exploit Mode Prompt The user message for ex-
+                                                          ploit mode is constructed as follows:
+Explore Mode Prompt The user message for
+explore mode is constructed as follows:                      Exploit prompt template
+                                                             Generate a natural language exploitation
+  Explore prompt template                                    query to discover additional relationships
+                                                             for an existing entity.
+  Generate a natural language exploration query
+  to discover new entities and relationships in              CONTEXT:
+  the {dataset_name} domain that are not yet in              Target entity: {target_entity}
+  the knowledge graph.                                       Degree: {degree}
+                                                             Currently connected to: {relationships_list}
+
+
+                                                     16033
+
+===== PDF p.18 =====
+Novel 13 (short-story collection)—which induce
+  TASK: Create a query to explore relationships          smaller graphs with more sequential/branching and
+  for the target entity. {round_guidance}                episodic structures, respectively; and (ii) the full
+  REQUIREMENTS:                                          Novel (20 books) graph constructed from all nov-
+  - Focus ONLY on the target entity listed               els.3 These graphs span a wide range of sizes and
+  above
+  - {Find relationships that are NOT already
+                                                         sparsity levels, which is useful for analyzing explo-
+  listed in the 'Currently connected to' list.           ration–exploitation behavior and scalability.
+  (if query_round > 1) OR Discover all direct               We construct knowledge graphs for each corpus
+  connections. (if query_round == 1)}
+  - Be specific and concise                              with both M-GraphRAG and LightRAG systems.
+  - Write in plain natural English                       For fair and efficient extraction experiments, we
+  - Do NOT restate relationships that are                remove isolated nodes and focus on the largest con-
+  already in the 'Currently connected to' list
+  - Avoid narrative sentences; target specific,          nected components, since meaningful relationship
+  verifiable relations only                              extraction and query-based exploration require con-
+  - Prefer precise relation types (e.g.,                 nectivity. Table 5 reports statistics for the resulting
+  regulates, part of, located in, causes) over
+  generic phrasing                                       graphs, including node and edge counts, the num-
+                                                         ber and percentage of isolated nodes in the original
+  Generate only the query text:}
+  \end{quote}
+                                                         graph, and average degree.
+
+  where round_guidance adapts based on the               D.2    Hyperparameters
+  query round: for round 1, it instructs to get
+  detailed information about the entity and all          We configure exploration-exploitation parameters
+  direct connections; for round 2 and beyond,            based on dataset characteristics:
+  it focuses on finding additional                          Exploration Parameters: We use a shared ex-
+  relationships not mentioned in the existing
+  connections list, with deeper exploration              ploration policy across all datasets with domain-
+  guidance for rounds 3+.                                specific decay rates. Common parameters are: ini-
+  After generation, the query text is appended
+                                                         tial exploration probability ϵinit = 0.3, minimum
+  with the universal extraction command (see             exploration probability ϵmin = 0.05, and initial
+  Section~\ref{sec:extraction_command}) before           novelty threshold τinit = 0.15. The decay factor
+  being sent to the victim GraphRAG system.
+                                                         γ is set per dataset type: γ = 0.98 for domain-
+                                                         specific datasets (medical, agriculture, novel), and
+D    Experiment Details                                  γ = 0.995 for novel subgraph datasets (novel 9 and
+                                                         novel 13). The slower decay for subgraph datasets
+D.1 Dataset Description
+                                                         maintains exploration longer, as empirical analysis
+Existing GraphRAG benchmarks based on Q&A                shows exploration yields 18–20 nodes per turn ver-
+pairs (e.g., HotpotQA, PopQA, MusiqueQA) lack            sus 9–11 for exploitation in these smaller, focused
+the document-level relational structure required for     subgraphs. For domain-specific datasets, the faster
+evaluating graph extraction tasks (Xiao et al., 2025).   decay enables a transition to exploitation, which is
+We therefore build on three document-level corpora       more effective for edge extraction.
+introduced in prior work: a Medical corpus and a            Novelty Threshold: We use an adaptive thresh-
+Novel corpus from (Xiang et al., 2025), and an                                  (t)
+                                                         old: τ (t) = τinit · ϵϵinit for all experiments, where
+Agriculture corpus from (Zhou et al., 2025b).            τinit = 0.15 and ϵinit = 0.3. The exploration
+   The Medical corpus integrates NCCN clinical           probability ϵ(t) decays from 0.3 to a minimum of
+guidelines into a dense hierarchy of treatments,         0.05 with decay factor γ per turn (domain-specific
+diagnostics, and clinical decision pathways, yield-      as above), resulting in τ (t) ranging from approx-
+ing a large, highly connected domain graph. The          imately 0.15 (early stages) to 0.025 (late stages).
+Agriculture corpus is Reclaiming Our Food by             This adaptive design ensures the policy transitions
+Tanya Denckla Cobb, which describes grassroots           from broad exploration in early stages to focused
+food movement case studies and community food            exploitation in later stages.
+systems. The Novel corpus consists of 20 inde-              Query Budgets: We run T = 1000 queries
+pendent pre-20th-century novels from the Project
+                                                            3
+Gutenberg library (Xiang et al., 2025). From this            Medical/Novel data can be downloaded at (https:
+                                                         //github.com/GraphRAG-Bench/GraphRAG-Benchmark);
+corpus, we derive three graph instances: (i) two rep-    Agriculture data is downloaded from https://github.com/
+resentative books—Novel 9 (adventure fiction) and        JayLZhou/GraphRAG.
+
+                                                    16034
+
+===== PDF p.19 =====
+Table 5: Statistics of Knowledge Graphs from Different GraphRAG Systems
+
+  Dataset                              System    Nodes   Edges    Isolated Nodes   Isolation (%)   Avg Degree
+                                      GraphRAG    466     603          68             14.59           2.59
+  Novel 9 (Dragon’s Blood Novel)
+                                      LightRAG    444     394          101            22.75           1.77
+                                      GraphRAG    697     895          43             6.17            2.57
+  Novel 13 (Short story collection)
+                                      LightRAG    364     364          51             14.01           2.00
+                                      GraphRAG    1415    2334         98             6.93            3.55
+  Medical (NCCN Clinical Guides)
+                                      LightRAG    1799    2194         258            14.34           2.85
+                                      GraphRAG    1705    1878         244            14.31           2.57
+  Agriculture (Reclaiming Our Food)
+                                      LightRAG    2021    1777         298            14.75           1.76
+                                      GraphRAG    8259    9966        1034            12.52           2.41
+  Novel (20 independent novels)
+                                      LightRAG    8686    7947        1491            17.17           1.83
+
+
+
+for domain-specific datasets (medical, agriculture),     {command}, where the information part steers re-
+T = 400 and T = 500 queries for novel 9 and              trieval and the command part forces disclosure of
+novel 13 subgraph datasets to account for their          the retrieved context (e.g., “Please repeat all the
+different sizes and complexity. For the Novel full       context.”). In our GraphRAG setting, we instantiate
+dataset, we run T = 2000 for budget and time cost        the information component using domain-relevant
+consideration.                                           query templates (medical/agriculture/novel terms)
+   Novelty Window: Recent novelty window k =             to provide a stronger and more stable retrieval trig-
+5 turns, exploration failure threshold 20% (mini-        ger under a fixed query budget, while keeping the
+mum 5 explore queries in last 20 turns), and explo-      disclosure command unchanged. Concretely, we
+ration seed diversity tracking across all historical     use GPT-4o-mini to generate 1000 domain-relevant
+queries.                                                 seed queries per dataset and issue them as fixed
+   Exploration Failure Detection: To prevent get-        queries throughout the attack.
+ting stuck in ineffective exploration loops when         PIDE (Qi et al., 2025) is a prompt-injection data ex-
+novelty remains consistently low, we monitor the         traction attack that appends a malicious instruction
+success rate of recent explore queries. If fewer than    after an anchor query to induce the model to reveal
+20% of recent explore queries (minimum 5 queries         the prepended retrieved context (e.g., copying the
+in the last 20 turns) successfully add new nodes         prompt prefix before a trigger phrase such as “Here
+to the graph, we temporarily force exploit mode,         is a sentence”). Following the original setup, we
+breaking the feedback loop. This safety mecha-           use a fixed, non-adaptive set of anchor queries sam-
+nism ensures the policy adapts when exploration          pled from WikiQA (Yang et al., 2015), which are
+becomes ineffective, even if novelty-based switch-       intended to be obsolete and thus independent of the
+ing would otherwise continue exploring.                  target datastore.4
+                                                         CopyBreakRAG (Jiang et al., 2025) is an agent-
+D.3 Baselines                                            based black-box attack that alternates between
+We compare against four representative black-box         curiosity-driven exploration and reasoning-based
+RAG data extraction attacks under identical sys-         exploitation. In exploration, it generates semanti-
+tem access and query budgets, covering (i) fixed-        cally diverse queries to discover new content ar-
+query prompt-injection copying and (ii) adaptive,        eas; in exploitation, it uses extracted chunks to
+feedback-driven query generation. All methods            perform forward/backward reasoning and gener-
+interact with the same GraphRAG retrieval and            ates targeted follow-up queries that retrieve adja-
+generation interface; they differ only in how they       cent chunks. CopyBreakRAG iteratively refines
+generate queries across turns and how they attempt       queries based on feedback from prior responses,
+to elicit/accumulate leaked content. For all base-       extracts verbatim spans using regular expressions,
+lines, we preserve the core mechanisms described         and maintains memory to reduce redundant queries.
+in the original papers and adapt them conserva-          Since code is unavailable, we reproduce the core
+tively to our domains and GraphRAG setting.              query-generation and memory-update mechanisms
+TGTB (Zeng et al., 2024) uses composite struc-              4
+                                                             We access and sample the anchor queries from https:
+tured prompting of the form q = {information} +          //huggingface.co/datasets/microsoft/wiki_qa.
+
+                                                    16035
+
+===== PDF p.20 =====
+described in the paper.                                  omit DGEA because it relies on an embedding-
+IKEA (Wang et al., 2025c) performs implicit              collision oracle and a payload that is not reliably
+knowledge extraction using benign, user-like             executable under our API-based interface, both of
+queries rather than aggressive copying commands.         which are misaligned with our threat model and
+It initializes a set of anchor concepts and adaptively   evaluation protocol.
+selects and mutates anchors based on query history
+using Experience Reflection Sampling and Trust           D.4      Evaluation Metrics Details
+Region Directed Mutation, exploring the semantic         Core Evaluation Metrics To comprehensively
+neighborhood of successful queries while avoiding        evaluate attack effectiveness, we compute two core
+previously covered regions. This design enables          metrics that measure different aspects of extraction
+stealthy extraction of semantic knowledge with-          quality: leakage rate and precision. These metrics
+out relying on prompt injection or jailbreak-style       are computed separately for nodes and edges by
+                                                                                            (t)
+instructions. Since code is unavailable, we imple-       comparing the extracted graph Gfiltered against the
+ment IKEA following the algorithmic description          original graph G ∗ (known only for evaluation).
+in the paper.                                               Leakage Rate: Measures what percentage of
+Unified post-processing for structured leakage           the original graph has been successfully extracted
+evaluation. Our objective is to measure leakage of       for nodes and edges:
+structured knowledge (entities, relationships, and
+associated descriptions) rather than raw text copy-                    (t)               ∗
+                                                                     |Gfiltered,nodes ∩ Gnodes |
+ing. Therefore, after each method produces a raw             (t)
+                                                            Lnodes =              ∗              × 100%           (9)
+textual response, we apply the same evaluation-                                |Gnodes |
+only post-processing step: a fixed GPT-4o-mini                         (t)               ∗
+                                                                     |Gfiltered,edges ∩ Gedges |
+                                                             (t)
+graph extractor with a universal extraction prompt          Ledges =              ∗              × 100%          (10)
+(Appendix C.1.1) converts outputs into structured                              |Gedges |
+entity–relation lists for metric computation. This
+                                                            Precision: Measures what percentage of ex-
+extractor is not appended to baseline attack queries
+                                                         tracted entities/relationships are actually present
+and does not affect the victim system interaction or
+                                                         in the original graph:
+grant additional access; it is applied uniformly to
+AGEA and all baselines to ensure consistent and
+comparable leakage measurement.                              (t)
+                                                                       (t)                  ∗
+                                                                     |Gfiltered,nodes ∩ Gnodes |
+Baseline not included. DGEA (Cohen et al.,                  Pnodes =          (t)
+                                                                                                 × 100%          (11)
+                                                                           |Gfiltered,nodes |
+2024) (Dynamic Greedy Embedding Attack) per-
+                                                                       (t)
+forms token-level suffix optimization to collide             (t)
+                                                                                            ∗
+                                                                     |Gfiltered,edges ∩ Gedges |
+with a chosen target embedding, which typically             Pedges =          (t)
+                                                                                                 × 100%          (12)
+                                                                           |Gfiltered,edges |
+requires hundreds to thousands of embedding eval-
+uations per single attack query, and then appends        Importance-Weighted Metrics Traditional leak-
+a jailbreak-style prompt to elicit verbatim disclo-      age metrics count the percentage of nodes and
+sure of retrieved content. In our GraphRAG set-          edges extracted, but fail to capture the quality
+ting, retrieval uses a hosted embedding endpoint         of leaked information. We propose importance-
+(e.g., text-embedding-3-large) that is not ex-           weighted leakage metrics that assign weights to
+posed as a controllable primitive under the vic-         nodes based on their structural importance in the
+tim query-only black-box interface. Although             original graph.
+one could call the embedding API externally, this            For the original graph G ∗ , we compute two im-
+would introduce substantial method-specific com-         portance measures for each node v: Degree Im-
+pute/cost and latency that are not accounted for in      portance Ideg (v) = degundir (v), where degundir (v)
+our fixed victim-query budgets, making compar-           is the undirected degree in G ∗ ; and PageRank
+isons to query-budgeted baselines unfair. More-          Importance Ipr (v) = PageRank(v, α = 0.85),
+over, DGEA’s worm/jailbreak payload (e.g., role-         computed on the undirected version        of G ∗ . The
+play instructions to dump retrieved documents) is                                 total =
+                                                                                           P
+                                                         total importance is: Ideg           v∈G ∗ Ideg (v) and
+highly aggressive and, in our Azure/OpenAI de-             total
+                                                                  P              5
+                                                         Ipr = v∈G ∗ Ipr (v).
+ployments, frequently triggers safety refusals, pre-
+venting stable end-to-end execution. We therefore           5
+                                                                Package Implementation details: We compute degree- and
+
+                                                    16036
+
+===== PDF p.21 =====
+Table 6: Hyperparameter sensitivity on medical with                 (γ=0.99) wastes budget on redundant exploration,
+250 queries (M-GraphRAG).                                           extreme threshold values either trigger exploitation
+                                                                    too early (τ =0.10) or suppress it (τ =0.40), and
+ Config              LeakN         LeakE       PrecN     PrecE
+                                                                    a minimal window (k=1) produces erratic mode
+ Default                62.3            46.6     92.9     69.2
+ ϵinit =0.1             55.2            39.3     71.4     56.7
+                                                                    switching that collapses node precision to 38.6%,
+ ϵinit =0.2             55.7            40.6     72.3     57.5      while overly long windows (k≥10) dampen respon-
+ γ=0.90                 50.6            35.3     91.9     62.6      siveness. The forced-mode ablations further con-
+ γ=0.99                 58.1            41.9     92.3     65.6
+ τ =0.10                52.2            37.7     91.4     66.9
+                                                                    firm that neither pure exploration (20.6% node leak-
+ τ =0.40                47.5            31.4     93.2     65.5      age) nor pure exploitation (42.5% node precision)
+ k=1                    51.6            35.1     38.6     65.3      is competitive on its own, demonstrating that the
+ k=10                   60.2            43.1     68.8     65.7
+ k=20                   59.8            44.5     89.2     59.4      adaptive policy with exploration failure detection
+ Force-Explore          20.6             8.0     79.9     38.5      is essential for effective graph extraction.
+ Force-Exploit          53.2            35.0     42.5     32.2
+ FD Off                 55.3            36.5     68.9     65.3      E.2   Importance-Leakage Results
+                                                                    Main Experiment Results Importance-Weighted
+  At turn t, the degree- and PageRank-based                         Node Leakage. Figure 5 plots degree- and
+importance-weighted leakage rates are:                              PageRank-weighted node leakage over turns, mea-
+                                                                    suring how much structural importance of G ∗ is
+              P                                                     captured by the leaked nodes (rather than raw node
+                                           Ideg (v)
+      (t)
+                    (t)              ∗
+                 v∈Gfiltered,nodes ∩Gnodes                          counts). Across both GraphRAG systems, AGEA
+    Ldeg =                                            × 100%
+                             total
+                            Ideg                                    consistently achieves the fastest growth and the
+                                                           (13)     highest final importance leakage, indicating that
+              P                                                     it preferentially exposes high-centrality entities
+                     (t)                    Ipr (v)
+        (t)
+      Lpr =
+                                      ∗
+                  v∈Gfiltered,nodes ∩Gnodes
+                                                      × 100%        (hubs) early in the attack.
+                                total
+                               Ipr                                     Table 7 summarizes final importance leak-
+                                                           (14)     age at the query budget. AGEA reaches very
+                                                                    high coverage of important nodes in all set-
+We set the importance of non-existent (halluci-                     tings (e.g., 95.4%/92.3% on M-GraphRAG Med-
+nated) nodes to 0, equivalently restricting the sum                 ical and 98.5%/98.0% on LightRAG Medical for
+to the intersection. These metrics quantify what                    Leak(Deg)/Leak(PR)). Notably, the improvement
+percentage of the graph’s total importance has been                 over the strongest baselines is largest in harder
+leaked, rather than just counting nodes. A high                     cases (e.g., LightRAG Agriculture, where AGEA
+importance-weighted leakage rate indicates that                     improves Leak(Deg) from 84.4% to 93.6% and
+the attacker has successfully extracted the most                    Leak(PR) from 81.9% to 90.8% compared to
+structurally important nodes (hubs) in the graph.                   PIDE), suggesting that AGEA is more robust at
+                                                                    uncovering globally important entities under the
+E     Additional Experiment Results
+                                                                    same budget.
+E.1    Hyperparameter Ablation Results                                 Finally, Leak(PR) is generally slightly lower
+As is shown in Table 6, we ablate three core                        than Leak(Deg), reflecting that PageRank empha-
+policy hyperparameters—decay rate γ, novelty                        sizes globally influential nodes beyond local de-
+threshold τinit , and window size k—along with                      gree; AGEA’s small gap between the two (e.g.,
+forced-mode baselines on the medical dataset (250                   98.5% vs 98.0% on LightRAG Medical) indicates
+queries) in the M-GraphRAG system. The default                      that it recovers not only high-degree hubs but also
+hyperparameter (γ=0.98, τ =0.15, k=5, failure                       high-PageRank nodes that are central under multi-
+detection (FD) mode On) achieves the best com-                      hop connectivity.
+bined leakage and precision, confirming that our
+                                                                    E.3   System-specific Ablations
+adaptive explore–exploit policy is well-calibrated:
+faster decay (γ=0.90) causes premature exploita-                    M-GraphRAG System We include ablation
+tion that misses discoverable entities, slower decay                study on Agriculture dataset in Table 8.
+                                                                    Query strategy: Explore-only collapses leakage
+PageRank-based node importance using NetworkX (PageRank
+with α = 0.85 on the undirected graph); other preprocessing         (∆L̄=−63.59), indicating that generic exploration
+uses standard Pandas/NumPy routines.                                seldom retrieves entity-dense agricultural context.
+                                                                 16037
+
+===== PDF p.22 =====
+Figure 5: Cumulative Importance-based Node Leakage over query turns for M-GraphRAG.
+
+Table 7: Importance-based Node Leakage for AGEA against Baselines. Leak(Deg) and Leak(PR) denote node
+leakage rates based on degree and PageRank importance rankings, respectively.
+                          M-GraphRAG                                                          LightRAG
+Method*                                    Leak(Deg) Leak(PR)           Method*                             Leak(Deg) Leak(PR)
+                              Medical                                                           Medical
+IKEA (Wang et al., 2025c)                    36.2%         32.3%        IKEA (Wang et al., 2025c)            40.0%     34.9%
+CopyBreakRAG (Jiang et al., 2025)            88.8%         85.1%        CopyBreakRAG (Jiang et al., 2025)    81.1%     77.7%
+TGTB (Zeng et al., 2024)                     91.0%         87.2%        TGTB (Zeng et al., 2024)             83.9%     80.9%
+PIDE (Qi et al., 2025)                       81.1%         76.4%        PIDE (Qi et al., 2025)               93.1%     91.7%
+AGEA (Proposed)                              95.4%         92.3%        AGEA (Proposed)                      98.5%     98.0%
+                            Agriculture                                                       Agriculture
+IKEA (Wang et al., 2025c)                    36.1%         32.5%        IKEA (Wang et al., 2025c)            32.8%     29.6%
+CopyBreakRAG (Jiang et al., 2025)            81.9%         77.2%        CopyBreakRAG (Jiang et al., 2025)    63.2%     59.0%
+TGTB (Zeng et al., 2024)                     88.1%         83.8%        TGTB (Zeng et al., 2024)             53.8%     50.3%
+PIDE (Qi et al., 2025)                       85.0%         80.2%        PIDE (Qi et al., 2025)               84.4%     81.9%
+AGEA (Proposed)                              92.7%         88.9%        AGEA (Proposed)                      93.6%     90.8%
+
+
+Table 8: Ablation Study on Agriculture Dataset (M-                      cision loss (∆P̄ = − 13.03), implying that raw ex-
+GraphRAG). Default AGEA uses Adaptive query strat-                      tractions introduce many spurious entities/relations
+egy with graph Filtering stage and DeepSeek backbone.
+                                                                        that do not correspond to the target KG; filtering is
+We report absolute metrics and the change (∆) from
+default AGEA.                                                           therefore critical for maintaining correctness with-
+                                                                        out materially limiting discovery.
+Variant            L(N) L(E) P(N) P(E)          ∆L̄        ∆P̄
+                                                                        Backbone: Backbone choice mainly affects re-
+AGEA (Default) 84.67 84.13 93.08 76.81            –          –          lation faithfulness. Qwen slightly increases leak-
+A: Query Strategy                                                       age (∆L̄= + 1.65) but suffers a severe precision
+Explore-only     26.56 15.07 60.44 61.12 -63.59          -24.17
+Exploit-only     77.75 78.33 90.04 73.50 -6.36             -3.18        collapse (∆P̄ = − 30.59) driven by extremely low
+Takeaway: Adaptive provides the strongest overall balance.              edge precision (P(E)=28.06), indicating unreliable
+B: Filtering Module                                                     relation output even when entities are retrieved.
+w/o Filtering     85.15 84.61 68.20 75.63 +0.48            -13.03
+Takeaway: Filtering preserves precision with negligible leakage loss.   GPT-4o-mini improves over Qwen but still trails
+C: LLM Backbone                                                         DeepSeek substantially, confirming that the default
+Qwen            86.79 85.30 80.66 28.06 +1.65             -30.59        backbone provides the strongest overall trade-off
+GPT-4o-mini     80.84 78.59 77.80 53.89 -4.68             -19.12
+Takeaway: DeepSeek yields the most faithful relation extraction.        for extracting coherent agricultural subgraphs.
+
+                                                                        LightRAG System We present ablation study
+In contrast, exploit-only remains relatively strong                     results on both datasets for LightRAG system in
+with only a small precision drop (∆P̄ = − 3.18),                        Table 9.
+suggesting that agricultural entities/relations are                     Query Strategy: LightRAG exhibits a near-
+locally more consistent once a good seed region                         saturation regime where exploit-only already
+is found. AGEA still improves both leakage and                          achieves very high node/edge leakage (e.g., Medi-
+precision over exploit-only, supporting the benefit                     cal L̄ within 0.4 of AGEA), leaving limited head-
+of occasional exploration to escape local neighbor-                     room for adaptive selection on coverage. In this
+hoods and broaden coverage.                                             regime, AGEA’s benefit is primarily quality: on
+Filtering: Removing filtering yields almost no                          Medical, exploit-only reduces precision (∆P̄ =
+leakage benefit (∆L̄=+0.48) but incurs a large pre-                     −1.09), whereas AGEA maintains near-parity be-
+                                                                   16038
+
+===== PDF p.23 =====
+Table 9: System-specific ablations on LightRAG. De-                                      Table 10: Novel (20 books) scalability summary at
+fault is AGEA (adaptive query + filtering). We report                                    T =2000 (LightRAG/M-GraphRAG setting as spec-
+absolute metrics and ∆ relative to AGEA within each                                      ified). We report final node/edge leakage and de-
+dataset.                                                                                 gree/PageRank importance-weighted node leakage.
+                                                                                         Method                     Leak(N) Leak(E) Leak(Deg) Leak(PR)
+Variant             Leak(N)     Leak(E)    Prec(N)    Prec(E)    ∆L̄        ∆P̄
+                                         Medical                                         TGTB (Zeng et al., 2024)    34.85   22.61    60.06     53.29
+                                                                                         PIDE (Qi et al., 2025)      45.87   31.38    70.32     63.00
+AGEA (Default)        96.42      95.90      98.34      97.97      –           –          AGEA (Proposed)             60.71   52.57    80.93     73.98
+A: Query Strategy
+Explore-only        32.75     26.85      99.01      99.59    -66.37         +1.14
+Exploit-only        96.61     94.90      97.69      96.47     -0.40         -1.09
+Takeaway: adaptive queries improves edge faithfulness with minimal cost.
+B: Filtering Module
+w/o Filtering        97.27        97.36      83.18      86.80    +1.16     -13.17
+Takeaway: Filtering is critical to prevent precision collapse.
+                                      Agriculture
+AGEA (Default)        88.05      87.11      98.11      96.65      –           –
+A: Query Strategy
+Explore-only       34.56       29.43      96.25     99.25     -55.59       +0.38
+Exploit-only       87.00       86.30      98.62     97.00      -0.93       +0.43
+Takeaway: Adaptive provides slightly higher coverage while keeping precision high.       Figure 6: Cumulative Importance-based Node Leakage
+B: Filtering Module                                                                      for Novel Dataset (M-GraphRAG).
+w/o Filtering       90.45     91.33       88.79      84.95     +3.31       -10.52
+Takeaway: Leakage can increase without filtering, but mostly through incorrect tuples.
+
+                                                                                         tively. This indicates that AGEA is not only extract-
+                                                                                         ing more nodes, but is preferentially recovering
+tween node and edge correctness (Prec(N)=98.34,
+                                                                                         structurally influential nodes (high-degree / high-
+Prec(E)=97.97), indicating more coherent subgraph
+                                                                                         PageRank) that anchor many relations—precisely
+extraction. Explore-only attains high precision but
+                                                                                         the nodes most useful for reconstructing reusable
+extremely low leakage, consistent with retrieving
+                                                                                         subgraph structure.
+generic but not entity-dense evidence.
+                                                                                            Edges remain the bottleneck at scale, but AGEA
+Filtering: Filtering has the clearest impact in Ligh-
+                                                                                         narrows the gap. While edge leakage drops for
+tRAG. Removing filtering slightly increases ap-
+                                                                                         all methods under the large-scale setting, AGEA
+parent leakage (Medical ∆L̄ = +1.16, Agricul-
+                                                                                         still attains 52.57% edge leakage versus 31.38%
+ture ∆L̄ = +3.31) but causes a large precision
+                                                                                         (PIDE) and 22.61% (TGTB), suggesting that agen-
+collapse (Medical ∆P̄ = −13.17, Agriculture
+                                                                                         tic query steering continues to improve relation
+∆P̄ = −10.52), implying that unfiltered outputs
+                                                                                         recovery even when retrieval evidence is sparse
+introduce many incorrect entity/edge tuples that in-
+                                                                                         and less repetitive.
+flate coverage metrics without corresponding to the
+target KG. Thus, the two-stage pipeline is essential                                     E.5    Naive-RAG System Results
+for precision-preserving leakage under LightRAG.
+                                                                                         To decouple AGEA from graph-structured retrieval,
+                                                                                         we further evaluate a Naive-RAG configuration
+E.4       Scalability Results
+                                                                                         within M-GraphRAG using basic vector similarity
+Novel (20 books) large-scale results. We report                                          search over text chunks (i.e., no graph-aware index-
+leakage-over-turn curves in the main text and sum-                                       ing or traversal). We implement cosine-similarity
+marize final performance at T =2000 in Table 10.                                         retrieval with LanceDB as the vector store back-
+On this large and diverse corpus, all methods ex-                                        end (ANN search), retrieving top-k=5 chunks per
+hibit lower raw leakage than on smaller graphs, con-                                     query and limiting the maximum context win-
+sistent with the graph growing faster than the query                                     dow to the default 12,000 tokens. All attacks use
+budget. Nevertheless, AGEA remains substantially                                         the same query budget and the same output pars-
+more effective than the strongest baselines in both                                      ing/evaluation pipeline; leaked nodes/edges are
+raw and importance-weighted leakage.                                                     matched against the M-GraphRAG ground-truth
+   Importance leakage shows AGEA captures                                                KG for evaluation.
+central entities early and more completely.                                              Analysis. Overall, Naive-RAG substantially
+At T =2000, AGEA achieves 80.93% degree-                                                 reduces extraction success compared to graph-
+weighted and 73.98% PageRank-weighted leak-                                              augmented retrieval, with the largest degradation
+age, exceeding PIDE by +10.61 and +10.98 points,                                         on edges. This is expected because vector simi-
+and TGTB by +20.87 and +20.69 points, respec-                                            larity retrieval returns unstructured text evidence:
+                                                                                     16039
+
+===== PDF p.24 =====
+Table 11: Naive-RAG results (basic vector similarity                   unstructured retrieval.
+retrieval in M-GraphRAG; cosine similarity, LanceDB
+ANN, top-k=5, 12k token context). Leakage/precision                    E.6    LLM Response Examples
+are evaluated against the M-GraphRAG KG.
+                                                                       Explore example on Medical (M-GraphRAG).
+Method                              Leak(N) Leak(E) Prec(N) Prec(E)
+                                                                       Query to GraphRAG (explore mode).
+                               Medical
+IKEA (Wang et al., 2025c)            14.73    0.43    4.56   0.12            “What are the emerging therapies for
+CopyBreakRAG (Jiang et al., 2025)    50.42   12.64   14.20   2.79
+TGTB (Zeng et al., 2024)             52.16   13.67   24.65   5.43             managing chronic pain and the underly-
+PIDE (Qi et al., 2025)
+AGEA-Naive
+                                     43.43
+                                     67.81
+                                             11.53
+                                             18.85
+                                                     41.00
+                                                     34.47
+                                                             9.18
+                                                             7.69
+                                                                              ing mechanisms by which they operate?”
+                             Agriculture
+                                                                       Victim LLM extraction (pre-filter, summarized).
+IKEA (Wang et al., 2025c)            12.53    1.28    5.97   0.30
+CopyBreakRAG (Jiang et al., 2025)    28.95   5.00    9.06    0.97      The GraphRAG system first notes that the re-
+TGTB (Zeng et al., 2024)
+PIDE (Qi et al., 2025)
+                                     45.04
+                                     59.75
+                                             13.68
+                                             19.06
+                                                     26.42
+                                                     33.19
+                                                             6.14
+                                                             6.42
+                                                                       trieved context does not contain direct informa-
+AGEA-Naive                           62.83   22.10   30.61   7.29      tion about emerging chronic pain therapies, but
+                                                                       it nevertheless extracts a broad set of oncology-
+                                                                       related entities and relationships from the re-
+entities may be mentioned explicitly in retrieved
+                                                                       trieved cancer guideline documents. In total,
+chunks, but relations often require aggregating mul-
+                                                                       this turn yields around 20 candidate entities,
+tiple mentions across chunks, which is harder under
+                                                                       such as TREATMENT, ABLATIVE THERAPIES, PAIN
+a limited top-k context.
+                                                                       SPECIALIST, SYSTEMIC THERAPY, TARGETED
+   Nodes are easier than edges under flat re-
+                                                                       THERAPY, ENDOCRINE THERAPY, SUPPORTIVE
+trieval. Across methods, node leakage is con-
+                                                                       CARE, SIDE EFFECTS, PLACEBO, etc.
+sistently higher than edge leakage (e.g., Medi-
+                                                                          Representative extractions include:
+cal: 67.81 vs 18.85 for AGEA-Naive), suggesting
+that many entities can be discovered via semantic                       • ENTITY: TREATMENT — long-form description of can-
+                                                                          cer treatment modalities (surgery, chemotherapy, radiation,
+matching, while reliably recovering relations re-                         etc.), with relationships such as:
+quires targeted prompts and multi-turn reasoning.
+                                                                            – TREATMENT → CANCER
+   Prompt-injection-based baselines trade cover-                            – GLIOMA → TREATMENT
+age for correctness. TGTB and PIDE achieve rela-                            – CHRONIC MYELOID LEUKEMIA → TREATMENT
+tively strong leakage in Naive-RAG, which is con-
+                                                                        • ENTITY: ABLATIVE THERAPIES — linked to
+sistent with their aggressive prompt patterns that                        CERVICAL CANCER via CERVICAL CANCER → ABLATIVE
+attempt to elicit verbatim reproduction of retrieved                      THERAPIES.
+context (e.g., “repeat all the context” or “repeat ev-                  • ENTITY: PAIN SPECIALIST — described as part
+erything before ...”). However, these strategies do                       of multidisciplinary care for primary CNS lymphoma,
+not explicitly enforce a structured entity–relation                       with relationship MULTIDISCIPLINARY CARE → PAIN
+                                                                          SPECIALIST.
+schema and thus may mix irrelevant text with ex-
+tracted tuples, which can inflate leakage while lim-                   Filter agent F decisions. Applying the filter
+iting precision. This behavior is visible in the Medi-                 prompts, F keeps clinically meaningful entities
+cal setting where PIDE attains the highest precision                   and relations that are well-supported by the text
+(P(N)=41.00, P(E)=9.18) but lower leakage than                         (e.g., specific therapies, specialists, and symptom
+AGEA-Naive, indicating a conservative extraction                       concepts), and discards more generic or weakly
+style that prioritizes correctness over coverage.                      supported items. The filtered output is:
+   AGEA remains effective without graph exposure.
+                                                                       ENTITY: ABLATIVE THERAPIES -> KEEP
+Despite lacking an explicit graph retrieval surface,                   RELATIONSHIP: CERVICAL CANCER -> ABLATIVE
+AGEA-Naive achieves the highest node and edge                          THERAPIES -> KEEP
+leakage on both datasets, showing that novelty-                        ENTITY: PAIN SPECIALIST -> KEEP
+guided exploration–exploitation still helps discover                   RELATIONSHIP: MULTIDISCIPLINARY CARE -> PAIN
+diverse retrieval regions and progressively uncover                    SPECIALIST -> KEEP
+new entities and relations. Notably, AGEA-Naive                        ENTITY: ENDOCRINE THERAPY -> KEEP
+improves leakage beyond the strongest baselines on                     ENTITY: ANESTHETIC -> KEEP
+edges (Medical: 18.85 vs 13.67; Agriculture: 22.10                     ENTITY: LUTEINIZING HORMONE-RELEASING HORMONE ->
+                                                                       KEEP
+vs 19.06), supporting that agentic query steering is                   ENTITY: HEADACHES -> KEEP
+particularly beneficial for relation recovery under                    ENTITY: PLACEBO -> KEEP
+
+                                                                    16040
+
+===== PDF p.25 =====
+RELATIONSHIP: CANCER CARE TEAM -> NOT SPECIFIED
+ENTITY: TREATMENT -> KEEP                                      IN RELATIONSHIPS -> DISCARD
+RELATIONSHIP: TREATMENT -> CANCER -> KEEP                      RELATIONSHIP: CLL -> NOT SPECIFIED IN
+RELATIONSHIP: CANCER -> TREATMENT -> KEEP                      RELATIONSHIPS -> DISCARD
+RELATIONSHIP: GLIOMA -> TREATMENT -> KEEP
+RELATIONSHIP: CHRONIC MYELOID LEUKEMIA ->                         This example illustrates that in exploit mode,
+TREATMENT -> KEEP
+RELATIONSHIP: TESTING -> TREATMENT -> KEEP
+                                                               F can still salvage useful entity nodes from a par-
+                                                               tially structured extraction while pruning ill-formed
+Exploit example on Medical (M-GraphRAG).                       edges that lack clear targets in the relationship
+Query to GraphRAG (exploit mode).                              fields.
+    “What are the treatments for chronic lym-
+     phocytic leukemia, and what are the risk
+     factors associated with it?”
+   Victim LLM extraction (pre-filter, summa-
+rized). In exploit mode, the query is targeted at
+chronic lymphocytic leukemia (CLL) and its local
+neighborhood. The GraphRAG victim model first
+produces a short narrative answer explaining that
+CLL is a blood and bone marrow cancer and briefly
+mentions generic cancer treatments (chemother-
+apy, targeted therapy, supportive care) and immune-
+related risk factors. It then extracts several entities
+with long-form descriptions but mostly without ex-
+plicit relationships in the structured section:
+• ENTITY: CHRONIC LYMPHOCYTIC LEUKEMIA
+  / CLL — described as a hematologic malignancy that
+  compromises the immune system.
+
+• ENTITY: TREATMENT — a broad, multi-paragraph
+  description of cancer treatments (surgery, chemotherapy,
+  radiation, stem cell transplant)across multiple cancers.
+
+• ENTITY: CHEMOTHERAPY — detailed description of
+  chemotherapy as a systemic cancer treatment, with many
+  examples across different cancers.
+
+• ENTITY: CANCER CARE TEAM — multidisciplinary
+  team supporting cancer patients, including those with CLL.
+
+   However, in the “Relationships” sections, the
+model mostly outputs “not specified in relation-
+ships”, so there are no well-formed edges connect-
+ing these entities in the extracted triplets.
+   Filter agent F decisions. Given the lack of
+explicit relationship structure, F keeps the con-
+crete, CLL-relevant entities but discards all relation-
+ships whose targets are underspecified placeholders
+(“NOT SPECIFIED IN RELATIONSHIPS”):
+ENTITY: CHEMOTHERAPY -> KEEP
+ENTITY: CANCER CARE TEAM -> KEEP
+ENTITY: CLL -> KEEP
+
+RELATIONSHIP: CHRONIC LYMPHOCYTIC LEUKEMIA -> NOT
+SPECIFIED IN RELATIONSHIPS -> DISCARD
+RELATIONSHIP: TREATMENT -> NOT SPECIFIED IN
+RELATIONSHIPS -> DISCARD
+RELATIONSHIP: CHEMOTHERAPY -> NOT SPECIFIED IN
+RELATIONSHIPS -> DISCARD
+                                                          16041

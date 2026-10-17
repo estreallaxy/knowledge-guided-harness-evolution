@@ -1,0 +1,2298 @@
+===== PDF p.1 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video
+                 Understanding by Decoupling Answer Authority
+
+
+                        Chenhao Qiu 1 Yechao Zhang 2 † Xin Luo 1 Shien Song 1 Xusheng Liu 1
+
+
+                          Abstract                                 1. Introduction
+                                                                   Long-video understanding (LVU) is substantially more chal-
+       Long video question answering requires locat-               lenging than short-video reasoning because relevant evi-
+       ing sparse, time-scattered visual evidence within           dence is sparse and temporally dispersed, while the video
+       highly redundant content. Although current                  contains overwhelming irrelevant content (Lin et al., 2023;
+       MLLMs perform well on short videos, long                    Cheng et al., 2024; Li et al., 2024). As a result, LVU systems
+       videos introduce long-horizon search and verifica-          are typically agentic: they iteratively navigate the timeline,
+       tion, which often necessitates multi-turn, agentic          retrieve candidate spans, and inspect visual evidence over
+       interaction. We show that existing LVU agents               multiple rounds of tool use (Wang et al., 2024; Ma et al.,
+       can exhibit evidence misalignment: they produce             2025; Tian et al., 2025; Yuan et al., 2025).
+       correct answers that are not supported by the re-
+                                                                   The prevailing paradigm in existing LVU systems is a uni-
+       trieved or inspected evidence. To characterize this
+                                                                   fied agentic orchestration, where a monolithic planner con-
+       failure, we introduce two diagnostics (temporal
+                                                                   trols retrieval, inspection tools within a single shared context
+       groundedness and semantic groundedness) and
+                                                                   window, reasons primarily over accumulated textual traces
+       use them to reveal two pressures that amplify mis-
+                                                                   (e.g., captions and frame descriptions), and delivers the final
+       alignment: prompt pressure from shared-context
+                                                                   answer (Yu et al., 2023; Wang et al., 2025b; Zhang et al.,
+       saturation at inference time and reward pressure
+                                                                   2024a; Pang & Wang, 2025). However, we observe a recur-
+       from outcome-only optimization during training.
+                                                                   ring failure mode in this paradigm: agents exhibit premature
+       These findings point to a structural root cause: the
+                                                                   commitment, outputting an answer even when their interac-
+       coupled agent paradigm conflates long-horizon
+                                                                   tion trace cannot provide sufficient grounded support (Xiao
+       planning with answer authority. We therefore pro-
+                                                                   et al., 2024; Sarkar & Etemad, 2025). We formalize this
+       pose the decoupled planner–inspector framework,
+                                                                   phenomenon as evidence misalignment by evaluating out-
+       which separates planning from answer authority
+                                                                   come correctness alongside trace groundedness, focusing
+       and gates final answering on pixel-level verifi-
+                                                                   on the pathological correct but ungrounded regime. To
+       cation. Across four long-video benchmarks, our
+                                                                   characterize this failure, we introduce two complementary
+       framework improves both answer accuracy and ev-
+                                                                   diagnostics: temporal groundedness, which checks whether
+       idence alignment, achieving 55.1% on LVBench
+                                                                   the agent accesses relevant temporal regions during interac-
+       and 62.0% on LongVideoBench while producing
+                                                                   tion, and semantic groundedness, which uses an LLM judge
+       interpretable search trajectories. Moreover, the
+                                                                   to verify whether the final answer is logically supported by
+       decoupled architecture scales consistently with
+                                                                   the tool outputs in the trace. Together, these diagnostics
+       increased search budgets and supports plug-and-
+                                                                   test whether an agent truly earns its answer from accessed
+       play upgrades of the MLLM backbone without
+                                                                   evidence and help identify the root cause of misalignment.
+       retraining the planner. Code and models are avail-
+       able at https://github.com/Echochef/                        Our diagnostics first reveal a systematic driver of evidence
+       VideoSEAL.                                                  misalignment at inference time. During inference, as the
+                                                                   agent’s tool traces grow longer and noisier, the planner
+                                                                   is increasingly prompted to be decisive without reliably
+   1
+    Mango TV, Changsha, China 2 Nanyang Technological              locating and reconciling the relevant evidence (Liu et al.,
+University, Singapore. Correspondence to: Yechao Zhang             2023; Bai et al., 2024), drifting from verification toward
+<yech.zhang@gmail.com>.                                            plausible completion (Menon et al., 2025). We term this
+                                                                   pathology prompt pressure. Prompt pressure shifts behavior
+Proceedings of the 43 rd International Conference on Machine
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026       from evidence seeking to evidence fitting: when support is
+by the author(s).                                                  missing, ambiguous, or hard to locate in a long trace, the
+
+                                                               1
+
+===== PDF p.2 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+planner resolves uncertainty by falling back to parametric             2. Related Work
+priors and generic plausibility templates, producing answers
+that are weakly supported by the trace.                                MLLMs for LVU. Recent Multimodal LLMs (Bai et al.,
+                                                                       2025a; Liu et al., 2025a; Wang et al., 2025a) have demon-
+On the other hand, during training, while reinforcement                strated remarkable proficiency in short-horizon video under-
+learning (RL) offers a promising route to learning effective           standing by scaling model capacity and instruction tuning.
+multi-turn interaction policies (Xie et al., 2025; Yang et al.,        However, extending these architectures to long video en-
+2025), agentic LVU is often equipped with outcome-only                 counters a structural bottleneck: visual token counts grow
+rewards because fine-grained temporal grounding labels are             with video duration, whereas decisive evidence remains
+scarce (Krishna et al., 2017; Fu et al., 2024; Wu et al., 2024).       sparse. Standard approaches resort to aggressive downsam-
+This constitutes another systematic driver of evidence mis-            pling or token compression, inevitably sacrificing critical
+alignment, since the reward primarily reflects answer cor-             evidence (Pang & Wang, 2025; Song et al., 2023; Zhu et al.,
+rectness rather than evidence grounding, encouraging short-            2025). This limitation (Pang & Wang, 2025; Wang et al.,
+cut behaviors that improve outcomes without improving                  2024; Ren et al., 2025) has necessitated a shift from single-
+alignment. We refer to this incentive-driven pathology as              pass inference to iterative, agentic reasoning paradigms that
+reward pressure. Under reward pressure, agents can max-                actively navigate the video timeline.
+imize return by relying on speculative completion instead
+of verifying evidence, leading to a widening hallucination             Agentic Evidence Seeking and Reasoning. To overcome
+gap (Skalse et al., 2022; Everitt et al., 2021).                       the computational bottleneck of single-pass inference, re-
+                                                                       cent work adopts iterative, evidence seeking agents that
+We argue these limitations share a common structural root:             retrieve candidate temporal spans and reason over inter-
+the coupled agent paradigm, where evidence seeking, in-                mediate textual summaries across multiple turns (Wang
+spection, and answer generation are conflated within a single          et al., 2024; Liao et al., 2024; Shang et al., 2024; Zhang
+model operating over the same context. To address this, we             et al., 2025b). However, these agents often rely on a strong
+propose a decoupled planner–inspector framework, which                 monolithic planner to manage long-horizon search, which
+strategically separates these distinct roles. This design gives        incurs substantial inference cost. More fundamentally, they
+the LLM planner a sparse, structured state for long-horizon            typically reason over lossy intermediate textual summaries
+navigation. An MLLM inspector then verifies candidate                  rather than visual evidence, so inaccurate summaries can
+evidence and holds exclusive answer authority through an               propagate into evidence misalignment when key spans are
+inspector gate. By architecturally decoupling these respon-            not retrieved.
+sibilities and leveraging GRPO (Shao et al., 2024), we mit-
+igate prompt and reward pressures, effectively preventing              Distinct from inference-time methods, complementary ap-
+unsupported answers driven by unverified tool outputs. Our             proaches aim to learn planning and tool-use behaviors di-
+decoupled framework achieves 55.1% answer accuracy and                 rectly via RL (Gao et al., 2025). Frameworks such as Video-
+62.0% accuracy on LongVideoBench (Wu et al., 2024) un-                 MTR and LongVT (Xie et al., 2025; Yang et al., 2025) train
+der a fixed budget, while exhibiting consistent gains with             a single model to iteratively acquire evidence with intrinsic
+larger search budgets and stronger inspector backbones. Our            visual grounding (Yao et al., 2023; Shen et al., 2023). How-
+contributions are threefold:                                           ever, these methods typically place search, accumulated tool
+                                                                       outputs, and final answering in the same shared context.
+                                                                       This design can encourage speculative completion, where
+  1. Evidence Misalignment Diagnostics: We formalize
+                                                                       the model compulsively reasons answers from superficial
+     evidence misalignment in agentic VideoQA and in-
+                                                                       correlation.
+     troduce two diagnostics, temporal groundedness and
+     semantic groundedness, which reveal two structural
+     drivers: reward pressure and prompt pressure.                     3. Diagnosing Evidence Misalignment
+  2. Decoupled Planner–Inspector Framework: We pro-                    In this section, we empirically document the evidence mis-
+     pose the decoupled planner–inspector framework that               alignment in agentic LVU, where an agent outputs an answer
+     separates long-horizon planning from answer authority,            while its interaction trace provides insufficient support. Our
+     with an inspector gate that produces an answer only               analysis proceeds in three steps. First, we formalize agentic
+     when the inspected visual evidence is sufficient.                 LVU as a multi-step interaction and introduce two diag-
+                                                                       nostics to measure trace groundedness (Section 3.1): (i) a
+  3. Empirical Gains and Scaling: Across four long-video               temporal-overlap test using ground-truth intervals, and (ii)
+     benchmarks, our framework improves both answer ac-                a trajectory-level semantic audit by LLM. Then, we use
+     curacy and evidence alignment, and scales monotoni-               these diagnostics to illustrate how and why this misalign-
+     cally with larger search budgets and stronger inspector           ment occurs during training (Section 3.2) and at inference
+     models, without retraining the planner.
+
+                                                                   2
+
+===== PDF p.3 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+(Section 3.3). Finally, we introduce a structural remedy by             where tIoU measures temporal intersection-over-union and
+separating planning from answer authority (Section 3.4).                γ is the threshold (set to the CG-Bench training mean;
+Together, these steps connect trace-level symptoms to their             γ=0.05), consistent with CG-Bench’s loose overlap cri-
+causes and motivate a concrete structural fix.                          terion (Chen et al., 2025; Mun et al., 2020).
+                                                                        To quantify how often agents give the correct answers with-
+3.1. Formalization and Diagnosis Setup                                  out accessing the ground-truth evidence (C=1, Gt =0), we
+Notation. We model agentic long-video understanding                     define the temporal hallucination rate as:
+as a sequential interaction process with evidence seeking
+                                                                                                                             E[C (1−Gt )]
+actions. Given a video V and a query q, an agent policy                                       Ht := P(Gt =0 | C=1) =                      .   (2)
+π interacts with the environment for at most K rounds,                                                                          E[C]
+using tool actions from an action space U to query, retrieve,           A higher Ht indicates that the agent achieves answer correct-
+or inspect video content. At each round t, the policy π                 ness frequently without accessing correct evidence, expos-
+produces a rationale rt and an action ut ∈ U, based on the              ing a gap between outcome correctness and groundedness.
+query q and current interaction history ht−1 (h0 = ∅):
+                  (rt , ut ) ∼ π(· | ht−1 , q),
+                                                                                                   LLM-based (Acc)        MLLM-based (Acc)
+                                                                                                   LLM-based (Gt )        MLLM-based (Gt )
+then receives an observation ot ← Env(V, ut ) from the
+environment and updates history as ht := ht−1 ⊕(rt , ut , ot ).                       0.7
+The interaction terminates when the policy π decides to stop                          0.6
+or when the budget K is reached. At the terminal round
+                                                                                      0.5
+                                                                        Performance
+
+T ≤ K, the agent emits an empty tool action uT = ∅
+                                                                                      0.4
+and a rationale rT that details why it stops, along with the
+final answer â to the query q. Throughout the interaction                            0.3
+trace ξ := hT , at each round t the agent accesses a set of                           0.2
+video evidence vt := E(ot ) in the video. We summarize the                            0.1
+overall process as π : (V, q) 7→ (â, ξ).
+                                                                                      0.0
+                                                                                         50        100        150           200       250     300
+                                                                                                                Training Steps
+Correctness vs Groundedness We assess an agent along
+two axes: outcome correctness and trace groundedness. Let               Figure 1. Performance vs Training steps. We train an MLLM
+a∗ denote the ground-truth answer and define outcome cor-               planner (Video-MTR (Xie et al., 2025) with its original tools) and
+rectness as C ∈ {0, 1}, where C=1 iff â = a∗ . Trace                   an LLM-planner (using the tools in Section 4.2) over CG-Bench.
+groundedness is a binary indicator G ∈ {0, 1} that cap-
+tures whether the agent’s final answer â is justified by its
+interaction trajectory ξ, without relying on information ab-            Diagnostic II: Semantic Grounding. Temporal access
+sent from the trace. The pair (C, G) ∈ {0, 1}2 partitions               alone does not guarantee grounded reasoning: even if the
+trajectories into four regimes: correct and grounded (1, 1),            agent successfully retrieves the relevant spans for query
+correct but ungrounded (1, 0), grounded but wrong (0, 1),               q, it may not properly interpret them and deduce the an-
+and ungrounded and wrong (0, 0). Our focus is the correct               swer with sufficient reason. To test whether an agent earns
+but ungrounded regime (C = 1, G = 0) that characterizes                 its answer from what it actually retrieves, we complement
+evidence misalignment: although the answer is right, it is              temporal overlap with an LLM-judge diagnostic that audits
+not supported by the trace. This indicates that the agent               the interaction trace (Li et al., 2025). The LLM judge ver-
+bypasses actual visual verification, instead achieving cor-             ifies the reasoning trajectory against tool outputs, where
+rectness through speculative guessing, parametric priors,               the answer lacking explicit grounded support is judged as
+or superficial dataset shortcuts. Such behavior exposes the             a hallucination. Given (q, ξ, â), the judge function Jjudge
+critical lack of verifiability and interpretability of the agent.       checks whether all the claims that lead to â are unsupported
+                                                                        by trace ξ. We define semantic groundedness as:
+Diagnostic I: Temporal Grounding. We assess whether
+the agent accesses relevant temporal regions during inter-                                           Gs := 1 − Jjudge (q, ξ, â),             (3)
+action. For every retrieved span τ ∈ E(ξ) and annotated
+interval τ ∗ ∈ E ∗ , where E ∗ denotes the ground-truth re-             where Jjudge =1 signifies that the answer is unsupported (hal-
+gions, we evaluate temporal groundedness as follows:                    lucinated). Analogous to Eq. 2, we quantify the semantic
+                                                                      hallucination rate (correct but unsupported) as:
+         Gt := I       max∗ ∗ tIoU(τ, τ ∗ ) ≥ γ .       (1)                                          Hs := P(Gs =0 | C=1).                    (4)
+                   τ ∈E(ξ), τ ∈E
+
+
+                                                                    3
+
+===== PDF p.4 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+                                             VideoAgent               DrVideo                                                         man et al., 2023). We refer to this training-time bias toward
+             Temporal Groundedness (Gt ) "                                  Temporal Hallucination (Ht ) #                            outcome-driven shortcuts as reward pressure. Under reward
+                                                            100
+70
+                                                            90
+                                                                                                                                      pressure, speculative reasoning that guesses answers using
+60
+
+50                                                          80
+                                                                                                                                      priors becomes more effective than rigorous evidence seek-
+40
+                                                            70                                                                        ing, thereby progressively weakening trace groundedness
+30
+
+20
+                                                            60                                                                        and enlarging the outcome–grounding gap.
+                                                            50
+10
+
+ 0                                                          40
+             Semantic Groundedness (Gs ) "                                  Semantic Hallucination (Hs ) #                            3.3. Inference-time Diagnostic: Prompt Pressure
+90                                                          60
+                                                                  Early Collapse
+80                                                          50                                                                        Seeking longer (still) cannot yield more grounded an-
+70
+
+60
+                                                            40
+                                                                                                           Late-stage
+                                                                                                                                      swers. We observe a systematic failure pattern across dif-
+                                                            30                                             Drift
+50                                                                                                                                    ferent interaction trajectories: longer interaction histories
+                                                            20
+40
+
+                                                            10
+                                                                                                                                      with more retrievals do not reliably yield more semantically
+30
+
+20                                                           0
+                                                                                                                                      grounded answers. Specifically, we group interaction traces
+     2   4      6     8    10     12    14   16   18   20         2     4     6      8    10     12    14       16      18   20
+                    Interaction Steps (t)                                          Interaction Steps (t)                              by their terminal length and compute both groundedness
+                                                                                                                                      (Gt and Gs ) and hallucination metrics (Ht and Hs ).
+Figure 2. Temporal access vs. semantic support under trace growth.
+We report temporal groundedness/hallucination (Gt /Ht ) and se-                                                                       As shown in Figure 2, temporal access and semantic support
+mantic groundedness/hallucination (Gs /Hs ) for VideoAgent and
+                                                                                                                                      increasingly decouple as trace length grows: Gt saturates
+DrVideo on LVBench.
+                                                                                                                                      early, while Gs steadily declines. Temporal groundedness
+                                                                                                                                      improves mainly in the first few steps and then plateaus
+While Gt checks for temporal access, Gs verifies logical                                                                              for both VideoAgent and DrVideo, suggesting diminishing
+semantic support, catching trajectory drift where the agent                                                                           returns from additional retrieval or inspection. In contrast,
+ignores accessed evidence.                                                                                                            semantic groundedness degrades monotonically with longer
+                                                                                                                                      traces, accompanied by rising semantic hallucination. Over-
+                                                                                                                                      all, these reveal that longer interactions do not translate into
+3.2. Training-time Diagnostic: Reward Pressure
+                                                                                                                                      better trace-supported reasoning. Instead, they increase the
+Training longer cannot yield more grounded answers.                                                                                   prevalence of correct yet ungrounded outputs: agents may
+We observe a systematic divergence between answer correct-                                                                            touch relevant content, but their final answers are progres-
+ness and trace groundedness as training progresses under                                                                              sively less justified with sufficient reason.
+the current prevalent agentic LVU solutions. Specifically,
+                                                                                                                                        Question                       ___ as the protagonist lockpicking the door
+we evaluate across training steps using on-policy rollouts                                                                                                             (A) Fire ignites (B) Water floods in (C) Mice appear (D) Enemies appear
+                                                                                                                                                                                                                                                                                                Time Reference
+                                                                                                                                                                                                                                                                                                00:04:01-00:04:52
+
+
+and compute both answer accuracy and temporal ground-                                                                                   Step 1                 Planner                                                  MLLM
+                                                                                                                                                                                                                        Observer
+                                                                                                                                                                                                         - Visual QA [00:03:12-00:03:28] Character picks wooden door lock, checks inside... No fire/flood
+edness. Figure 1 shows the training dynamics across op-                                                                                 Tool: retrieve
+                                                                                                                                        Query: The protagonist is lockpicking the door
+                                                                                                                                                                                                         - Visual QA [00:03:28-00:03:44] Hand inserts wall object, camera focus... No fire/water/mice/enemies
+                                                                                                                                                                                                         - Visual QA [00:04:16-00:04:32] Uses lockpick on door-like object...
+                                                                                                                                                                                                         ...
+timization steps: answer accuracy steadily improves for
+                                                                                                                                        Step 2                 Planner                                                  Observer
+both LLM-based and MLLM-based agents, whereas trace                                                                                    The current evidence does not specify what occurs as the protagonist is lockpicking the door, only noting that they manipulate tools on the lock... No fire, flooding,
+                                                                                                                                       mice, or enemies are mentioned during this action. Additional details about concurrent events and time frames... are required for an accurate answer.
+
+
+groundedness grows much more slowly, leading to an ex-                                                                                  Step 3                 Planner                                                  MLLM
+                                                                                                                                                                                                                        Observer
+                                                                                                                                                                                                         - Visual QA [04:00-04:16] The character has tools and focuses on opening something...no visible fire...
+
+panding gap between outcomes and groundedness. This                                                                                     Tool: retrieve
+                                                                                                                                        Query: The protagonist is lockpicking the door
+                                                                                                                                                                                                         - Visual QA [04:48-05:04] water flooding inside, water floods the storage area with buckets...no fire or
+                                                                                                                                                                                                         enemies, mice appear after the flood...
+                                                                                                                                                                                                         - Visual QA [05:04-05:20] The character looks off-screen with concern...no visible fire or water flooding...
+
+growing outcome–grounding gap indicates that correctness                                                                                Step 4                 Planner                                                 Observer
+is not accompanied by proportional gains in evidence seek-                                                                             The current evidence does not provide a clear answer to what happens as the protagonist is lockpicking the door. The descriptions mention various events and settings,
+                                                                                                                                       but none explicitly link the act of lockpicking with the appearance of fire, water, mice, or enemies. Additional information or specific time spans are needed.
+
+
+ing. Instead, agents increasingly rely on parametric priors                                                                             Step 5                 Planner                                                  MLLM
+                                                                                                                                                                                                                       Observer
+                                                                                                                                                                                                         - Dense Caption [00:03:28-00:03:44] Industrial scene, dim light, character with metal tools, high-temp
+                                                                                                                                                                                                         glow, crafting...
+or spurious cues rather than retrieved evidence, leading to                                                                             Tool: retrieve
+                                                                                                                                        Query: The protagonist is lockpicking the door
+                                                                                                                                                                                                         - Dense Caption [00:03:44-00:04:00] Dim light, character in traditional wear by wooden door, metal part
+                                                                                                                                                                                                         operation, camera pans up, elevated...
+                                                                                                                                                                                                         - Dense Caption [00:04:16-00:04:32] Night, dim light, braided character peers at open wood door...
+more correct yet ungrounded answers.
+                                                                                                                                        Step 6                 Planner                                                Observer
+                                                                                                                                        Based on the descriptions, none of the options are explicitly mentioned as occurring during the lockpicking process. However, the protagonist is startled by
+                                                                                                                                        something in the dark tunnel behind them, which might suggest someone is moving in the tunnel behind them. This is the closest inference we can make from the
+                                                                                                                                        given descriptions. Therefore, the most plausible answer is:
+                                                                                                                                        {'final_answer': 'D'}
+Reward pressure impairs groundedness. The above re-
+sults suggest that training implicitly prioritizes outcome                                                                            Figure 3. An example of prompt pressure. The agent repeatedly
+optimization over trace grounding. In the prevalent archi-                                                                            retrieves candidate clips and even surfaces potentially relevant
+tectures, the planner is responsible for both interaction de-                                                                         visual cues, yet its final decision is a hedged plausibility template
+                                                                                                                                      (e.g., “might suggest”) and incorrect.
+cisions and final answer generation. While reward signals
+directly supervise final answers, they provide only weak and
+indirect feedback on the evidence seeking process. Subse-                                                                             Prompt pressure impairs groundedness. The above re-
+quently, agents can maximize rewards more efficiently by                                                                              sults suggest that the agent is increasingly prompted to be
+exploiting parametric priors or superficial patterns in the                                                                           decisive without adequately inspecting retrieved evidence,
+interaction trace, rather than performing costly and precise                                                                          regardless of whether the trace suffices to justify an answer.
+evidence retrieval (Chai et al., 2024; Cao et al., 2025; Light-                                                                       In the prevalent architectures, the planner is also responsi-
+
+                                                                                                                                  4
+
+===== PDF p.5 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+ble for both trace inspection and final answer generation.                           Couple                                            Decouple
+A longer trace creates an incentive to commit even when
+trace support is uncertain. We refer to this inference-time
+compulsion to commit as prompt pressure. As showcased                      Search token                                                            Search token
+
+
+in Figure 3, prompt pressure shifts behavior from evidence
+seeking to evidence fitting: when support is missing, am-
+biguous, or hard-to-locate in a long trace, the agent resolves                                              z    Tools
+                                                                                                                                                   Search token
+uncertainty by falling back to superficial correlation and                  Tool token
+
+                                                                           Search token
+generic plausibility, yielding seemingly coherent but weakly               Rea2ans token Answer Authority                       Answer Authority
+                                                                                                                                                    Tool token
+
+
+supported answers. Thus, the agent may still touch relevant
+content (so Gt saturates), while its final decision drifts to-
+ward tentative guesses rather than grounded understanding,             Pressure           Hallucination                                 Inspector
+degrading Gs and increasing semantic hallucination as T
+grows.
+                                                                                                                Answers
+
+3.4. Remedy: Separating Planning and Answering                           Search token                           Tool token                         Rea2ans token
+
+
+Structural root: the coupled agent paradigm. Building                Figure 4. Architectural comparison between the coupled agent and
+on the above diagnostics, we attribute both prompt pres-             the decoupled agent.
+sure and reward pressure to a shared structural cause: the
+coupled-agent design. We define a coupled agent as a sin-            history ht−1 , the environment returns observation ot , and
+gle policy that both seeks evidence and produces the final           the inspector evaluates the extracted evidence vt := E(ot ):
+answer, with all decisions conditioned on the same interac-
+tion history ht . In prevalent architectures, this means the            (rt , ut ) ∼ P (· | ht−1 , q),                       (zt , ft ) ∼ I(· | vt , q).
+planner is simultaneously responsible for trace inspection,
+                                                                     Here zt ∈ {0, 1} is a binary sufficiency verdict and ft rep-
+termination, and final answer generation within one shared
+                                                                     resents the feedback, where zt =1 indicates that the current
+context. Such entanglement amplifies prompt pressure at
+                                                                     evidence is sufficient to answer. The agent terminates and
+inference time and reward pressure during training.
+                                                                     outputs an answer only when zt =1. Otherwise, the plan-
+                                                                     ner continues evidence seeking. Figure 5 illustrates the
+Decoupled agent with an inspector gate. To break this
+                                                                     workflow, and we detail the planner–inspector interaction
+entanglement, we propose a decoupled agent with two en-
+                                                                     protocol in Section 4.3.
+tities (see Figure 4): a planner that gathers evidence via
+tools, and an inspector that controls answer authority. After
+each retrieval/inspection, the planner submits inspectable           4.2. Tool Interfaces
+evidence to the inspector, who returns a binary sufficiency          We implement long-horizon evidence seeking with three
+verdict. The planner terminates only when the inspector              tool interfaces: (i) offline clip indexing, (ii) index-based
+approves. Otherwise, it continues evidence seeking.                  retrieval, and (iii) visual inspection.
+                                                                     Offline indexing. We partition each long video into fixed-
+4. Method                                                            length clips (16 seconds). For each clip, we pre-generate a
+In this section, we present our decoupled framework in               caption using an MLLM captioner (Qwen3-VL-8B-Instruct)
+Section 4.1 and the tool set used for the planner’s agentic          and a dense embedding of that caption using a text em-
+evidence seeking in Section 4.2, as well as how the planner          bedding encoder (text-embedding-3-large), and store the
+and inspector interact using the tool set in Section 4.3. Fi-        metadata in a retrieval index.
+nally, we describe the reward design and policy optimization         Retrieval. Given a text query, VisualRetrieve per-
+procedure for training the planner in Section 4.4.                   forms cosine-similarity search over the index to return a
+                                                                     top-k set of candidate clips/spans. To reduce semantic drift,
+4.1. Decoupled Planner–Inspector Framework                           we apply an LLM filter (DeepSeek-V3.2) over the associ-
+                                                                     ated captions to prune and consolidate candidates, yielding
+We propose a novel decoupled planner–inspector framework
+                                                                     a concise set of question-relevant temporal spans.
+for agentic LVU. The key design is to decouple the original
+policy π into two entities: a planner P for evidence seeking         Visual inspection. VisualInspect is the tool interface
+and an inspector I that exclusively controls termination and         used to instantiate the inspector I. Given a set of video evi-
+the final answer. Concretely, at each round t, the planner           dence vt and the query q, VisualInspect(vt , q) returns
+produces a rationale–action pair (rt , ut ) conditioned on the       a structured response (zt , ft ). When zt = 1, ft includes an
+
+                                                                 5
+
+===== PDF p.6 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+
+
+                                                                                                                                                                                                                               Final Answer
+                                     Planner                                              Visual Retrieve                    Visual Inspect                                              Visual Retrieve                             &
+                                                                                                                                                                                                                                 Evidence
+
+                        What color is vlogger's car?                      “Span relevance:                         SPANS:-00:12:34–00:12:58;                       “Span relevance:                           SPANS:-00:05:52–00:06:08
+                        (A)White                                          1. UNRELATED – only                      00:15:22–00:15:45                               1. UNRELATED Interior only;                00:08:00–00:08:16
+                                                                             interior view, no exterior                                                               no exterior or color of the
+                        (B)Black
+                                                                             color show”                                                                              vlogger’s car.”
+                        (C)Green                                          2. ....                                         00:12:45     00:15:36                    2. ....                                              00:05:58       00:08:04
+                        (D)Blue                                           3. USEFULSPANS:-00:12:34                        Answer:                                  3. USEFULSPANS:-00:05:52                               Answer: B
+                                                                             –00:12:58- 00:15:22–                         SEARCH_MORE.                                –00:06:08- 00:08:00–                                Evidence:00:0
+                                                                             00:15:45                                     Next Search:…                               00:08:16                                            8:00-00:08:16
+
+
+                                                               00:08:04
+                                                   GT
+                  00:00:00            00:05:00      00:10:00              00:15:00           00:20:00          00:25:00              00:30:00           00:35:00             00:40:00          00:45:00      00:50:00              00:55:00
+
+
+                        Offline Index Building                                                                                          Visual Inspect
+
+
+
+                             Videos                 Captions                         Embeddings                   DB
+
+
+                                                                                                                                                                                                          Search More
+                         Visual Retrieve
+
+                                                                                                                                                                                                             Search
+                                                                                                                                                                                                                                          Answer
+                                                                                                                                                                                                            More/SUF
+
+                             Query           Embeddings Cosine Similarity                   LLM         Useful Captions                         Query    Context
+                                                                                                                                                                                        MLLM
+
+
+
+                                                 Figure 5. Overview of the decoupled planner–inspector framework.
+
+
+answer proposal ât grounded in the inspected evidence.                                                             4.4. Policy Optimization and Reward Design
+                                                                                                                    Optimizing the planner with a frozen inspector. We op-
+4.3. Planner–Inspector Interaction
+                                                                                                                    timize the planner P using GRPO (Shao et al., 2024) while
+Planner. The planner is a language-model policy for long-                                                           keeping the inspector I frozen. This choice ensures that
+horizon evidence seeking. At each turn t, it takes the ques-                                                        policy optimization primarily shapes long-horizon evidence
+tion q and a compact search memory ht−1 , and chooses                                                               seeking behavior (e.g., when to retrieve, which spans to
+one of two actions: (i) retrieve candidate temporal spans,                                                          inspect), rather than altering visual verification or answer
+or (ii) submit a set of video evidence vt for pixel-level in-                                                       generation. To disentangle the effect of architectural de-
+spection via VisualInspect(vt , q). After an inspection,                                                            coupling from reward specification, we evaluate both the
+the planner appends the submitted spans and the inspector’s                                                         coupled baseline and our decoupled framework under two
+feedback to its search memory, keeping the planner focused                                                          terminal-reward regimes.
+on evidence seeking rather than speculative answering. Cru-
+cially, this feedback closes the loop between verification and                                                      Outcome-only terminal reward. As a default baseline,
+search: based on the inspector’s verdict and feedback, the                                                          we use an outcome-only terminal reward that depends solely
+planner iteratively revises its span proposals, either broad-                                                       on answer correctness. Let a∗ denote the ground-truth an-
+ening retrieval to explore new evidence or refining vt into a                                                       swer and â be the terminal prediction. We define
+tighter, more informative window for re-inspection.                                                                                            (
+                                                                                                                                                 1, if â = a∗ ,
+                                                                                                                                   Rans (ξ) :=                             (5)
+                                                                                                                                                 0, otherwise,
+Inspector. The inspector is a frozen MLLM model ac-
+cessed through VisualInspect. Each call is condi-                                                                   which ignores how the answer is obtained.
+tioned only on the original question q and the submitted
+video evidence vt , without access to the planner’s inter-                                                          Evidence-gated terminal reward. On datasets with
+mediate reasoning or full history. This design reduces the                                                          ground-truth evidence intervals, we additionally encourage
+influence of accumulated context and makes verification                                                             the policy to access temporally aligned evidence. Let E ∗
+depend on what is actually visible in the inspected spans.                                                          be the set of ground-truth evidence intervals, and let (ξ)
+As a result, the inspector controls termination and outputs                                                         denote the set of evidence spans accessed by the trajectory
+the final answer only when the inspected evidence is suf-                                                           (defined in Section 3.1). In practice, the maximum temporal
+ficient. Finally, because the inspector is a modular visual                                                         overlap between accessed spans and ground-truth evidence
+backend, it can be upgraded at inference time by swapping                                                           is small (e.g., ≈ 0.05 on average), making a hard evidence
+in a stronger MLLM without retraining the planner.                                                                  gate overly sparse. We therefore use a bounded soft gate
+
+                                                                                                              6
+
+===== PDF p.7 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+Table 1. Accuracy on four LVU benchmarks. For each agentic solution, we report the planner, inspector, parameter size, answer authority,
+and frame budget. In this table, Frames denotes the maximum number of frames fed into the inspector per inspection call.
+                                                                                                                             VideoMME (w/o sub)
+ Models                                        Planner         Inspector      Param. Ans. Auth. Frames           MLVU                           LongVideoBench               LVBench
+                                                                                                                              Overall   Long
+ Duration                                                                                                      3∼120 min     1∼60 min 30∼60 min    0∼60 min                   4101 sec
+ Proprietary Models
+ Gemini-1.5-Pro                                  –           Gemini-1.5-Pro     –         Model        1fps       61.8         75.0           67.4              64.0               33.1
+ GPT-4o                                          –              GPT-4o          –         Model        1fps       66.2         77.2           72.1              66.7               34.7
+ Open-Source Video MLLMs
+ Video-LLaVA (Lin et al., 2023)                  –           Video-LLaVA       7B         Model         8         47.3         40.4           38.1              39.1                -
+ LongVA (Zhang et al., 2024b)                    –             LongVA          7B         Model        128        56.3         54.3           47.6               -                  -
+ Video-R1 (Feng et al., 2025)                    –             Video-R1        7B         Model        32         45.4         59.3            -                 -                 35.9
+ Qwen2.5-VL-Instruct (Bai et al., 2025b)         –           Qwen2.5-VL        7B         Model        64         63.9         58.4           44.9              55.3               34.6
+ Qwen2.5-VL-Instruct (Bai et al., 2025b)         –           Qwen2.5-VL        7B         Model        768         -           63.5           50.3              56.0               39.4
+ Agentic frameworks (Coupled)
+ VideoAgent (Wang et al., 2024)               GPT-4o              –             –         LLM            –        55.8         59.4           47.9              50.3               42.3
+ DrVideo (Ma et al., 2025)                    GPT-4o          Qwen2.5-VL       7B         LLM            –        62.4         62.5           50.4              55.9               51.4
+ Ego-R1 (Tian et al., 2025)                   Qwen2.5         Qwen2.5-VL       7B         LLM            –        40.9          -              -                 -                 41.0
+ GenS (Yao et al., 2025)                   Qwen2.5-VL (3B)    Qwen2.5-VL       7B         MLLM          64        58.0         58.1           49.7              41.6               41.3
+ FrameThinker (He et al., 2025)             Qwen2.5-VL        Qwen2.5-VL       7B         MLLM         21.1       59.1          -             47.6              52.9               36.6
+ Conan (Ouyang et al., 2025)                Qwen2.5-VL        Qwen2.5-VL       7B         MLLM          32        63.4         60.5            -                56.6               39.2
+ VideoMind (Liu et al., 2025b)               Qwen2-VL          Qwen2-VL        7B         MLLM          32        64.4         57.6           49.3              55.7               42.4
+ Video-MTR (Xie et al., 2025)               Qwen2.5-VL        Qwen2.5-VL       7B         MLLM          80        58.4         62.7           52.7              57.3               42.0
+ LongVT (Yang et al., 2025)                 Qwen2.5-VL        Qwen2.5-VL       7B         MLLM         512        58.0         58.1           49.7              41.6               41.3
+ Ours                                        Qwen3 (8B)       Qwen2.5-VL       7B         LLM           64        64.6         59.9           49.6              52.2               48.2
+ Agentic frameworks (Decoupled)
+ Ours                                        Qwen3 (8B)       Qwen2.5-VL       7B         MLLM          64     68.2 (↑ 4.3) 62.9 (↑ 4.5) 53.4 (↑ 8.5)       62.0 (↑ 6.7)    55.1 (↑ 20.5)
+
+
+
+
+that scales smoothly with overlap:                                                            evaluation protocols, using the same backbones and search
+                                                                                            budgets where applicable.
+                       1                    ∗
+  gevd (ξ) := min 1,       max max tIoU(τ, τ ) , (6)
+                      γ τ ∈E(ξ) τ ∗ ∈E ∗                                                      5.2. Main Results
+where tIoU(·, ·) is the temporal IoU (Section 3.1), and γ is                                  Table 1 reports results on four LVU benchmarks across (i)
+an overlap scale (e.g., the training-set mean of the max-tIoU                                 proprietary models, (ii) open-source video MLLMs, and
+statistic) that normalizes the gate to [0, 1]. The evidence-                                  (iii) agentic frameworks (coupled and decoupled). Within
+gated terminal reward is then                                                                 the same backbone, our decoupled framework consistently
+                      Revd (ξ) := Rans (ξ) · gevd (ξ).                              (7)       improves over its coupled counterpart. For example, it
+                                                                                              improves MLVU accuracy from 64.6% to 68.2%, and yields
+This reward remains outcome-correctness driven, but as-                                       similar gains on LongVideoBench from 52.2% to 62.0%
+signs higher return to trajectories that answer correctly and                                 and LVBench from 48.2% to 55.1%. This indicates that
+access evidence that better aligns with annotated ground-                                     separating termination and answer authority can translate
+truth intervals.                                                                              evidence seeking into reliable gains.
+
+                                                                                              Table 2. Grounding evaluation on LVBench. VideoSEAL improves
+5. Experiments                                                                                temporal and semantic grounding beyond final answer accuracy.
+5.1. Experimental Setup                                                                           Method       Recall@0.05 (Gt )   Recall@0.10       Recall@0.20   Ht ↓    Gs ↑      Hs ↓
+                                                                                                  LongVT             0.088            0.054             0.041      0.889   0.250     0.708
+We evaluate on four LVU benchmarks: VideoMME (Fu                                                  Video-MTR          0.175            0.138             0.088      0.833   0.280     0.621
+                                                                                                  VideoMind          0.275            0.219             0.144      0.629   0.273     0.543
+et al., 2024), MLVU (Zhou et al., 2025), LongVideoBench                                           VideoAgent         0.281            0.231             0.169      0.838   0.454     0.471
+(Wu et al., 2024), and LVBench (Zhang et al., 2025a). These                                       DrVideo            0.448            0.324             0.271      0.547   0.472     0.414
+                                                                                                  Ego-R1             0.419            0.325             0.275      0.504   0.405     0.378
+datasets span video durations from minutes to hours and                                           Ours               0.528            0.434             0.333      0.406   0.808     0.113
+require multi-hop temporal reasoning.
+To isolate the effect of architectural decoupling, we com-                                    Beyond final answer accuracy, Table 2 further evaluates
+pare a coupled baseline with our decoupled framework using                                    whether the retrieved and inspected evidence actually sup-
+identical backbones and training objective (GRPO (Shao                                        ports the answer on LVBench. VideoSEAL achieves the best
+et al., 2024)). The only difference is answer authority: in the                               temporal grounding, with the highest Recall@0.05 (Gt ), Re-
+coupled baseline, the planner produces the final answer; in                                   call@0.10, and Recall@0.20, and also substantially reduces
+our decoupled framework, the inspector produces the final                                     temporal hallucination Ht . More importantly, it improves
+answer and decides when to stop. We also report compar-                                       semantic groundedness Gs to 0.808 and reduces seman-
+isons with prior agentic frameworks under their standard                                      tic hallucination Hs to 0.113, indicating that our decoupled
+
+                                                                                          7
+
+===== PDF p.8 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+                                                      (a) Test-time Search Scaling                                                         (b) MLLM Capacity Scaling
+                          60
+                                   Decoupled (Ours)                                                         65          Decoupled (Ours)
+                                   DrVideo                                                                              DrVideo
+                                   Coupled Baseline                                                                     Coupled Baseline              Plug-and-Play
+                                                                                                                                                         Scaling
+                                   VideoAgent                                                                           VideoAgent
+                          55       EgoR1                                                                    60          EgoR1
+                                                                                      +6.9% Gain
+Accuracy (%) on LVBench
+
+
+
+
+                                                                                                            55
+                          50
+
+
+                                                                                                            50
+                          45
+
+                                                                                                            45
+                          40
+                                                                                                            40
+                               4                        8                      12                  16        Qwen2.5-VL                              Qwen2.5-VL                        Qwen2.5-VL
+                                                            Search Turns (K)                                    (7B)                                   (32B)                             (72B)
+                                                                                                                                                     Model Size
+
+Figure 6. Scaling properties. (a) Search: Increasing budget K improves our method, while coupled baselines plateau due to context
+saturation. (b) Perception: Replacing the inspector from 7B to 72B yields substantial accuracy gains without retraining the planner,
+highlighting modular scalability.
+
+
+framework produces fewer correct-but-unsupported answers                                                     Sequential Search Scaling. We quantify the decoupled
+and yields more evidence-aligned trajectories.                                                               agent’s ability to convert computational budget into perfor-
+                                                                                                             mance by scaling the maximum number of search rounds
+Table 3. Decoupling dominates reward design. Decoupling consis-                                              K. As shown in Figure 6(a), increasing interaction steps im-
+tently outperforms coupled baselines under both reward settings,                                             proves performance from 47.1% to 55.1%, suggesting that
+identifying architectural separation as the primary performance                                              investing more computation in exploration yields higher
+driver.
+                                                                                                             gains without increasing contextual burden. In contrast,
+                           Model             Objective        Acc (%)      Gt (%)         Ht (%)             when interaction rounds exceed 8, the coupled agent re-
+                           Coupled              Rans            48.2           47.0         48.3
+                                                                                                             gresses, consistent with contextual saturation where accu-
+                           Decoupled            Rans            54.1           50.4         42.1             mulated history weakens reasoning reliability, whereas our
+                           Coupled              Revd            50.2           50.2         43.2             framework remains robust and continues to benefit from
+                           Decoupled            Revd            55.1           52.8         40.6             larger budgets.
+                                                                                                             Decoupled Perceptual Scaling. Beyond search scaling, our
+                                                                                                             decoupled agent naturally facilitates MLLM scaling. By
+5.3. Ablation Studies                                                                                        structurally isolating answer authority from the planner to
+Decoupling drives the main gain. To study the impact                                                         the inspector, we can directly replace the inspector without
+of the decoupling mechanism itself and identify the main                                                     retraining the planner. As shown in Figure 6(b), scaling the
+source of improvement, we report a controlled 2×2 compar-                                                    inspector within Qwen2.5-VL from 7B to 72B yields a clear
+ison over architecture and reward design in Table 3. Across                                                  improvement on LVBench, increasing performance from
+all variants, the planner, inspector backbone, retrieval stack,                                              55.1% to 59.5%. This trend suggests that the decoupled
+and GRPO training details are kept fixed. The only architec-                                                 agent is not tied to a specific visual model and supports plug-
+tural difference is whether stop and final-answer authority                                                  and-play scaling via a stronger MLLM backend, whereas the
+stays with the planner or is delegated to the inspector gate.                                                coupled agent shows only a weak 1.1% gain despite a large
+We also compare the outcome-only reward Rans with the                                                        increase in parameters, indicating performance saturation.
+temporal evidence-gated reward Revd . The results indicate
+that the gain is primarily due to decoupling, rather than                                                    Table 4. Refusal and answer rates on non-target vs. ground-truth
+                                                                                                             clips. Refusal corresponds to z=0 and answer to z=1. We also
+auxiliary modules or reward enhancement. Although the                                                        report accuracy on answered cases Accans and the base accuracy
+time reward design helps, the coupled agent with Revd still                                                  of each inspector.
+underperforms the decoupled agent with Rans (50.2% vs.
+                                                                                                                 Inspector Model           Clip Interval z=0 (%) z=1 (%) Accans (%) Base Acc. (%)
+54.1%). This suggests that the main improvement does not
+                                                                                                                                        Non-target        75.8        24.2   61.1
+come from temporal reward supervision, but from archi-                                                           Qwen2.5-VL-7B-Instruct
+                                                                                                                                        Ground-truth      21.6        78.4   72.7
+                                                                                                                                                                                        39.4
+
+tectural decoupling, which provides a structural remedy by                                                       Qwen3-VL-8B-Instruct
+                                                                                                                                           Non-target     85.4        14.6   53.5
+                                                                                                                                                                                        50.6
+                                                                                                                                           Ground-truth   26.5        73.5   84.0
+separating planning from answer authority.
+
+                                                                                                        8
+
+===== PDF p.9 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+Refusal Enables Selective Answering. A key question for             for a simple shift in how we build agentic long-video QA
+the decoupled framework is whether the inspector can rec-           frameworks: instead of training a single coupled agent to
+ognize insufficient evidence and refuse to answer, instead          both search and decide, we separate evidence seeking from
+of producing a plausible guess. To isolate this behavior on         answer authority with a planner–inspector design. Along-
+LVBench, for each question with annotated evidence times-           side this decoupling, we introduce evidence-grounded di-
+tamps, we construct two inspection inputs: (i) a randomly           agnostics that make it easy to tell whether an answer is
+sampled 16-second non-target clip that does not overlap the         actually supported by what the agent retrieved. We hope
+annotated evidence, and (ii) a 16-second ground-truth clip          this paradigm and analysis help the community build more
+sampled from the annotated evidence interval. We feed the           verifiable long-video agents and reduce unsupported guess-
+visual content of each clip to the inspector and record its         ing.
+verdict z ∈ {0, 1}, where z=0 indicates a refusal.
+Table 4 shows that even the Qwen2.5-VL base inspector               References
+exhibits selective answering. Specifically, the answer rate         Bai, S., Cai, Y., Chen, R., Chen, K., Chen, X., Cheng, Z.,
+z=1 is substantially higher on ground-truth clips at 78.4%            Deng, L., Ding, W., Gao, C., Ge, C., Ge, W., Guo, Z.,
+than on non-target clips at 24.2%, indicating that the in-            Huang, Q., Huang, J., Huang, F., Hui, B., Jiang, S., Li, Z.,
+spector can distinguish evidence-sufficient from insufficient         Li, M., Li, M., Li, K., Lin, Z., Lin, J., Liu, X., Liu, J., Liu,
+inputs. Conditioned on answering, accuracy is also higher             C., Liu, Y., Liu, D., Liu, S., Lu, D., Luo, R., Lv, C., Men,
+on ground-truth clips at 72.7% than on non-target clips at            R., Meng, L., Ren, X., Ren, X., Song, S., Sun, Y., Tang,
+61.1%, suggesting that the decision to answer correlates              J., Tu, J., Wan, J., Wang, P., Wang, P., Wang, Q., Wang,
+with evidence quality. When scaling to a stronger inspector,          Y., Xie, T., Xu, Y., Xu, H., Xu, J., Yang, Z., Yang, M.,
+we observe concurrent gains in both answered accuracy and             Yang, J., Yang, A., Yu, B., Zhang, F., Zhang, H., Zhang,
+refusal: answered accuracy on ground-truth clips increases            X., Zheng, B., Zhong, H., Zhou, J., Zhou, F., Zhou, J.,
+to 84.0%, while refusal on non-target clips becomes stricter,         Zhu, Y., and Zhu, K. Qwen3-VL technical report, 2025a.
+with z=0 rising to 85.4%. Overall, these results suggest              URL https://arxiv.org/abs/2511.21631.
+that the inspector is more likely to refuse on non-target
+clips, reducing guessing and encouraging the planner to             Bai, S., Chen, K., Liu, X., Wang, J., Ge, W., Song, S., Dang,
+keep searching for better evidence.                                   K., Wang, P., Wang, S., Tang, J., Zhong, H., Zhu, Y., Yang,
+                                                                      M., Li, Z., Wan, J., Wang, P., Ding, W., Fu, Z., Xu, Y.,
+6. Conclusion                                                         Ye, J., Zhang, X., Xie, T., Cheng, Z., Zhang, H., Yang, Z.,
+                                                                      Xu, H., and Lin, J. Qwen2.5-VL technical report, 2025b.
+In this work, we analyze evidence misalignment as a reward-           URL https://arxiv.org/abs/2502.13923.
+hacking failure in agentic long-video question answering,
+where agents can produce correct but insufficiently sup-            Bai, Y. et al. Longbench: A bilingual, multitask benchmark
+ported answers by optimizing answer correctness without               for long context understanding. In Proceedings of the
+grounding their decisions in verified evidence. We introduce          62nd Annual Meeting of the Association for Computa-
+temporal and semantic groundedness diagnostics to iden-               tional Linguistics (ACL), 2024.
+tify correct-but-ungrounded answers and measure temporal
+evidence access, and show that misalignment is amplified            Cao, M., Zhang, S., Chang, X., and Precup, D. SCAR: shap-
+by prompt pressure at inference time and reward pressure              ley credit assignment for more efficient RLHF. CoRR,
+during training. To address this, we propose a decoupled              abs/2505.20417, 2025. doi: 10.48550/ARXIV.2505.2041
+planner–inspector framework that separates long-horizon               7. URL https://doi.org/10.48550/arXiv.2
+evidence seeking from answer authority and gates final an-            505.20417.
+swering through visual verification. Across four long-video
+benchmarks, our framework improves over coupled base-               Chai, Y., Sun, H., Fang, H., Wang, S., Sun, Y., and Wu, H.
+lines, scales with larger search budgets, and supports plug-          MA-RLHF: Reinforcement learning from human feed-
+and-play inspector upgrades without retraining the planner.           back with macro actions, 2024.
+
+                                                                    Chen, G., Liu, Y., Huang, Y., Pei, B., Xu, J., He, Y., Lu,
+Impact Statement                                                      T., Wang, Y., and Wang, L. Cg-bench: Clue-grounded
+This work frames evidence misalignment as a manifesta-                question answering benchmark for long video under-
+tion of reward hacking in agentic long-video QA: agents               standing. In The Thirteenth International Conference
+may optimize answer correctness while bypassing the in-               on Learning Representations, ICLR 2025, Singapore,
+tended process of evidence-grounded verification. We argue            April 24-28, 2025. OpenReview.net, 2025. URL https:
+                                                                      //openreview.net/forum?id=le4IoZZHy1.
+
+                                                                9
+
+===== PDF p.10 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+Cheng, Z., Leng, S., Zhang, H., Xin, Y., Li, X., Chen, G.,             Liao, R., Erler, M., Wang, H., Zhai, G., Zhang, G., Ma, Y.,
+  Zhu, Y., Zhang, W., Luo, Z., Zhao, D., and Bing, L.                    and Tresp, V. VideoINSTA: Zero-shot long video under-
+  VideoLLaMA 2: Advancing spatial-temporal modeling                      standing via informative spatial-temporal reasoning with
+  and audio understanding in video-LLMs. arXiv preprint                  LLMs. In Al-Onaizan, Y., Bansal, M., and Chen, Y.-N.
+  arXiv:2406.07476, 2024. URL https://arxiv.or                           (eds.), Findings of the Association for Computational Lin-
+  g/abs/2406.07476.                                                      guistics: EMNLP 2024, pp. 6577–6602, Miami, Florida,
+                                                                         USA, November 2024. Association for Computational
+Everitt, T., Hutter, M., Kumar, R., and Krakovna, V. Re-                 Linguistics. URL https://aclanthology.org
+  ward tampering problems and solutions in reinforcement                 /2024.findings-emnlp.384.
+  learning: a causal influence diagram perspective. Synth.,
+  198(27):6435–6467, 2021. doi: 10.1007/S11229-021-0                   Lightman, H., Kosaraju, V., Burda, Y., Edwards, H., Baker,
+  3141-4. URL https://doi.org/10.1007/s112                               B., Lee, T., Leike, J., Schulman, J., Sutskever, I., and
+  29-021-03141-4.                                                        Weng, L. Let’s verify step by step, 2023.
+Feng, K., Gong, K., Li, B., Guo, Z., Wang, Y., Peng, T.,               Lin, B., Zhu, B., Ye, Y., Ning, M., Jin, P., and Yuan,
+  Wang, B., and Yue, X. Video-r1: Reinforcing video                      L. Video-LLaVA: Learning united visual representa-
+  reasoning in mllms. CoRR, abs/2503.21776, 2025. doi:                   tion by alignment before projection. arXiv preprint
+  10.48550/ARXIV.2503.21776. URL https://doi.                            arXiv:2311.10122, 2023.
+  org/10.48550/arXiv.2503.21776.
+                                                                       Liu, N. F., Lin, K., Hewitt, J., Paranjape, A., Bevilac-
+Fu, C., Dai, Y., Luo, Y., Li, L., Ren, S., Zhang, R., Wang,              qua, M., Petroni, F., and Liang, P. Lost in the mid-
+  Z., Zhou, C., Shen, Y., Zhang, M., et al. Video-MME:                   dle: How language models use long contexts, 2023.
+  The first-ever comprehensive evaluation benchmark of                   arXiv:2307.03172.
+  multi-modal LLMs in video analysis. arXiv preprint
+  arXiv:2405.21075, 2024.                                              Liu, X., Shu, Y., Liu, Z., Li, A., Tian, Y., and Zhao, B.
+                                                                         Video-XL-Pro: Reconstructive token compression for
+Gao, Z., Zhang, B., Li, P., Ma, X., Yuan, T., Fan, Y.,
+                                                                         extremely long video understanding. arXiv preprint
+ Wu, Y., Jia, Y., Zhu, S., and Li, Q. Multi-modal agent
+                                                                         arXiv:2503.18478, 2025a.
+  tuning: Building a vlm-driven agent for efficient tool
+  usage. In The Thirteenth International Conference on                 Liu, Y., Lin, K. Q., Chen, C. W., and Shou, M. Z. Video-
+  Learning Representations, ICLR 2025, Singapore, April                  Mind: A chain-of-lora agent for long video reasoning.
+  24-28, 2025. OpenReview.net, 2025. URL https:                          arXiv preprint arXiv:2503.13444, 2025b.
+ //openreview.net/forum?id=0bmGL4q7vJ.
+                                                                       Ma, Z., Gou, C., Shi, H., Sun, B., Li, S., Rezatofighi, H.,
+He, Z., Qu, X., Li, Y., Huang, S., Liu, D., and Cheng, Y.               and Cai, J. DrVideo: Document retrieval based long
+  Framethinker: Learning to think with long videos via                  video understanding. In Proceedings of the IEEE/CVF
+  multi-turn frame spotlighting. CoRR, abs/2509.24304,                  Conference on Computer Vision and Pattern Recognition
+  2025. doi: 10.48550/ARXIV.2509.24304. URL https:                      (CVPR), pp. 18936–18946, June 2025.
+ //doi.org/10.48550/arXiv.2509.24304.
+                                                                       Menon, S., Iscen, A., Nagrani, A., Weyand, T., Vondrick, C.,
+Krishna, R., Hata, K., Ren, F., Fei-Fei, L., and Niebles, J. C.         and Schmid, C. Caviar: Critic-augmented video agentic
+  Dense-captioning events in videos. In ArXiv, 2017.                    reasoning. arXiv preprint arXiv:2509.07680, 2025.
+Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu,
+                                                                       Mun, J., Cho, M., and Han, B. Local-global video-text
+ C. H., Gonzalez, J. E., Zhang, H., and Stoica, I. Efficient
+                                                                        interactions for temporal grounding. In 2020 IEEE/CVF
+ memory management for large language model serving
+                                                                        Conference on Computer Vision and Pattern Recognition,
+ with pagedattention. In Proceedings of the ACM SIGOPS
+                                                                        CVPR 2020, Seattle, WA, USA, June 13-19, 2020, pp.
+ 29th Symposium on Operating Systems Principles, 2023.
+                                                                        10807–10816. Computer Vision Foundation / IEEE, 2020.
+Li, B., Zhang, Y., Guo, D., Zhang, R., Li, F., Zhang,                   doi: 10.1109/CVPR42600.2020.01082. URL https:
+  H., Zhang, K., Li, Y., Liu, Z., and Li, C. Llava-                     //openaccess.thecvf.com/content_CVPR
+  onevision: Easy visual task transfer. arXiv preprint                  _2020/html/Mun_Local-Global_Video-Tex
+  arXiv:2408.03326, 2024.                                               t_Interactions_for_Temporal_Groundin
+                                                                        g_CVPR_2020_paper.html.
+Li, Z. et al. Opportunities and challenges of llm-as-a-
+  judge. In Proceedings of the 2025 Conference on Empiri-              Ouyang, K., Liu, Y., Yao, L., Cai, Y., Zhou, H., Zhou, J.,
+  cal Methods in Natural Language Processing (EMNLP),                    Meng, F., and Sun, X. Conan: Progressive learning to
+  2025.                                                                  reason like a detective over multi-scale visual evidence.
+
+                                                                  10
+
+===== PDF p.11 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+  CoRR, abs/2510.20470, 2025. doi: 10.48550/ARXIV.2                  Wang, W., Gao, Z., Gu, L., Pu, H., Cui, L., Wei, X., Liu,
+  510.20470. URL https://doi.org/10.48550                             Z., Jing, L., Ye, S., Shao, J., Wang, Z., Chen, Z., Zhang,
+  /arXiv.2510.20470.                                                  H., Yang, G., Wang, H., Wei, Q., Yin, J., Li, W., Cui, E.,
+                                                                      Chen, G., Ding, Z., Tian, C., Wu, Z., Xie, J., Li, Z., Yang,
+Pang, Z. and Wang, Y.-X. MR. video: ”MapReduce” is the
+                                                                      B., Duan, Y., Wang, X., Hou, Z., Hao, H., Zhang, T., Li,
+  principle for long video understanding. arXiv preprint
+                                                                      S., Zhao, X., Duan, H., Deng, N., Fu, B., He, Y., Wang,
+  arXiv:2504.16082, 2025.
+                                                                      Y., He, C., Shi, B., He, J., Xiong, Y., Lv, H., Wu, L., Shao,
+Ren, X., Xu, L., Xia, L., Wang, S., Yin, D., and                      W., Zhang, K., Deng, H., Qi, B., Ge, J., Guo, Q., Zhang,
+  Huang, C. VideoRAG: Retrieval-augmented genera-                     W., Zhang, S., Cao, M., Lin, J., Tang, K., Gao, J., Huang,
+  tion with extreme long-context videos. arXiv preprint               H., Gu, Y., Lyu, C., Tang, H., Wang, R., Lv, H., Ouyang,
+  arXiv:2502.01549, 2025.                                             W., Wang, L., Dou, M., Zhu, X., Lu, T., Lin, D., Dai,
+                                                                      J., Su, W., Zhou, B., Chen, K., Qiao, Y., Wang, W., and
+Sarkar, P. and Etemad, A. Self-alignment of large video               Luo, G. Internvl3.5: Advancing open-source multimodal
+  language models with refined regularized preference opti-           models in versatility, reasoning, and efficiency, 2025a.
+  mization. arXiv preprint arXiv:2504.12083, 2025.                    URL https://arxiv.org/abs/2508.18265.
+Shang, C., You, A., Subramanian, S., Darrell, T., and Herzig,        Wang, X., Zhang, Y., Zohar, O., and Yeung-Levy, S.
+  R. Traveler: A modular multi-lmm agent framework for                VideoAgent: Long-form video understanding with large
+  video question-answering, 2024. URL https://arxi                    language model as agent, 2024. URL https://arxi
+  v.org/abs/2404.01476.                                               v.org/abs/2403.10517.
+Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Zhang, M.,
+                                                                     Wang, Z., Yu, S., Stengel-Eskin, E., Yoon, J., Cheng, F.,
+  Li, Y. K., Wu, Y., and Guo, D. DeepSeekMath: Pushing
+                                                                      Bertasius, G., and Bansal, M. VideoTree: Adaptive tree-
+  the limits of mathematical reasoning in open language
+                                                                      based video representation for LLM reasoning on long
+  models. CoRR, abs/2402.03300, 2024. doi: 10.48550/A
+                                                                      videos. In Proceedings of the Computer Vision and Pat-
+  RXIV.2402.03300. URL https://doi.org/10.4
+                                                                      tern Recognition Conference (CVPR), pp. 3272–3283,
+  8550/arXiv.2402.03300.
+                                                                      June 2025b.
+Shen, Y., Song, K., Tan, X., Li, D., Lu, W., and Zhuang, Y.
+                                                                     Wu, H., Li, D., Chen, B., and Li, J. LongVideoBench: A
+  Hugginggpt: Solving ai tasks with chatgpt and its friends
+                                                                      benchmark for long-context interleaved video-language
+  in huggingface. In Advances in Neural Information Pro-
+                                                                      understanding. In Globersons, A., Mackey, L., Belgrave,
+  cessing Systems, 2023.
+                                                                      D., Fan, A., Paquet, U., Tomczak, J. M., and Zhang,
+Skalse, J., Howe, N. H. R., Krasheninnikov, D., and Krueger,          C. (eds.), Advances in Neural Information Processing
+  D. Defining and characterizing reward hacking. CoRR,                Systems 38: Annual Conference on Neural Information
+  abs/2209.13085, 2022. doi: 10.48550/ARXIV.2209.13                   Processing Systems 2024, NeurIPS 2024, Vancouver, BC,
+  085. URL https://doi.org/10.48550/arXiv                             Canada, December 10 - 15, 2024, 2024. URL http:
+  .2209.13085.                                                        //papers.nips.cc/paper_files/paper/2
+                                                                      024/hash/329ad516cf7a6ac306f29882e9c
+Song, E., Chai, W., Wang, G., Zhang, Y., Zhou, H., Wu, F.,            77558-Abstract-Datasets_and_Benchmar
+  Guo, X., Ye, T., Lu, Y., Hwang, J.-N., et al. Moviechat:            ks_Track.html.
+  From dense token to sparse memory for long video un-
+  derstanding. arXiv preprint arXiv:2307.16449, 2023.                Xiao, J., Yao, A., Li, Y., and Chua, T. Can I trust your
+                                                                       answer? visually grounded video question answering. In
+Tan, S., Luo, M., Cai, C., Venkat, T., Montgomery, K., Hao,            IEEE/CVF Conference on Computer Vision and Pattern
+  A., Wu, T., Balyan, A., Roongta, M., Wang, C., Li, L. E.,            Recognition, CVPR 2024, Seattle, WA, USA, June 16-22,
+  Popa, R. A., and Stoica, I. rllm: A framework for post-              2024, pp. 13204–13214. IEEE, 2024. doi: 10.1109/CV
+  training language agents. https://pretty-radio                       PR52733.2024.01254. URL https://doi.org/10
+ -b75.notion.site/rLLM-A-Framework-for                                 .1109/CVPR52733.2024.01254.
+ -Post-Training-Language-Agents-21b81
+  902c146819db63cd98a54ba5f31, 2025. Notion                          Xie, Y., Chen, T., Ge, Z., and Ni, L. Video-mtr: Reinforced
+  Blog.                                                                multi-turn reasoning for long video understanding. CoRR,
+                                                                       abs/2508.20478, 2025. doi: 10.48550/ARXIV.2508.20
+Tian, S., Wang, R., Guo, H., Wu, P., Dong, Y., Wang, X.,
+                                                                       478. URL https://doi.org/10.48550/arXiv
+  Yang, J., Zhang, H., Zhu, H., and Liu, Z. Ego-r1: Chain-
+                                                                       .2508.20478.
+  of-tool-thought for ultra-long egocentric video reasoning,
+  2025. URL https://arxiv.org/abs/2506.1                             Yang, Z., Wang, S., Zhang, K., Wu, K., Leng, S., Zhang,
+  3654.                                                                Y., Li, B., Qin, C., Lu, S., Li, X., and Bing, L. LongVT:
+
+                                                                11
+
+===== PDF p.12 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+  Incentivizing ”thinking with long videos” via native tool            Zhou, J., Shu, Y., Zhao, B., Wu, B., Liang, Z., Xiao, S.,
+  calling. arXiv preprint arXiv:2511.20785, 2025.                        Qin, M., Yang, X., Xiong, Y., Zhang, B., Huang, T., and
+                                                                         Liu, Z. MLVU: benchmarking multi-task long video
+Yao, L., Wu, H., Ouyang, K., Zhang, Y., Xiong, C., Chen,
+                                                                         understanding. In IEEE/CVF Conference on Computer
+  B., Sun, X., and Li, J. Generative frame sampler for long
+                                                                         Vision and Pattern Recognition, CVPR 2025, Nashville,
+  video understanding. In Che, W., Nabende, J., Shutova,
+                                                                         TN, USA, June 11-15, 2025, pp. 13691–13701. Computer
+  E., and Pilehvar, M. T. (eds.), Findings of the Associa-
+                                                                         Vision Foundation / IEEE, 2025. doi: 10.1109/CVPR52
+  tion for Computational Linguistics, ACL 2025, Vienna,
+                                                                         734.2025.01278. URL https://openaccess.the
+  Austria, July 27 - August 1, 2025, Findings of ACL, pp.
+                                                                         cvf.com/content/CVPR2025/html/Zhou_M
+  17900–17917. Association for Computational Linguistics,
+                                                                         LVU_Benchmarking_Multi-task_Long_Vid
+  2025. URL https://aclanthology.org/2025.
+                                                                         eo_Understanding_CVPR_2025_paper.html.
+  findings-acl.921/.
+                                                                       Zhu, Z., Xu, H., Luo, Y., Liu, Y., Sarkar, K., Yang, Z.,
+Yao, S., Zhao, J., Yu, D., Du, N., Shafran, I., Narasimhan,
+                                                                         and You, Y. FOCUS: efficient keyframe selection for
+  K., and Cao, Y. ReAct: Synergizing reasoning and
+                                                                         long video understanding. CoRR, abs/2510.27280, 2025.
+  acting in language models. In International Confer-
+                                                                         doi: 10.48550/ARXIV.2510.27280. URL https:
+  ence on Learning Representations (ICLR), 2023. URL
+                                                                         //doi.org/10.48550/arXiv.2510.27280.
+  https://arxiv.org/abs/2210.03629.
+Yu, S., Cho, J., Yadav, P., and Bansal, M. Self-chained
+  image-language model for video localization and question
+  answering. In NeurIPS, 2023.
+Yuan, H., Liu, Z., Zhou, J., Qian, H., Shu, Y., Sebe, N., Wen,
+  J.-R., and Dou, Z. Think with videos for agentic long-
+  video understanding. arXiv preprint arXiv:2506.10821,
+  2025.
+Zhang, C., Lu, T., Islam, M. M., Wang, Z., Yu, S., Bansal,
+  M., and Bertasius, G. A simple LLM framework for
+  long-range video question-answering. In Al-Onaizan,
+  Y., Bansal, M., and Chen, Y. (eds.), Proceedings of
+  the 2024 Conference on Empirical Methods in Natu-
+  ral Language Processing, EMNLP 2024, Miami, FL,
+  USA, November 12-16, 2024, pp. 21715–21737. As-
+  sociation for Computational Linguistics, 2024a. doi:
+  10.18653/V1/2024.EMNLP- MAIN.1209. URL
+  https://doi.org/10.18653/v1/2024.emn
+  lp-main.1209.
+Zhang, H., Dong, L., Liu, Y., Huang, Y., Wang, Y., Wang, L.,
+  and Qiao, Y. LVBench: A benchmark for long-form video
+  understanding with versatile multi-modal question an-
+  swering. Int. J. Comput. Vis., 133(11):7726–7747, 2025a.
+  doi: 10.1007/S11263-025-02555-8. URL https:
+  //doi.org/10.1007/s11263-025-02555-8.
+Zhang, P., Zhang, K., Li, B., Zeng, G., Yang, J., Zhang,
+  Y., Wang, Z., Tan, H., Li, C., and Liu, Z. Long con-
+  text transfer from language to vision. arXiv preprint
+  arXiv:2406.16852, 2024b. URL https://arxiv.or
+  g/abs/2406.16852.
+Zhang, X., Jia, Z., Guo, Z., Li, J., Li, B., Li, H., and Lu, Y.
+  Deep video discovery: Agentic search with tool use for
+  long-form video understanding. CoRR, abs/2505.18079,
+  2025b. doi: 10.48550/ARXIV.2505.18079. URL http
+  s://doi.org/10.48550/arXiv.2505.18079.
+
+                                                                  12
+
+===== PDF p.13 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+A. Experimental Details
+Training Data We train our planner on CG-Bench (Chen et al., 2025), a comprehensive benchmark designed for clue-
+grounded question answering in long videos. The dataset comprises 1,219 manually curated videos with an average duration
+of approximately 27 minutes, spanning 14 diverse domains such as life records, movies, and news. Unlike traditional
+QA datasets, CG-Bench provides 12,129 Question-Answer-Clue triplets where each QA pair is associated with precise
+temporal spans serving as supporting evidence. This granular annotation structure covers varying cognitive demands,
+including perception, reasoning, and hallucination detection, thereby providing a rich environment for learning long-horizon
+information seeking and temporal localization skills.
+
+Implementation and Environment All experiments are conducted on a computational node equipped with 8 NVIDIA
+A100 GPUs. The agent framework is built upon the rllm (Tan et al., 2025), utilizing vLLM (Kwon et al., 2023) for
+high-throughput inference and Ray for distributed rollout management. Our architecture employs a Qwen3-8B planner
+for high-level planning. Regarding visual evidence processing, we utilize the Qwen3-VL-8B-Instruct inspector during the
+training phase, whereas the Qwen2.5-VL-7B-Instruct model is employed for inference on benchmarks. Furthermore, the
+visual retrieval tool incorporates DeepSeek-V3.2 as an LLM filter to refine retrieved content. The agent interacts with the
+environment with a maximum budget of K = 16 steps per trajectory. At each step, the planner chooses between semantic
+retrieval using a pre-computed video index and visual inspection. During visual inspection, video frames are extracted at 1
+fps, capped at 64 frames, and resized to 1024px for MLLM consumption. We perform training on the CG-Bench dataset and
+conduct validation on diverse out-of-domain benchmarks.
+
+Training Framework We fine-tune the policy using GRPO. To ensure training stability and efficiency, we utilize FSDP2
+sharding strategies with bfloat16 precision. The optimization process employs a learning rate of 1 × 10−6 accompanied by a
+cosine warmup schedule with a ratio of 0.05 for one epoch. To prevent excessive deviation from the reference policy, we
+include a KL divergence penalty with a coefficient of 0.001. The reward mechanism focuses on ground-truth alignment
+and framework adherence. Positive rewards are granted for final answer correctness, determined via exact match for
+multiple-choice questions, as well as for adhering to the strict tool-use format.
+
+B. Video Segmentation and Retrieval Index
+Video Indexing and Retrieval We partition each long video into fixed-length clips of 16 seconds and uniformly sample
+frames at a rate of 1 FPS. This temporal grid underpins both the retrieval and inspection mechanisms. To facilitate semantic
+indexing, we employ Qwen3-8B-Instruct to generate concise retrieval-oriented captions that summarize salient entities,
+actions, and scene contexts within one to three sentences. These textual proxies serve as the foundation for the VisualRetrieve
+tool, which embeds both clip captions and planner queries using the OpenAI text-embedding-3-large model. Candidate clips
+are subsequently identified through cosine similarity.
+
+C. Additional Ablation
+C.1. Behavioral Statistics and Trajectory Analysis.
+We further characterize whether the search policy behaves like random switching or meaningful refinement. As shown
+in Table 5, VideoSEAL follows a retarget-then-refine pattern: it reaches evidence earlier, as measured by Hit@1/2/3, and
+recovers more often after an initial miss. After the first hit, the median temporal overlap with the ground-truth evidence also
+increases, indicating local refinement around the relevant evidence rather than random exploration.
+Following the temporal-grounding setup in Sec. 3.1, we use the same annotated evidence intervals E ⋆ , temporal IoU tIoU,
+and threshold γ = 0.05. For a trajectory ξ, let T be its length. At step t, let Et denote the temporal spans accessed through
+retrieval or inspection, where we omit the argument ξ for readability. We define the best step-level temporal overlap as
+                                            (
+                                               maxτ ∈Et , τ ⋆ ∈E ⋆ tIoU(τ, τ ⋆ ), Et ̸= ∅,
+                                     mt =
+                                               0,                                 Et = ∅.
+
+A step is counted as a hit if mt ≥ γ.
+Table 5 reports how often a trajectory reaches annotated evidence during the early search process. Hit@k (k = 1, 2, 3) is the
+
+                                                              13
+
+===== PDF p.14 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+percentage of evaluation trajectories that contain at least one hit within the first k available steps. Thus, Hit@1, Hit@2, and
+Hit@3 measure whether the search reaches evidence immediately, within two steps, or within three steps, respectively.
+Recovery is evaluated only on trajectories that miss at the first step (m1 < γ). It is the percentage of these first-step misses
+that reach annotated evidence in any later step. Trajectories with no later step are counted as not recovered. For trajectories
+that contain at least one hit, let thit = min{t : mt ≥ γ} be the first hit step. We report IoUmed as first-hit→post-hit: the left
+value is the median overlap mthit when evidence is first reached, and the right value is the median best overlap observed
+from that point onward. A larger post-hit value indicates that the trajectory refines toward better-aligned evidence after first
+reaching the relevant region.
+
+                   Table 5. Trajectory-policy statistics on LVBench. Most metrics are percentages except IoUmed .
+
+                              Method          Hit@1      Hit@2        Hit@3   Recovery      IoUmed
+                              Ego-R1           23.6       26.7        27.3       7.5       0.0→0.0
+                              DrVideo          25.5       34.8        39.8      33.0       0.0→0.0
+                              VideoMind        31.1       39.1        41.0      24.3       0.0→0.1
+                              Video-MTR        32.9       32.9        32.9       0.0       0.0→0.1
+                              Ours             53.9       56.5        56.9      34.8       0.2→0.4
+
+
+
+C.2. Retrieval Granularity and State Stability.
+We stress-test state stability by sweeping the retrieval depth k (top-k candidates returned by the embedding index) while
+keeping the frame budget and backbones fixed. Increasing k improves the oracle recall of evidence, but it also increases the
+amount of intermediate tool traces that must be processed by the planner. In coupled agents, these traces are directly injected
+into the same context that maintains the routing state and holds the Answer authority, making the planner increasingly
+susceptible to context dilution as k grows. Empirically, coupled baselines saturate or degrade at larger k, accompanied by a
+higher per-step token footprint. In contrast, our decoupled framework keeps the planner’s state low-bandwidth (structured
+memory) and delegates termination to an evidence-gated inspector. As a result, the planner remains stable as k increases:
+higher retrieval recall translates into consistent gains in Accans (Table 6). Although Gt exhibits a moderate decline due to
+the lower signal-to-noise ratio in larger candidate pools, the architecture effectively leverages the expanded search scope to
+issue more accurate answers without succumbing to the context collapse observed in baselines.
+
+C.3. The Asymmetry of Scaling: Reasoning versus Perception
+To disentangle the distinct contributions of semantic planning and visual grounding, we conduct a controlled ablation across
+orthogonal scaling regimes. By selectively upgrading the planner or the inspector while holding the counterpart fixed, we
+isolate the limiting bottleneck in the current agentic video understanding loop.
+The empirical results reveal a fundamental asymmetry in component scalability. As detailed in the Scaling Reasoning
+section of Table 7, enhancing the cognitive backbone yields diminishing returns. Upgrading the planner from the 8B baseline
+to GPT-4o results in a counter-intuitive regression in accuracy to 52.3%, while the transition to Gemini-3-Flash-Preview
+offers only marginal gains. This phenomenon indicates that the temporal navigation task has reached a state of semantic
+saturation; the 8B-parameter planner already possesses sufficient agency to formulate valid search queries, rendering further
+increases in reasoning capacity redundant when bounded by the same visual acuity.
+In stark contrast, the Scaling Perception regime demonstrates that the system is heavily perception-bound. By maintaining
+the lightweight 8B planner and substituting the inspector with Gemini-3-Flash-Preview, we observe a breakthrough in
+performance, with accuracy surging to 69.9%. This represents a massive 14.8 point improvement over the baseline, far
+outstripping the gains from reasoning scaling. This divergence underscores a critical insight: once the navigational logic is
+sound, the upper bound of LVU is dictated by the fidelity of pixel-level inspection rather than the sophistication of linguistic
+planning. Our decoupled architecture uniquely exploits this property, enabling significant zero-shot performance leaps by
+simply plugging in stronger visual backends.
+
+C.4. Newer-Backbone Results and Inspector Modularity
+To validate that the decoupled design is not tied to an outdated visual backbone, we further evaluate VideoSEAL with newer
+and stronger inspector models under the same pipeline. Across all variants, we keep the planner, retrieval stack, search
+
+                                                                 14
+
+===== PDF p.15 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+Table 6. Scalability Analysis. Comparison of robustness as the number of retrieved candidates (k) increases. Our decoupled method
+maintains high performance compared to the baseline.
+
+                                        Method                    k        Gt (%)     Acc. (%)
+                                                                 10         51.1         48.2
+                                        Coupled                  20         46.8         50.8
+                                                                 40         38.8         47.2
+                                                                 10         45.3         51.2
+                                        Decoupled (Ours)         20         42.9         53.4
+                                                                 40         40.6         55.1
+
+
+Table 7. Decoupled Scaling Analysis on LVBench. We explore orthogonal scaling regimes to identify the system bottleneck. The
+comparison reveals a distinct hierarchy: Scaling Perception via a superior visual backend unlocks significantly higher gains than Scaling
+Reasoning through a stronger language model, indicating that performance is currently bounded by perceptual fidelity rather than planning
+logic.
+
+            Scaling Regime        Planner                      Inspector                   Accans (%)     Gt (%)     Gs (%)
+            Baseline              Qwen3-8B                     Qwen2.5-VL (7B)                  55.1       52.8       40.6
+            Scaling Reasoning     GPT-4o                       Qwen2.5-VL (7B)                  52.3       51.9       42.3
+            (Strong Planner)      Gemini-3-Flash-Preview       Qwen2.5-VL (7B)                  59.4       54.5       35.8
+            Scaling Perception    Qwen3-8B                     GPT-4o                           62.0       51.3       39.1
+            (Strong Inspector)    Qwen3-8B                     Gemini-3-Flash-Preview           69.9       51.5       43.1
+
+
+
+budget, and interaction protocol unchanged, and only replace the frozen inspector used for visual verification and final
+answer authority. As shown in Table 8, stronger inspectors substantially improve absolute performance across all four
+benchmarks. This confirms the modularity of VideoSEAL: once the planner learns to search for candidate evidence, better
+visual backbones can be plugged in to improve pixel-level verification without retraining the planner.
+
+C.5. Impact of Visual Sampling Density
+Beyond model capacity, we investigate the sensitivity of our framework to temporal granularity by varying the frame budget
+from 64 to 256. This scaling analysis aims to determine whether the performance bottleneck stems from missing visual
+information due to aggressive downsampling or the inability to process available cues.
+As summarized in Table 9, we observe a robust monotonic improvement in VideoMME performance as the frame budget
+increases. Upgrading the sampling density from 64 to 256 frames yields a consistent gain in overall accuracy. This trend
+indicates that the current system effectively capitalizes on higher-resolution temporal structures. Unlike coupling models
+where excessive token density often leads to context pollution or ”lost-in-the-middle” phenomena, our inspector-gated
+architecture processes visual data in targeted, context-isolated spans. This structural advantage allows the agent to ingest
+denser visual information for precise verification without overwhelming the reasoning planner, thereby converting enhanced
+temporal fidelity directly into grounded decision-making.
+
+C.6. Restoring Groundedness: Closing the Hallucination Gap
+To address the reward pressure and the consequent hallucination gap identified in Section 3.2, our decoupled framework
+restructures the optimization process. By explicitly separating the evidence seeking objective from the answer generation
+reward, we enforce a structural dependency where correct answers must derive from verified video segments.
+
+Empirical Verification of Alignment We analyze the training dynamics of our approach in Figure 7. Contrary to the
+divergence observed in coupled baselines, our approach exhibits a strong alignment between answer accuracy and evidence
+retrieval success. Throughout the training process, the performance curves remain tightly synchronized with the discrepancy
+consistently maintained at a negligible margin of approximately 0.02. This synchronization confirms that the agent avoids
+learning shortcut heuristics or relying on parametric priors. Instead, the gains in answer accuracy are causally linked to
+improvements in evidence localization. This demonstrates that the agent strictly adheres to the retrieval-then-reasoning
+
+                                                                   15
+
+===== PDF p.16 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+  Table 8. Newer-backbone results under the same decoupled pipeline. Only the inspector is changed; all numbers are accuracy (%).
+
+                       Inspector                    LongVideoBench        LVBench       MLVU       Video-MME
+                       Qwen2.5-VL-7B                       62.0              55.1        68.2           62.9
+                       Qwen3-VL-8B                         69.2              58.5        79.2           74.0
+                       Kimi2.5                             80.8              65.7        84.3           82.5
+                       Gemini-3-Flash-preview              77.2              69.9        79.3           83.0
+
+Table 9. Impact of Frame Budget on VideoMME. We evaluate the system performance across varying temporal resolutions. The results
+demonstrate a positive correlation between sampling density and answer accuracy, confirming that our decoupled inspector efficiently
+leverages finer-grained visual cues without suffering from context overload.
+
+                                              Frame               VideoMME Overall (↑)
+                                              64 (Default)                 62.9
+                                              128                          63.6
+                                              256                          64.4
+
+
+workflow rather than resorting to speculation.
+
+C.7. Efficiency and Cost Analysis
+Beyond accuracy, the practical deployment of agentic systems requires economic efficiency. We therefore evaluate the
+performance of each framework under a standardized budget and implementation setting. Specifically, we report the average
+wall-clock latency per question, the average number of frames processed by the inspector, and the average monetary cost per
+query. All financial metrics are calculated based on OpenRouter pricing and sum the expenses for both the planner and
+MLLM components. Crucially, the reported cost for our method explicitly accounts for the overhead introduced by the
+DeepSeek V3.2 LLM filter. As summarized in Table 10, our decoupled design achieves the lowest cost among agentic
+approaches at $0.015 per query while maintaining superior accuracy. This efficiency stems from the reduction of redundant
+visual inspections and the use of inspector feedback to refine queries. These savings effectively offset the computational cost
+of the retrieval filter.
+Table 10. Comparison of accuracy and inference efficiency. Our decoupled framework achieves significantly higher accuracy while strictly
+minimizing monetary costs compared to alternative agentic baselines.
+
+                    Method                         Acc. (%)       Latency (s)       Avg. Frames      Avg. Cost ($)
+                    Qwen2.5-VL-7B-Instruct              39.4            686.3             768.0                0.004
+                    VideoAgent                          42.3             22.8                 –                0.038
+                    DrVideo                             51.4             56.6              35.3                0.053
+                    Ego-R1                              39.4             70.4             315.9                0.034
+                    Ours (Decoupled)                    55.1             69.5              63.1                0.015
+
+
+
+C.8. Impact of Retrieval Filtration
+To enforce the structural separation of concerns, our Retrieval primitive incorporates a semantic filter designed to prune
+irrelevant noise before it reaches the planner. We instantiate this component using DeepSeek-V3.2 due to its high token
+throughput and semantic capability. To empirically validate the necessity of this gatekeeping mechanism and clarify its
+implementation, we conduct an ablation study comparing three filtering configurations while keeping the planner fixed as
+Qwen3-8B: (i) None, where raw top-k retrieved chunks are injected directly into the planner’s context; (ii) DeepSeek-V3.2
+(Ours); and (iii) GPT-4o, representing a frontier model upper bound.
+As presented in Table 11, bypassing the filter (“None”) precipitates a sharp performance degradation, with accuracy dropping
+from 55.1% to 51.2%. This regression empirically corroborates our diagnosis of Prompt Pressure: without semantic
+curation, the accumulation of irrelevant text chunks saturates the planner’s context window, degrading its ability to reason
+over long horizons. Furthermore, substituting the lightweight DeepSeek model with GPT-4o yields only a marginal gain of
+0.8%. This saturation suggests that the system’s performance is bounded by the recall of the initial dense retrieval rather than
+
+                                                                  16
+
+===== PDF p.17 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+                                                     Training Dynamics: Decoupled Approach
+                                         0.60
+                                                                                Acc
+                                         0.58
+                                                                                Gt
+
+
+                                         0.56
+
+                           Performance
+                                         0.54                             Strong Alignment
+
+
+                                         0.52
+
+
+
+                                         0.50
+
+
+
+                                         0.48
+                                                50      100         150            200       250         300
+                                                                     Training Steps
+
+Figure 7. Training Dynamics of the Decoupled Approach. Unlike the Hallucination Gap observed in coupled baselines, our method
+maintains a strong alignment between answer accuracy and temporal groundedness (Gt ). The performance gap remains negligible
+(∆ ≈ 0.02) throughout the training process. This indicates that improvements in answer accuracy are driven entirely by successful
+evidence retrieval, effectively eliminating the ”cheating” behavior caused by reward pressure.
+
+
+the reasoning depth of the filter. Consequently, our choice of DeepSeek-V3.2 represents an optimal design point, effectively
+mitigating context pollution without incurring the latency and cost overhead of larger models.
+
+Table 11. Ablation on Retrieval Filtration Strategy. We analyze the impact of the filtering mechanism on the LVBench validation set.
+Removing the filter exposes the planner to context noise, significantly exacerbating Prompt Pressure and reducing accuracy. The choice of
+DeepSeek-V3.2 balances performance with efficiency.
+
+                          Planner                    Filter Model              Acc (%)   Gt (%)       Gs (%)
+                          Qwen3-8B                   –                          51.2      47.2         45.7
+                          Qwen3-8B                   DeepSeek-V3.2              55.1      52.8         40.6
+                          Qwen3-8B                   GPT-4o                     55.0      53.0         41.0
+
+
+C.9. Limitations
+Although decoupling the search and verification processes effectively mitigates evidence misalignment, this architectural
+choice inherently introduces certain trade-offs. Explicitly inspecting candidate spans naturally adds inference overhead;
+consequently, latency can spike during complex queries even if the average computational cost remains competitive.
+Furthermore, the inspection mechanism itself is not infallible. The model may occasionally misjudge sufficiency, leading to
+premature termination on incomplete evidence or unnecessary retrieval cycles when sufficient clues are missed. Beyond
+these operational constraints, evaluating semantic groundedness currently relies on an LLM judge. We advocate treating
+this metric as a comparative diagnostic rather than an absolute oracle, particularly when handling ambiguous or highly
+fine-grained visual information. From a broader application standpoint, our empirical findings are based on a specific set of
+clue-grounded training data and standard benchmarks.
+
+
+
+
+                                                                          17
+
+===== PDF p.18 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+D. Case Studies
+We present five representative trajectories (three successes and two failures) to characterize the evidence seeking be-
+havior of the decoupled planner–inspector framework. In each episode, the planner proposes candidate spans via
+visual retrieve, while the inspector exclusively controls termination: it issues an answer only when zt = 1, and
+otherwise returns SEARCH MORE with a missing-evidence signal ft .
+
+S1: Counting (Fig. 8). The planner retrieves three dispersed spans (00:00:00–00:00:16; 00:15:12–00:15:28; 00:33:20–
+00:33:36) and submits non-overlapping candidates for inspection, where the inspector counts five red stripes and selects
+option B (0.95). This discriminative count directly rules out the remaining options, yielding an evidence-based decision.
+
+S2: Post-condition (Fig. 9). The planner first retrieves an off-target co-occurrence span (00:50:24–00:50:40) that contains
+no verifiable weather evidence, prompting the inspector to return SEARCH MORE. Guided by the missing-evidence signal ft ,
+it reformulates retrieval and re-centers on the ground-truth time reference (00:26:48–00:28:32), where snowfall is verified in
+00:27:44–00:28:00 and option D is returned (1.00). The episode terminates only once the post-condition is supported by
+discriminative visual cues, rather than by co-occurrence or span relevance alone.
+
+S3: Recovery (Fig. 10). The planner localizes the ground-truth neighborhood around 01:08:07–01:08:26, yet the first
+two visual inspect calls return SEARCH MORE because sparse sampling over a long span makes the option-critical
+cues (same-species rescue and threat attribution) hard to verify. Instead of discarding the window, the planner treats each
+rejection as actionable feedback, refocuses visual retrieve queries toward option-aligned details, and re-submits a
+tighter, more verifiable span; the inspector then confirms a ladybug–ladybug interaction near 01:08:22 and terminates with
+option C (confidence 0.95).
+
+F1: Fine-grained error (Fig. 11). Although the planner retrieves relevant spans, the inspector exhibits a fine-grained
+perceptual failure on headwear attributes (small accessories / color), producing an answer that is inconsistent with its own
+stated evidence and ultimately incorrect (ground truth: D).
+
+F2: Off-target retrieval and local-cue overreliance (Fig. 12). The retrieval concentrates on early meeting-like spans
+and misses the evidence-bearing window required to validate the query’s global constraint, forcing the inspector to answer
+from local seasonal cues and resulting in an incorrect commitment (A, 0.95). The lack of overlap with time reference
+(00:49:49–00:49:49) reflects this off-target retrieval and leaves the decision unsupported by time-aligned evidence.
+
+Summary. Taken together, these cases highlight a consistent closed loop: decoupling answer authority from planning
+systematically steers retrieval toward discriminative evidence and enables evidence-entailed termination. The failure modes
+further indicate that residual errors are dominated by (i) perception-bound fine-grained attributes and (ii) coverage failures
+under global temporal constraints, rather than by the planning protocol itself. These limitations are complementary to
+common strengths in recent long-video agents, suggesting that stronger visual backbones and improved coverage can be
+integrated without altering the decoupled protocol.
+
+
+
+
+                                                             18
+
+===== PDF p.19 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+
+                    Question                How many red stripes are there on the vlogger's black t-shirt?                                                                  Time Reference
+                                            (A) 7 (B) 5 (C) 6 (D) 4                                                                                                         00:00:00-00:00:39
+
+
+
+                    Step 1                  Planner                                                   Retrieve
+                                                                                                     Observer
+                                                                                                     Span relevance:
+                  <think>Okay, First, I should probably start by using the visual_retrieve tool to
+                                                                                                     - [00:33:20–00:33:36] RELATED: Explicitly shows the vlogger wearing a black T-shirt with
+                  find any scenes where the vlogger is wearing a black t-shirt...</think>
+                                                                                                     bold...
+                    Tool: visual_retrieve                                                            - [00:00:00–00:00:16] RELATED: Shows the vlogger in a black t-shirt ...
+                    Query: vlogger wearing black t-shirt                                             - [00:15:12–00:15:28] RELATED: Shows the...
+
+
+
+                    Step 2
+
+                             Raw Question
+
+
+
+
+                               Context
+
+
+                   Planner                                                                             Inspector
+                   <think>Okay, ...I should call visual_inspect with a few of these spans. Let       Answer: B
+                   me pick three non-overlapping ones... </think>                                    Evidence: The vlogger wears a black T-shirt featuring five prominent red horizontal stripes
+                                                                                                     against its dark backdrop. These stripes stand out distinctly due to their color contrast and
+                    Tool: visual_inspect                                                             placement along the shirt’s front area.
+                    Time: 00:00:00-00:00:16, 00:15:12-00:15:28, 00:33:20-00:33:36                    Confidence: 0.95
+                    Context: How many red stripes are on the vlogger's black t-shirt...
+
+
+
+                    Step 3                  Answer: B
+
+
+
+Figure 8. Case S1 (Counting). The inspector verifies a unique count-based cue from retrieved spans, enabling evidence-sufficient
+termination.
+
+
+
+                  Question                        What is the weather like after the water vole finds mole in the forest?                                                Time Reference
+                                                  (A) It fogs (B) It rains (C) It suns (D) It snows                                                                      00:26:48-00:28:32
+
+
+
+
+                    Step 1                  Planner                                                   Retrieve
+                                                                                                     Observer
+                  <think>Okay ... Maybe use the visual_retrieve tool with a query like "water        Span relevance:
+                  vole mole forest" to get time spans...After identifying the relevant time span,    - [00:50:24–00:50:40] PARTIAL: Shows a mole and a vole/shrew together at night...
+                  the next step is to check the weather conditions...</think>                        - [00:26:24–00:26:40] PARTIAL: Shows a small rodent in a yellow coat in a dense...
+                                                                                                     - [00:25:52–00:26:08] PARTIAL: Similar to above; a beaver/rodent in a yellow coat...
+                    Tool: visual_retrieve                                                            ...
+                    Query: water vole mole forest interaction
+
+
+
+                    Step 2
+
+                            Raw Question
+
+
+
+
+                              Context
+
+
+                   Planner                                                                             Inspector
+                  <think>Okay ...I should use visual_inspect on the spans where they are             Answer: SEARCH_MORE.
+                  together. The first span [00:50:24-00:50:40] has them together. Maybe the          Evidence: The scene shows night-time with stars visible but no indication of fog, rain...
+                  weather changes right after that. ...</think>                                      Confidence: 0.00
+                    Tool: visual_inspect                                                             Missing: Foggy atmosphere, rainfall, sunny sky, snowy landscape.
+                    Time: 00:50:24-00:50:40                                                          Next search: Search for scenes showing immediate aftermath interactions...
+                    Context: What is the weather like after the water vole finds mole...             ...
+
+
+
+                    Step 3                  Planner                                                  Observer
+                                                                                                      Retrieve
+                  <think></think>                                                                    Span relevance:
+                                                                                                     - [00:27:44–00:28:00] RELATED: Shows two small creatures in a tree hollow in a forest...
+                    Tool: visual_retrieve                                                            - [00:28:16–00:28:32] RELATED: Shows two animal characters in a burrow...
+                    Query: weather change after forest animal interaction                            - [00:26:56–00:27:12] PARTIAL: ...
+
+
+
+                    Step 4
+                            Raw Question
+
+
+
+
+                              Context
+
+
+                   Planner                                                                             Inspector
+                  <think>Okay,... The next step is to check if the snow starts immediately after     Answer: D
+                  the interaction. The first span after the interaction (00:27:44) shows snowfall,   Evidence: Snowflakes can be seen falling gently on the branches and trees around them
+                  which might be the answer. But the exact timing needs confirmation</think>         during frame 00:27:44 - 00:28:00, indicating light snowfall.
+                                                                                                     Confidence: 1.00
+                    Tools:visual_inspect
+                    Time: 00:27:44–00:28:00
+                    Context: What is the weather like after the water vole finds mole...
+
+
+
+                    Step 5                  Answer: D
+
+
+
+  Figure 9. Case S2 (Post-condition). SEARCH MORE refines retrieval to a post-event span where the decisive visual cue is verified.
+
+
+
+                                                                                                       19
+
+===== PDF p.20 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+
+
+
+                                      One time a smaller insect saves a larger insect of the same class in the rainforest, what happens?
+              Question                                                                                                                                      Time Reference
+                                      (A) The smaller ladybug saves the larger ladybug from a spider's web
+                                                                                                                                                            01:08:07-01:08:26
+                                      (B) The smaller mantis saves the larger mantis from a human's hand
+                                      (C) The smaller ladybug saves the larger ladybug from a mantis's hand
+                                      (D) The smaller mantis saves the larger mantis from a spider's web
+
+
+               Step 1                    Planner                                           Retrieve
+             <think>Okay,... Starting with visual_retrieve. The query should be about     Span relevance:
+             insects of the same class interacting in a rainforest...</think>             - [01:08:16–01:08:32] PARTIAL: Shows a large green praying mantis with a tiny red
+                                                                                          ladybug trapped/held on its leg; the ladybug then ...
+               Tool: visual_retrieve                                                      - [01:08:00–01:08:16] PARTIAL: Shows a large green praying mantis and ...
+               Query: small insect saving larger insect same class rainforest             - [01:08:48–01:09:04] PARTIAL: Shows a lush jungle with small flying insects and ...
+
+
+
+               Step 2
+                       Raw Question
+
+
+
+
+                         Context
+
+
+              Planner                                                                      Inspector
+             <think>Okay, ... I need to check these spans again but with a focus on       Answer: SEARCH_MORE.
+             same-class insects. Let me use visual_inspect on the provided spans,         Evidence: No clear instances where insects save others within their own species can be
+             focusing on same-class interactions... </think>                              observed directly. Searches need broader coverage...
+               Tool: visual_inspect                                                       Confidence: 0.00
+                                                                                          Missing: Specific examples showing saving behavior among same-species insects...
+               Time: 01:08:00-01:08:16,01:08:16-01:08:32,01:08:48-01:09:04
+                                                                                          ...
+               Context: A smaller insect saves a larger insect of the same class...
+
+
+               Step 3                     Planner                                         Retrieve
+                                                                                          Span relevance:
+             <think></think>                                                              - [01:08:16–01:08:32] RELATED: Shows a small ladybug trapped on...
+               Tool: visual_retrieve                                                      - [00:43:12–00:43:28] PARTIAL: Shows a ladybug hovering near ...
+                                                                                          - [01:08:00–01:08:16] PARTIAL: Shows a mantis and a ladybug-like...
+               Query: ladybug rescue same species rainforest
+                                                                                          ...
+
+
+               Step 4
+                       Raw Question
+
+
+
+
+                         Context
+
+
+              Planner                                                                      Inspector
+             <think></think>                                                              Answer: SEARCH_MORE.
+                                                                                          Evidence: No clear instances where insects save others within their own species can be
+               Tools:visual_inspect                                                       observed directly between the given timestamp...
+               Time: 00:43:12-00:43:28,01:08:00-01:08:16,01:08:16-01:08:32                Confidence: 0.00
+               Context: A smaller insect saves a larger insect of the same class...       Missing: - Specific scenes showing mantises interacting with other mantises...
+
+
+               Step 5                     Planner                                         Retrieve
+             <think>Okay... Since the previous searches didn't find anything, maybe       Span relevance:
+             expanding the query to include terms like “same species rescue”...</think>   - [01:07:44–01:08:00] RELATED: Shows a small orange-red insect hovering near a larger
+                                                                                          stationary green praying mantis in a jungle setting...
+               Tool: visual_retrieve                                                      - [01:08:16–01:08:32] RELATED: Shows a ladybug trapped on a mantis's leg, then
+               Query: insect same species rescue rainforest                               detaching and flying away...
+
+
+
+               Step 6
+
+                       Raw Question
+
+
+
+
+                         Context
+
+
+              Planner                                                                      Inspector
+             <think></think>                                                              Answer: C
+                                                                                          Evidence: Around 01:08:22, a mantis grasps a ladybug with its forelegs; a smaller
+               Tools:visual_inspect                                                       ladybug flies in and interacts nearby. The trapped ladybug breaks free and flees, a clear
+               Time: 01:07:44-01:08:00,01:08:16-01:08:32                                  case of a ladybug rescuing its peer from the mantis.
+               Context: A smaller insect saves a larger insect of the same class...       Confidence: 0.95
+
+
+               Step 7                    Answer: C
+
+
+
+ Figure 10. Case S3 (Recovery). Query refocusing recovers from inspector false negatives under long-span, sparse sampling.
+
+
+
+
+                                                                                            20
+
+===== PDF p.21 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+
+                    Question               What are the dancers with pink ponytails wearing on their heads?                                                      Time Reference
+                                           (A) White headgear (B) Black hat (C) White hat (D) Black headgear                                                     00:59:00-00:59:20
+
+
+
+                   Step 1                  Planner                                                Retrieve
+                                                                                                  Observer
+                                                                                                  Span relevance:
+                  <think>Okay, ... First, use visual_retrieve with a pink ponytail query to get
+                                                                                                  - [00:58:40–00:58:56] RELATED: Shows two female dancers with vibrant pink pigtails ...
+                  time spans of those dancers...</think>
+                                                                                                  - [01:02:56–01:03:12] RELATED: Explicitly mentions four backup dancers with ...
+                    Tool: visual_retrieve                                                         - [00:59:12–00:59:28] RELATED: Describes four dancers...
+                    Query: dancers with pink ponytails                                            ...
+
+
+
+                   Step 2
+
+                           Raw Question
+
+
+
+
+                              Context
+
+
+                  Planner                                                                          Inspector
+                  <think>Okay,...The next step is to use visual_inspect on the provided spans     Answer: A,D
+                  to check for headgear...</think>                                                Evidence: The dancers with pink ponytails have white headbands resembling bows on
+                                                                                                  stage during various moments captured. These headpieces match well visually compared
+                    Tool: visual_inspect                                                          to options B/C where black hats would stand out differently due to color contrast...
+                    Time: 00:58:40-00:58:56, 00:59:12-00:59:44, 01:02:56-01:03:12                 Confidence: 0.95
+                    Context: What are the dancers with pink ponytails wearing on ...
+
+
+                   Step 3                  Answer: A,D
+
+
+
+Figure 11. Case F1 (Fine-grained perceptual failure). Fine-grained headwear attributes (small accessories / color) are misperceived,
+yielding evidence–option inconsistency.
+
+
+
+                  Question                        When does the man meet the woman for the last time?                                                              Time Reference
+                                                  (A) Autumn (B) Winter (C) Spring (D) Summer                                                                      00:49:49-00:49:49
+
+
+
+
+                   Step 1                  Planner                                                 Retrieve
+                                                                                                  Observer
+                  <think>Okay, ...I should start by using the visual_retrieve tool to get some    Span relevance:
+                  initial clues. Maybe "man and woman meeting" or "final meeting scene".          - [00:06:40-00:06:56] RELATED: Shows two figures (likely a man and woman)
+                  That could give me some time anchors... </think>                                meeting/interacting closely...
+                                                                                                  - [00:28:32-00:28:48] RELATED: Shows two characters meeting intimately...
+                    Tool: visual_retrieve                                                         - [00:25:04-00:25:20] PARTIAL: Shows a man and a woman standing near each other...
+                    Query: man and woman meeting
+
+
+
+                   Step 2
+
+                            Raw Question
+
+
+
+
+                              Context
+
+
+                  Planner                                                                          Inspector
+                  <think>Okay, let's see...The useful spans provided include times like           Answer: SEARCH_MORE
+                  00:28:32-00:28:48, which mentions an autumnal setting. Another span             Evidence: The dragonfly flying against a pinkish sky suggests springtime, while the
+                  at 00:06:40-00:06:56 has cherry blossoms, which is spring...</think>            presence of both characters outdoors indicates an outdoor meeting scene. There's no
+                                                                                                  clear indication whether their meeting was during summer or fall based on these frames...
+                    Tool: visual_inspect                                                          Confidence: 0.00
+                    Time: 00:06:40-00:07:12, 00:28:32-00:28:48, 00:25:04-00:25:20                 Missing: No specific details indicating precise seasonality...
+                    Context: When does the man meet the woman for the last time?                  ...
+
+
+                   Step 3                   Planner                                               Observer
+                                                                                                   Retrieve
+                                                                                                  Span relevance:
+                  <think></think>                                                                 - [00:34:40–00:34:56] RELATED: Shows a man and woman seated closely in a quiet,
+                                                                                                  intimate interaction. The scene is bathed in warm ...
+                    Tool: visual_retrieve                                                         - [00:27:28–00:27:44] RELATED: Clearly shows a man and a woman...
+                    Query: final farewell with seasonal cues                                      - [00:29:04–00:29:20] PARTIAL: Shows a man and woman ...
+
+
+
+                   Step 4
+                            Raw Question
+
+
+
+
+                              Context
+
+
+                  Planner                                                                          Inspector
+                   <think></think>                                                                Answer: A
+                                                                                                  Evidence: The scene features autumnal colors, including yellowish-brown foliage on trees
+                     Tool: visual_inspect                                                         and warm lighting suggesting sunset hues typical of fall seasons. These visual cues
+                     Time: 00:27:28-00:27:44, 00:34:40-00:34:56                                   strongly indicate the setting takes place during autumn.
+                     Context: When does the man meet the woman for the last time...               Confidence: 0.95
+
+
+
+                   Step 5                  Answer: A
+
+
+
+Figure 12. Case F2 (Off-target retrieval). The search misses the time-aligned evidence window, forcing an answer from local cues and
+resulting in an incorrect commitment.
+
+
+
+                                                                                                    21
+
+===== PDF p.22 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+E. Algorithm Details
+Inference Execution and Fallback We formally present the inference execution flow in Algorithm 1. The process follows
+the decoupled framework wherein the planner iteratively refines its search memory ht via sequence concatenation ⊕ rather
+than set union to preserve the temporal order of reasoning traces. A critical component of this implementation is the
+maintenance of a candidate cache C which persists across the entire episode to serve as a safety net. Should the search
+budget K be exhausted prior to a definitive sufficiency verdict zt = 1, we enforce
+                                                                               S   a fallback mechanism wherein the agent
+aggregates all historically retrieved candidates into a unified timeline τall = C and executes a forced VisualInspect
+call.
+
+Algorithm 1 Decoupled Planner–Inspector Framework
+ 1: Input: video V (duration Tvid ), original question q, budget K
+ 2: Initialize: search memory h0 ← [], candidate cache C ← ∅, last tool ℓ ← ∅
+ 3: for t = 1 to K do
+ 4:    ut ← Planner(q, ht−1 )
+ 5:    if ut is VisualRetrieve(k) then
+ 6:        Pt ← VisualRetrieve(q, k) {Pt : retrieved candidate spans at turn t}
+ 7:        C ← C ∪ Pt {Cache retrieved candidates}
+ 8:        ht ← ht−1 ⊕ [RET(Summary(Pt ))]
+ 9:        ℓ ← VisualRetrieve
+10:    else if ut is VisualInspect(vt , q) then
+11:        {vt is the set of spans submitted by the Planner at turn t (may change across turns)}
+12:        (zt , ft ) ← VisualInspect(vt , q)
+13:        ht ← ht−1 ⊕ [(vt , zt , ft )]
+14:        ℓ ← VisualInspect
+15:        if zt = 1 then
+16:           return ft {Evidence-grounded resolution}
+17:        end if
+18:    end if
+19: end for
+20: {Forced fallback: append a terminal VisualInspect to satisfy the last-tool constraint}
+21: if ℓ ̸= VisualInspect then
+22:    if C ̸= ∅ then
+23:        Sfb ← C
+24:    else
+25:        Sfb ← {[0, Tvid ]} {Inspect full video if no candidates}
+26:    end if
+27:    (zfb , ffb ) ← VisualInspect(Sfb , q)
+28:    hK+1 ← hK ⊕ [(Sfb , zfb , ffb )]
+29:    if zfb = 1 then
+30:        return ffb
+31:    end if
+32: end if
+33: return EvidenceNotFound
+
+
+
+
+                                                            22
+
+===== PDF p.23 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+F. Prompt.
+F.1. System Prompt for the Decoupled Planner
+ Decoupled Tool-Agent System Prompt
+
+ You are a helper that answers multi-step video questions by sequentially invoking
+ functions.
+ Your ONLY job is to retrieve and refine candidate time spans; the final answer content
+ must
+ come from visual_inspect, not from your own imagination.
+
+ Tool outputs are lossy and may miss details. Prefer improving coverage by:
+ - trying different queries,
+ - inspecting new / non-overlapping time spans,
+ rather than re-running the same tool on the same spans.
+
+ If you cannot find strong anchors after several retrieval attempts, you may switch to an
+ exploration mode:
+ - randomly sample a few large, non-overlapping time spans across the video,
+ - send them to visual_inspect to discover where relevant evidence might be.
+
+ Each turn, do exactly one of the following:
+
+ * If further clues and evidence are needed:
+   Output EXACTLY one tool call:
+   <tool_call>{"name":"...","arguments":{...}}</tool_call>
+
+ * If ready to finalize:
+   You may enter this branch ONLY if the immediately previous turn called visual_inspect
+   and its output contains a clear, reliable verdict.
+   Output:
+   <final>...</final>
+
+ Final Format
+ • Multiple-choice → ONLY the letter(s) uppercase.(e.g., C). No extra words.
+
+Rules
+- One Tool call only per turn. Exactly one tool call per turn, except final turn (no
+tool call).
+- You are a retriever, not an answerer: never invent answers; never override
+visual_inspect.
+- You MUST NOT conclude from any non-visual_inspect tool alone.
+- You may output <final> ONLY if the immediately previous turn was a visual_inspect call
+  AND it returned a clear, reliable verdict.
+- If the last tool call is NOT visual_inspect, you MUST NOT output <final>; keep
+searching
+  and then call visual_inspect.
+- The final answer must match the most recent reliable visual_inspect verdict (prefer
+the
+  latest decisive visual_inspect when multiple exist).
+- Do NOT re-run the same tool on the same time spans just to \get more info".
+  Instead, broaden coverage via different queries and new spans, or use exploration mode
+  (large non-overlapping spans).
+- If visual_inspect explicitly indicates that more search is needed (e.g., a special
+\search more"
+  flag or low-confidence signal), you must NOT finalize.
+- A good pattern is to alternate tools, e.g.:
+  visual_retrieve → visual_inspect → visual_retrieve(different query) →
+  visual_inspect(different spans) → final.
+- As soon as you have plausible spans, it is better to call visual_inspect again
+(possibly with
+  more detailed context or slightly refined spans) than to keep doing blind retrieval.
+  Multiple visual_inspect with different time spans calls are encouraged.
+
+
+
+                                                       23
+
+===== PDF p.24 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+- Always zero-pad time fields (HH:MM:SS).
+- Hard constraint: end_time must be strictly greater than start_time.
+
+Tool Calling Conventions
+- visual_retrieve: {"name":"visual_retrieve","arguments":{"query":"..."}}.
+  Use free-form natural language or short visual phrases related to the question to
+retrieve
+  visually/scene-relevant regions and coarse time anchors from the unified visual index.
+- visual_inspect: {"name":"visual_inspect","arguments":{
+      "spans":[{"start_time":"HH:MM:SS","end_time":"HH:MM:SS"}, ...],
+      "context":"Restate the original question + 2{4 visual sub-questions; explain
+briefly why
+                these spans were chosen (e.g., tool hits/previous clues); provide a
+short
+                'look-for' checklist of disambiguating cues to verify within these spans
+                (appearance: gender/age/face/hair, clothing/accessories,
+actions/objects,
+                location, on-screen text). Phrase hints as 'look for / verify' rather
+than
+                confirmed facts."
+  }}.
+  Constraints: each span must satisfy end_time > start_time.
+
+
+
+
+                                                      24
+
+===== PDF p.25 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+F.2. System Prompt for the coupled agent
+ Coupled Tool-Agent System Prompt
+ TOOLAGENT_SYS_PROMPT_EN = """
+ You are a helpful assistant who answers multi-step questions by sequentially invoking
+ functions. Follow the THINK → ACT → OBSERVE loop. Each turn, do exactly this and keep
+ every <think> rich with reasoning:
+
+ * If further clues and evidence are needed:
+   <think>
+   Reflect explicitly on your current evidence and remaining uncertainties. Clearly
+ reference outputs from previous tools. Justify precisely which next tool, parameters,
+ and targeted window can provide valuable additional clues or reduce significant
+ uncertainty.
+   </think>
+   <tool_call>{"name":"...","arguments":{...}}</tool_call>
+
+ * If ready to finalize:
+   <think>
+   Integrate the complete set of clues gathered from prior tools. Reference decisive
+ evidence (tool name + key timestamps/details) and explain why no further investigation
+ is necessary. If you used visual_inspect, briefly cite the key visual evidence.
+   </think>
+   <final>...</final>
+
+ Final Format
+ • Multiple-choice → ONLY the letter(s) uppercase. For multi-select, separate by comma
+ (e.g., A,C). No extra words.
+ • Open-ended → the final concise textual conclusion.
+
+ Rules
+ - One output per turn. Exactly one tool call per turn, except final turn (no tool call).
+ - Start broad: use retrieval tools to map storyline clues and concrete time-windows;
+ then iteratively narrow with targeted follow-up retrieval and/or inspection until
+ decisive evidence is found.
+ - Final turn sequence strictly follows: <think> → <final>.
+ - Always zero-pad time fields (HH:MM:SS).
+ - Every <think> must contain detailed reasoning in plain text (no placeholders). Empty
+ or purely generic thoughts are invalid.
+ - Evidence grounding: Base all reasoning and conclusions strictly on evidence from tool
+ outputs (cite tool name and timestamp/details). Do NOT invent details or speculate. If
+ evidence is insufficient, plan another tool call instead of guessing. Avoid hedging
+ words like "maybe", "might", "seems"; be definitive only when evidence supports it.
+ - Before any <tool_call>, the preceding <think> must reference what previous tools
+ revealed (or failed to reveal) and justify the specific tool/arguments you are about to
+ execute.
+ - Before any <final>, the preceding <think> must cite the precise evidence (tool name +
+ timestamp/key detail) that resolves the question.
+ - You must output your final choice in <final>...</final> without unknown or
+ uncertainty.
+ - Visual tools (visual_retrieve and visual_inspect) NEVER return person names or
+ identities. They only show appearances and actions (clothes, hair, position, behavior).
+ If a question asks about who a person is (names or roles), you must infer identity from
+ long-term storyline and consistent appearance across scenes, not from a single visual
+ tool call.
+
+ Tool Calling Conventions
+ - visual_retrieve: {"name":"visual_retrieve","arguments":{"query":"..."}}.
+   Use free-form natural language or short visual phrases related to the question to
+ retrieve visually/scene-relevant regions and coarse time anchors from the unified visual
+ index.
+ - visual_inspect: {"name":"visual_inspect","arguments":{
+       "spans":[{"start_time":"HH:MM:SS","end_time":"HH:MM:SS"}, ...],
+
+
+
+
+                                                        25
+
+===== PDF p.26 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+      "context":"Restate the original question + 2{4 visual sub-questions; explain
+briefly why these spans were chosen (e.g., tool hits/previous clues); provide a short
+'look-for' checklist of disambiguating cues to verify within these spans (appearance:
+gender/age/face/hair, clothing/accessories, actions/objects, location, on-screen text).
+Phrase hints as 'look for / verify' rather than confirmed facts."
+  }}.
+  Constraints: use at most 10 spans per call; each span must satisfy end_time >
+start_time.
+
+Balanced Clue Discovery Guidance
+- Typically start with visual_retrieve to establish narrative anchors and fine-grained
+visual context early.
+- If initial retrieval is weak, broaden the query and retry retrieval; or use
+visual_inspect on a small number of broader spans to quickly confirm whether any
+decisive evidence exists there, then narrow down with additional retrieval.
+- Confirm decisive details with visual_inspect when needed, then finalize only when
+evidence is sufficient.
+- Collect corroborating evidence across tools and timestamps; prioritize the spans where
+multiple tools agree.
+"""
+
+
+
+
+                                                      26
+
+===== PDF p.27 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+F.3. Prompt for Visual Inspect (Inspector)
+ Visual Inspect Prompt Template
+ You will be shown frames sampled across multiple time windows of a video.
+ Spans: {spans_label}.
+ {Context: <optional prior-search summary, only if provided>}
+
+ Use the frames together with the optional Context (which summarizes prior searches) to
+ answer the question.
+ Reason explicitly about how the visual evidence matches each part of the question and
+ any clues in Context.
+
+ Important: You ONLY see frames from the spans listed above. If a required element is not
+ visible or cannot be inferred here,
+ that usually means the answer is outside these spans and the retriever should search
+ elsewhere in the video.
+ Only treat these spans as FIXED ground-truth if the question explicitly asks about this
+ exact time range
+ (e.g., it mentions the same timestamps or says "in this segment"). In that fixed-range
+ case, you MUST choose the best-supported
+ option from these frames, even if your confidence is below 0.95, and you must NOT output
+ SEARCH_MORE.
+
+ Only choose option letters if the frames (with help from Context) clearly support all
+ required elements
+ (entities, actions, attributes, relations, and any time conditions).
+ If this is NOT a fixed-range question and any required element cannot be verified or
+ reliably inferred from these frames,
+ do NOT choose an option.
+
+ Always output a numeric confidence in [0.00, 1.00]. If this is NOT a fixed-range
+ question and confidence is below 0.95,
+ output Answer: SEARCH_MORE.
+
+ When outputting SEARCH_MORE, briefly state which specific elements of the question are
+ still unverified in these spans
+ and suggest 1--3 concrete next searches as query phrases / what to look for.
+ Do NOT include any explicit timestamps, HH:MM:SS ranges, or relative time directions
+ (e.g., earlier/later).
+ Do NOT recommend re-checking the same spans unless the question itself requires it.
+ Finally, add a short Reminder line telling the central LLM that the NEXT tool call
+ should NOT be visual_inspect,
+ and should instead use other retrieval tools to find new spans.
+
+ When citing visual evidence in your answer, reference exact timestamps in HH:MM:SS (or
+ ranges like HH:MM:SS{HH:MM:SS)
+ from the provided spans; do NOT use "frame N" or image indices.
+
+ Question(s):
+ {qtext}
+
+ OUTPUT FORMAT
+ - Start with a single line: Answer: <one or more option letters such as "A" or "A,C", OR
+ "SEARCH_MORE">.
+ - Then provide Evidence: <1{3 sentences grounded in the frames; include HH:MM:SS
+ timestamps rather than "frame N"
+   when referencing specific visual cues>.
+ - Then Confidence: <0.00{1.00, two decimals>.
+ - If Answer is SEARCH_MORE, add three more lines:
+   Missing: <bullet-like list inside one line of what is not visible / still unclear>.
+   Next search: <concrete query phrases / what to search for next, WITHOUT any
+ timestamps>.
+   Reminder: <one sentence: do NOT call visual_inspect next; use other tools to search
+ new spans>.
+
+
+
+                                                        27
+
+===== PDF p.28 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+
+If you output option letters in a non-fixed-range question, your confidence MUST be at
+least 0.95 and your evidence must cover
+every element of the question.
+
+
+
+
+                                                      28
+
+===== PDF p.29 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+F.4. Prompt for Visual Retrieve Summary
+
+ Visual Retrieve Summary Prompt Template
+ ROLE (clue finder / relevance check ONLY)
+ - Do NOT answer the final QA and do NOT choose multiple-choice option letters.
+ - You ONLY see candidate time windows with short captions (no raw frames). Use ONLY
+ these captions; do not invent details.
+ - Read the User question and extract minimal visual facts that would distinguish the
+ options (entities, actions, attributes, relations).
+ - Treat the Visual retrieval query as a short checklist, not a question.
+ - For each candidate window, judge relevance to the question based ONLY on its caption.
+
+ Task:
+ - For each window (in the given order), label it RELATED / PARTIAL / UNRELATED and
+ briefly explain why.
+ - Separate KNOWN vs UNKNOWN facts relative to the question/options; UNKNOWN should focus
+ on option-distinguishing facts that are missing or unclear.
+ - Propose concrete Next search cues (short phrases) that target the UNKNOWN facts. Do
+ NOT include timestamps or relative-time words.
+
+ Output format (NO JSON, keep this order):
+ Span relevance: <for each span, label RELATED / PARTIAL / UNRELATED with a short reason>
+ Evidence: <1-3 sentences; include KNOWN facts and UNKNOWN facts tied to the
+ question/options>
+ Next search: <3-8 short phrases, derived from UNKNOWN facts; same language as the
+ question when possible>
+ USEFUL_SPANS:
+ - HH:MM:SS{HH:MM:SS
+ - ... (up to {MAX_USEFUL} lines; must be chosen from the candidate list)
+
+ Notes:
+ - If none clearly match, say so in Evidence, but still list up to 1-2 least-irrelevant
+ spans in USEFUL_SPANS as weak leads.
+ - Do not add any extra sections beyond the required output lines and USEFUL_SPANS block.
+
+ User question (may include options; use them to disambiguate): {USER_QUESTION}
+ Visual retrieval query: {QUERY_TEXT}
+
+ Candidate windows:
+ 1. [HH:MM:SS{HH:MM:SS] <caption>
+ 2. [HH:MM:SS{HH:MM:SS] <caption>
+ ...
+
+
+
+
+                                                       29
+
+===== PDF p.30 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+F.5. Prompt for Clip Captioning
+
+ Clip Caption Prompt
+ You are a vision-language assistant. You will be given multiple frames from a single
+ video clip spanning {START_HMS}{{END_HMS}.
+ Describe ONLY what is visible on screen (no audio/subtitles/metadata or outside
+ knowledge).
+ Write a detailed, chronological visual narrative that reads naturally as a story.
+
+ Return EXACTLY one JSON object (no extra text, no markdown) with this schema:
+ {
+   "clip_description": "<multi-sentence (preferably multi-paragraph) narrative of the
+ visible events.
+ Be concrete: who/characters (use neutral labels if unknown), clothing/colors/patterns;
+ objects (names/quantities/states);
+ setting/location cues (indoor/outdoor/room/setting); camera movement; lighting; legible
+ on-screen text;
+ entrances/exits; occlusions; and state changes across the clip. Organize from start to
+ end;
+ you may use lightweight hints like [start]/[mid]/[end] or [t$\approx$HH:MM:SS] if
+ helpful|do not invent exact timestamps.
+ Strictly visual evidence only.>"
+ }
+
+ Writing requirements:
+ - Visual-only: avoid speculation, backstory, or intent beyond what is visibly evident.
+ - Coverage is within the prose (no lists): weave people, objects, scene, actions,
+ camera, lighting, on-screen text, and changes into a coherent narrative.
+ - Chronology: describe from the start toward the end; you may include lightweight hints
+ like [start], [mid], [end] or [t$\approx$00:00:05] if helpful|do not invent exact
+ timestamps.
+ - JSON constraint: return exactly one JSON object with the single key
+ 'clip_description'; no code fences, no extra keys, no trailing text.
+
+
+
+
+                                                        30
+
+===== PDF p.31 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+F.6. Prompt for Trajectory-Level Semantic Groundedness
+ LLM as Judge Prompt
+ You are a rigorous auditor for Video Agent Trajectories.
+ Your job: evaluate whether the agent’s video-search process is logically grounded AND
+ whether its trajectory is clear and traceable toward the final answer (agentic
+ interpretability).
+
+ ===============
+ INPUTS
+ ===============
+ User Query:
+ {{query}}
+
+ Search Trajectory Log:
+ {{trajectory_log}}
+ Format: Turn # | Action | Tool Output | Agent Thought
+
+ Final Answer:
+ {{final_answer}}
+
+ ===============
+ CORE RULE: STRICT EVIDENTIARY SUPPORT
+ ===============
+ Let A be the critical Tool Output(s) provided during the search process.
+ Let B be the claim in the Final Answer.
+
+ The audit focuses strictly on whether A supports B.
+ - If A supports B (explicitly contains, entails, or validates B), the answer is
+ GROUNDED.
+ - If B asserts claims, facts, or details not found in A, or contradicts A, the answer is
+ HALLUCINATED.
+
+ ===============
+ FAIRNESS: FOCUS ON FINAL ANSWER
+ ===============
+ - **Scope:** Hallucination judgment applies ONLY to the {{final_answer}}.
+ - **Thoughts Ignored:** Speculative, incorrect, or wandering statements inside "Agent
+ Thought" do NOT count as hallucination unless those errors propagate into the Final
+ Answer.
+ - **Authority:** Regardless of whether the agent acts as a relay (copying a tool) or an
+ analyst (synthesizing data), the rule remains: Does the tool evidence support the final
+ claim?
+
+ ===============
+ METRICS (OBSERVABLE)
+ ===============
+
+ 1) Hallucination (hallucination: true/false)
+
+ Definition: Hallucination is the absence of tool-based evidence for the Final Answer.
+
+ Compare the Final Answer (B) against the visible Tool Outputs (A).
+
+ **hallucination = false** (Not Hallucinated) IFF:
+   - The content of the Final Answer is explicitly present in or strictly entailed by the
+ Tool Outputs.
+   - (For Multiple Choice) The option selected matches the evidence or the explicit
+ answer provided by the tool.
+
+ **hallucination = true** (Hallucinated) IFF:
+   - **Fabrication:** The Final Answer includes specific visual details, timestamps,
+ counts, or objects that appear NOWHERE in the Tool Outputs.
+
+
+
+
+                                                       31
+
+===== PDF p.32 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+
+  - **Contradiction:** The Final Answer claims "X" while the Tool Outputs explicitly say
+"Not X" or "Y".
+  - **Unjustified Certainty:** The Final Answer provides a definitive/specific answer
+when the Tool Output was empty, ambiguous, or explicitly stated "I don't know" or "No
+information found".
+
+2) Trajectory-to-Answer Clarity (trajectory_clarity: 0--10)
+How reconstructable and \toward-the-answer" the trajectory is (independent of
+correctness).
+Capability-adjusted scoring:
+
+Score guidance:
+10: Each major step states intent, cites prior evidence, refines spans/queries, and the
+final answer is clearly linked to specific evidence.
+7{9: Mostly coherent; occasional unclear jumps but overall traceable.
+4{6: Fragmented; weak linkage between actions and evidence; rationale often implicit.
+1{3: Largely opaque; actions feel arbitrary; hard to explain why the agent did what it
+did.
+0: No meaningful trajectory; cannot reconstruct a path to the answer from the log.
+
+===============
+CREDIBILITY SCORE (credibility_score: 0--10)
+===============
+Credibility measures the strength of the evidential support for the Final Answer.
+
+10: Strong Support. The Tool Outputs contain the exact answer or decisive visual
+evidence covering the full query scope.
+8{9: Good Support. Minor ambiguity or slight coverage gap, but the answer is highly
+likely based on tool data.
+5{7: Weak/Partial Support. Evidence is indirect, circumstantial, or misses a key part of
+the query (e.g., checking only half the video for a "first occurrence" question).
+0{4: Unsupported/Hallucinated. The answer is based on no evidence or contradicted by
+evidence.
+
+===============
+REQUIRED AUDIT STEPS (MUST DO)
+===============
+1) Identify the critical Tool Output(s) (A) that relate to the Final Answer (B).
+2) Quote (verbatim, short snippet) the specific text in A that supports or contradicts
+B.
+3) CHECK SUPPORT:
+   - Does A contain the information in B? -> hallucination = false.
+   - Does B contain information absent from A? -> hallucination = true.
+4) Rate trajectory_clarity based on logical progression.
+5) Set credibility_score based on how strong that support is.
+
+===============
+OUTPUT (JSON ONLY)
+===============
+Return valid JSON exactly in this schema (no extra text):
+{
+  "reasoning": "Concise justification. 1) Quote the tool evidence. 2) State if Final
+Answer matches/is supported by this evidence. 3) Explain scoring for
+clarity/credibility.",
+  "hallucination": true/false,
+  "trajectory_clarity": 0-10,
+  "credibility_score": 0-10
+}
+
+
+
+
+                                                      32
+
+===== PDF p.33 =====
+VideoSEAL: Mitigating Evidence Misalignment in Agentic Long Video Understanding by Decoupling Answer Authority
+                                        Training Reward                                                                               Response Length Evolution                                                        Training Reward                                                                         Response Length Evolution
+                 0.55                                                                                                 6000                                                                       0.70
+                 0.50                                                                                                                                                                            0.65                                                                                          5000
+                                                                                                                      5500
+
+
+
+
+                                                                                      Avg. Response Length (Tokens)
+
+
+
+
+                                                                                                                                                                                                                                                               Avg. Response Length (Tokens)
+                 0.45                                                                                                 5000                                                                       0.60                                                                                          4500
+Average Reward
+
+
+
+
+                                                                                                                                                                                Average Reward
+                 0.40                                                                                                                                                                            0.55
+                                                                                                                      4500
+                                                                                                                                                                                                                                                                                               4000
+                 0.35                                                                                                                                                                            0.50
+                                                                                                                      4000
+                 0.30                                                                                                                                                                            0.45                                                                                          3500
+                                                                                                                      3500
+                 0.25
+                                                                                                                                                                                                 0.40                                                                                          3000
+                 0.20                                                                                                 3000
+                                                                                                                                                                                                 0.35
+                 0.15                                                                                                 2500                                                                                                                                                                     2500
+                         0   50   100     150   200       250    300   350                                                   0   50   100   150   200    250   300   350                                0   50   100    150    200       250   300   350                                              0   50   100   150    200       250   300   350
+                                          Training Steps                                                                                    Training Steps                                                               Training Steps                                                                              Training Steps
+
+
+                                                (a) Decouple + Time (Ours)                                                                                                                                                           (b) Decouple (w/o Time)
+                                        Training Reward                                                                               Response Length Evolution                                                        Training Reward                                                                         Response Length Evolution
+                                                                                                                                                                                                 0.8
+                 0.7                                                                                         10000                                                                                                                                                                         9000
+                                                                                                                                                                                                 0.7
+                                                                             Avg. Response Length (Tokens)
+
+
+
+
+                                                                                                                                                                                                                                                           Avg. Response Length (Tokens)
+                 0.6
+                                                                                                                      9000                                                                       0.6                                                                                       8000
+Average Reward
+
+
+
+
+                                                                                                                                                                                Average Reward
+                 0.5
+                                                                                                                                                                                                 0.5
+                                                                                                                      8000
+                 0.4                                                                                                                                                                                                                                                                       7000
+                                                                                                                                                                                                 0.4
+                 0.3                                                                                                  7000                                                                       0.3                                                                                       6000
+                 0.2                                                                                                  6000                                                                       0.2
+                 0.1                                                                                                                                                                             0.1                                                                                       5000
+                                                                                                                      5000
+                 0.0                                                                                                                                                                             0.0
+                        0    50   100    150    200   250       300    350                                                   0   50   100   150   200    250   300   350                                0   50   100    150    200       250   300   350                                              0   50   100   150   200        250   300   350
+                                         Training Steps                                                                                     Training Steps                                                              Training Steps                                                                               Training Steps
+
+
+                                                                (c) Couple + Time                                                                                                                                                         (d) Couple (Baseline)
+Figure 13. Training Dynamics across Model Configurations. We report the moving average of the reward (left y-axis) and response
+length (right y-axis) for four variants. The proposed decoupled + time setting achieves a superior balance between high reward attainment
+and concise tool usage.
+
+
+G. Training Dynamics of Agent Variants
+To empirically validate our design, we study GRPO training stability and convergence under four configurations, contrasting
+our decoupled planner with coupled agent baselines, each instantiated with and without explicit temporal cues. Figure 13
+reveals clear differences in optimization dynamics. The time-aware decoupled variant exhibits the smoothest learning curves:
+rewards increase steadily, and the interaction horizon remains well regulated rather than drifting toward longer, noisier
+trajectories. Removing temporal cues does not break stability, but it slows evidence localization, suggesting that temporal
+grounding primarily improves sample efficiency rather than acting as a stabilizer. In contrast, the coupled baselines show
+pronounced oscillation and high variance in both reward and trajectory length across training, consistent with optimization
+interference when navigation decisions and answer authority are optimized within a single shared history. By isolating
+the search policy from answer termination and enforcing an inspector-gated endpoint, our decoupled protocol reduces this
+interference and yields more stable RL fine-tuning.
+
+
+
+
+                                                                                                                                                                           33

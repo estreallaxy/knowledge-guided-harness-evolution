@@ -1,0 +1,1358 @@
+===== PDF p.1 =====
+Think Parallax: Solving Multi-Hop Problems via Multi-View
+                   Knowledge-Graph-Based Retrieval-Augmented Generation
+
+                               Jinliang Liu1,2 , Jiale Bai2 , Shaoning Zeng1,2 *
+   1
+     Yangtze Delta Region Institute (Huzhou), University of Electronic Science and Technology of China,
+                                         Huzhou, Zhejiang, China
+2
+  School of Information and Software Engineering, University of Electronic Science and Technology of China,
+                                         Chengdu, Sichuan, China
+               lucaliu510@gmail.com, syxb02@gmail.com, zsn@outlook.com
+
+
+                              Abstract                                                      Encoder-Only Transformer
+
+            Large language models (LLMs) still strug-                                                                           Bi-             Bi-
+                                                                                                                            Directional Add Directional Add
+            gle with multi-hop reasoning over knowledge-                                       Block1      Block2     ...     Multi-
+                                                                                                                               Head
+                                                                                                                                         &
+                                                                                                                                        Norm
+                                                                                                                                              Multi-
+                                                                                                                                               Head
+                                                                                                                                                         &
+                                                                                                                                                        Norm
+            graphs (KGs), and we identify a previously                                                                      Attention        Attention
+
+            overlooked structural reason for this difficulty:             Early Hop Relation
+                                                                                               []    Hop1 Specializing Heads
+            Transformer attention heads naturally special-                                     []    Hop2 Specializing Heads                                   Reasoning
+
+            ize in distinct semantic relations across reason-                                  ...             ...
+                                                                                                                                                         []
+                                                                                                                                                                 Chain
+                                                                                                                                                               Timeline
+                                                                                               []    Hopn Specializing Heads
+            ing stages, forming a hop-aligned relay pattern.          Longer Hop Relation
+
+
+            This key finding suggests that multi-hop rea-
+                                                                        (a) ParallaxRAG: Hop-Specialized                                   (b) Standard KG-RAG:
+            soning is inherently multi-view, yet existing
+                                                                         Multi-Head Embeddings                                             Single Embedding Space
+            KG-based retrieval-augmented generation (KG-
+            RAG) systems collapse all reasoning hops into             Figure 1: Comparison of ParallaxRAG and standard
+            a single representation, flat embedding space,            KG-RAG embedding strategies. (a) In ParallaxRAG,
+            suppressing this implicit structure and causing           attention heads specialize in distinct semantic relations
+            noisy or drifted path exploration. We intro-              across reasoning stages, where early heads capture shal-
+            duce ParallaxRAG, a symmetric multi-view                  low relational patterns while later heads handle longer-
+            framework that decouples queries and KGs                  hop dependencies. (b) In standard KG-RAG, all reason-
+            into aligned, head-specific semantic spaces. By           ing hops are collapsed into a single embedding space,
+            enforcing relational diversity across multiple            suppressing hop-specific semantic structure.
+            heads while constraining weakly related paths,
+            ParallaxRAG constructs more accurate, cleaner
+            subgraphs and guides LLMs through grounded,                  Our analysis identifies an architectural property
+            hop-wise reasoning. On WebQSP and CWQ,                    of Transformers that is directly relevant to this prob-
+            it achieves state-of-the-art retrieval and QA             lem, where different attention heads consistently
+            performance, substantially reduces hallucina-             specialize in distinct semantic relations across rea-
+            tion, and generalizes strongly to the biomed-
+                                                                      soning stages, forming a hop-aligned pattern. Some
+            ical BioASQ benchmark. Our implementa-
+            tion is available at https://github.com/                  attention heads primarily contribute to the early
+            LucaLiu1313/ParallaxRAG.                                  stages of reasoning, while others specialize in later-
+                                                                      stage reasoning and make dominant contributions
+                                                                      as the reasoning process deepens. This observa-
+       1    Introduction
+                                                                      tion suggests that multi-hop reasoning is inherently
+       Multi-hop reasoning over KGs remains a chal-                   multi-view, with different hops requiring distinct
+       lenge for LLMs. Although RAG improves fac-                     representational subspaces.
+       tual grounding (Lewis et al., 2020), existing KG-                 Current KG-RAG approaches do not leverage
+       RAG systems still struggle with long reason-                   this structure. Most methods encode queries and
+       ing chains (Luo et al., 2023), compounding er-                 graph triples into a single embedding space (Fu
+       rors (Mavromatis and Karypis, 2024), and the                   et al., 2020; Ji et al., 2021), which conflates hop-
+       rapid expansion of irrelevant graph paths (He et al.,          specific semantics and hinders step-wise reason-
+       2024). These issues limit both the accuracy and                ing. This monolithic representation causes early-
+       robustness of downstream question answering.                   hop signals to interfere with deeper relational com-
+           * Corresponding author                                     position, increasing noise and reducing retrieval
+                                                                26637
+   Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 26637–26655
+                                    July 2-7, 2026 ©2026 Association for Computational Linguistics
+
+===== PDF p.2 =====
+precision (Liu et al., 2023). Iterative LLM-based       2     Related Work
+reasoning (Sun et al., 2023) offers partial improve-
+                                                        2.1    Retrieval-Augmented Generation (RAG)
+ments but introduces high latency and lacks an
+explicit mechanism for hop decomposition over           RAG was proposed to ground LLMs in exter-
+KGs. These limitations indicate a structural mis-       nal knowledge to mitigate hallucination (Lewis
+match: multi-hop reasoning requires hop-separated       et al., 2020). Dense retrievers showed strong re-
+semantics, yet existing KG-RAG systems enforce          sults (Karpukhin et al., 2020; Izacard et al., 2022;
+a single shared embedding basis.                        Gao et al., 2023), but struggled with unstruc-
+   To instantiate this principle, we introduce Paral-   tured or redundant data (Izacard and Grave, 2020;
+laxRAG, a framework based on symmetric multi-           Petroni et al., 2020). KG-RAG leveraged structured
+head decoupling. We leverage transformer multi-         KGs (Peng et al., 2024) to enable more precise
+head activations to decompose queries into multi-       evidence retrieval. GNN-RAG (Mavromatis and
+view representations (Vaswani et al., 2017; Besta       Karypis, 2024) propagated information via graph
+et al., 2024), while projecting the KG triples into     neural networks, encoding queries and triples into a
+aligned multi-faceted latent spaces (Mavromatis         shared embedding space. SubgraphRAG (Li et al.,
+and Karypis, 2024; Li et al., 2024). Two mecha-         2024) improved subgraph retrieval quality through
+nisms operationalize this framework: (1) a Pairwise     lightweight structural scoring. Both approaches,
+Similarity Regularization (PSR) module integrated       however, operated in a single, monolithic embed-
+into the Distance Encoding (DE) stage, which en-        ding space and did not model relational structure
+forces head-level specialization and prevents repre-    at the level of individual reasoning hops. We in-
+sentational collapse; and (2) a lightweight retrieval   stead focus on query–graph representations that
+component that consolidates head-specific infor-        explicitly decompose reasoning by hops.
+mation to reduce noise and improve alignment be-
+tween queries and graph structure (Khattab and          2.2    Multi-Head Embeddings
+Zaharia, 2020).                                         Multi-head attention (MHA) variants improved em-
+   Our main contributions are as follows:               beddings across modalities, e.g., visual semantic
+                                                        alignment via self-attention (Park et al., 2020),
+   • Multi-head decoupling architecture for
+                                                        redundancy reduction (Bhojanapalli et al., 2021;
+     KG-RAG. We propose the first KG-RAG
+                                                        Bian et al., 2021), and low-resource multilingual
+     framework that decouples queries and KGs
+                                                        tasks (Vashisht et al., 2025). Recent interpretabil-
+     into head-specific views, allowing attention
+                                                        ity work has shown that attention heads in LLMs
+     heads to capture complementary relational
+                                                        tend to specialize in distinct semantic roles, exhibit-
+     cues at different reasoning depths. We also in-
+                                                        ing consistent patterns across inputs and architec-
+     troduce a joint exploration–exploitation strat-
+                                                        tures (Zheng et al., 2025; Basile et al., 2025). In
+     egy, namely PSR and weakly supervised gat-
+                                                        RAG, MRAG (Besta et al., 2024) leveraged multi-
+     ing which enhances robustness and promotes
+                                                        ple attention heads as parallel retrieval channels to
+     specialization.
+                                                        capture diverse semantic aspects of a query, work-
+   • Head specialization in multi-hop reasoning.        ing well for unstructured textual corpora. How-
+     We provide the first empirical evidence of a       ever, MRAG was designed around independent,
+     relay effect, where distinct head groups dom-      non-aligned head channels, where query represen-
+     inate different stages of multi-hop reasoning.     tations and context embeddings need to be pro-
+     New metrics quantify head-level contribution       jected into consistent semantic subspaces across
+     and effectiveness.                                 reasoning hops. We address this gap by symmet-
+                                                        rically decomposing both queries and KG triples
+   • State-of-the-Art Performance and Cross-
+                                                        into shared head-specific subspaces.
+     Domain Generalization.           ParallaxRAG
+     achieves state-of-the-art results on WebQSP        2.3    Multi-Hop QA
+     and CWQ, and generalizes to the biomedical
+                                                        Prior methodologies generally bifurcated into en-
+     BioASQ benchmark. Under zero-shot trans-
+                                                        hancing LLM reasoning via decomposition or
+     fer, it surpasses the previous SOTA by 7.32
+                                                        prompting (Perez et al., 2020; Fu et al., 2021; Wei
+     Macro-F1, demonstrating transferable reason-
+                                                        et al., 2022), and improving retrieval via iterative or
+     ing capabilities across domains.
+                                                        adaptive methods (Trivedi et al., 2022; Asai et al.,
+                                                   26638
+
+===== PDF p.3 =====
+I. Preprocess                                                                                                                                                              Knowledge Graph
+                                                         Structured Triples                                                      Entity & Relation Extraction
+                                                                                                                                                                            Randy Rhoads
+                                                                                                                                                                                         Black Sabbath
+                                                                                                                                                                                Ozzy Osbourne
+                 (Ozzy Osbourne, born_in, Birmingham), (Geezer Butler, plays_instrument, Bass Guitar),                                                                           Jackson    Tony lommi
+                                                                                                                                                                                         Marshall
+                 (Tony Iommi, lost_fingertips_in, Industrial Accident), (Marshall, manufactured_by, Marshall Amplification)...
+                                                                                                                                                                                       Gibson
+
+
+                                                                                                                                                                           Multi-Hop Question
+
+                                                                                                                                  What brands of electric guitars did the guitarists play
+                      Embedding Model (Multi-Head)
+                                                                                                                                     in the bands British singer Ozzy Osbourne was in?
+
+                          Graph Views                                                       Question Views
+                                                                                                                                                                Precondition
+                            Graph View1                                                        Question View1
+                                                        Alignment
+                                                                        What brands of electric guitars did the guitarists play                                              Relevant Triples
+                                                                         in the bands British singer Ozzy Osbourne was in?                  (d)                     (Ozzy Osbourne, was_singer_of, Black Sabbath),
+                                                                                                                                                                     (Tony Iommi, was_guitarist_of, Black Sabbath)
+                                                                                                                                                                       (Tony Iommi, used_guitar_brand, Gibson),
+                                                                                                                                                                      (Randy Rhoads, used_guitar_brand, Jackson)
+                            Graph View2                                                        Question View2                                                                            ...
+                                                        Alignment
+                                                                        What brands of electric guitars did the guitarists play
+                                                                         in the bands British singer Ozzy Osbourne was in?                                                           Prompt
+      (a)                                                                                                                                                                  LLM Prompting
+                                ···                                                                  ···
+                            Graph Viewh                                                                                                                                             Answer
+                                                                                               Question Viewh
+                                                        Alignment                                                                                                         Guitarists in Ozzy Osbourne's
+                                                                        What brands of electric guitars did the guitarists play                                           bands, such as Tony Iommi and
+                                                                                                                                                                          Randy Rhoads, performed with
+                                     ···                                 in the bands British singer Ozzy Osbourne was in?
+                                                                                                                                                                           iconic guitar brands including
+                                                                                                                                                                                Gibson and Jackson.
+
+
+
+                                  (b)                                                                 (c)
+ II. Retrieval                                                                                                                             (e)                  III. Generate
+
+
+
+Figure 2: The architecture of ParallaxRAG, illustrating its three main stages: Preprocess, Retrieval, and Generate.
+The core retrieval process begins by creating specialized multi-view representations for both the graph (b) and the
+question (c), a process guided by directional distance encoding and regularized by pairwise similarity (a). Next,
+candidate triples are scored in parallel across these diverse views (d). Finally, a query-aware gating mechanism
+computes head importance (e) to produce a weighted aggregation of the scores, identifying the most relevant triples
+for the final generation stage.
+
+
+2024). LLM-prompted methods such as Struct-                                                                    consistent manner. However, most KG-RAG sys-
+GPT (Jiang et al., 2023) and ToG (Sun et al., 2023)                                                            tems collapse this process into a single embedding
+enabled step-wise KG traversal but required multi-                                                             space, which obscures step-wise structure. Par-
+ple LLM calls and incurred high latency. EtD (Liu                                                              allaxRAG builds on the intuition that each rea-
+et al., 2024) reduced cost with a lightweight GNN                                                              soning hop should be represented from a distinct
+retriever, but operated within a single-view embed-                                                            perspective. By decomposing both the query and
+ding space. Path-based methods such as RoG (Luo                                                                the graph into multiple, aligned views, and regu-
+et al., 2023) planned relation paths with full su-                                                             lating their interaction through a balanced explo-
+pervision, treating retrieval and planning as dis-                                                             ration–exploitation process, ParallaxRAG retrieves
+joint stages. RoE (Han et al., 2026) unified ex-                                                               compact, interpretable subgraphs that better sup-
+ploration and generation through Reinforcement                                                                 port multi-hop reasoning.
+Learning (RL) but incurred high trajectory training
+costs. Deep GraphRAG (Li et al., 2026) introduced                                                              3.1         Symmetric Decoupling of Query and
+hierarchical global-local retrieval via RL, yet re-                                                                        Graph Views
+quired complex hierarchy maintenance. Across                                                                   In standard KG-RAG, a complex query is encoded
+these methods, hop-level representation alignment                                                              as a single vector q ∈ Rd , conflating semantics
+between the query and the graph remains largely un-                                                            required for different reasoning stages. We in-
+addressed. We approach this with an encoder-only                                                               stead leverage the internal multi-head structure of a
+Transformer trained under a weakly supervised ob-                                                              Transformer to obtain H specialized query views:
+jective, where multi-head attention is organized to
+reflect the hop structure of multi-hop reasoning.                                                                                    Qviews = {qk ∈ Rdh }H
+                                                                                                                                                         k=1 .                                                       (1)
+
+3     The ParallaxRAG Framework                                                                                Concretely, we extract qk from the [CLS] rep-
+                                                                                                               resentation of the final Transformer layer: the H
+Multi-hop reasoning over knowledge graphs re-                                                                  attention heads naturally partition the hidden state
+quires connecting multiple relational steps in a                                                               into H complementary subspaces of dimension
+                                                                                                    26639
+
+===== PDF p.4 =====
+dh = d/H, each capturing a distinct semantic facet                where β controls the penalty strength. This keeps
+of the query. A shared linear projection Wproj maps               the retrieval process exploratory, where heads re-
+each head slice to the same dh -dimensional space                 main distinct, each probing a different facet of the
+and is applied symmetrically to entity and relation               graph.
+texts, yielding ek , rk ∈ Rdh . This design aligns
+                                                                  Head-Specific Triple Scoring. Under each head
+the query and the graph across multiple seman-
+                                                                  k, a candidate triple τ = (h, r, t) is scored by a
+tic dimensions, allowing each head to focus on a
+                                                                  shared MLP over the concatenation of the query
+particular aspect such as entity grounding or rela-
+                                                                  view, augmented entity, and relation representa-
+tional chaining. Unlike MRAG (Besta et al., 2024),
+                                                                  tions, where ẽk = [ek ; δk ] denotes the entity em-
+which primarily leverages multiple heads as paral-
+                                                                  bedding concatenated with its DE structural fea-
+lel embedding channels for multi-aspect retrieval,
+                                                                  tures, and superscripts h and t refer to the head and
+our symmetric decomposition explicitly enforces
+                                                                  tail entity of τ respectively:
+alignment between query and graphs within each
+                                                                                                                  
+head. This design encourages each head to special-                          zk (τ ) = MLP [qk ; ẽhk ; rk ; ẽtk ] . (5)
+ize in a coherent semantic role shared by both the
+query and the graph, facilitating more structured                 Stacking scores across all triples and heads yields
+hop-wise reasoning.                                               Z ∈ R|E|×H , which the query-aware gate then
+                                                                  aggregates into a final ranking.
+3.2 Balancing Exploration and Exploitation                        Exploitation: Query-Aware Gating with Weak
+Creating multiple semantic views introduces flex-                 Supervision. To focus retrieval on the most rel-
+ibility but also tension: the model must encour-                  evant heads for a given question, a lightweight
+age heads to explore distinct reasoning cues, yet                 gate maps the global query embedding q to head-
+prevent them from drifting toward irrelevant or re-               importance weights
+dundant information. ParallaxRAG balances them
+through exploration for head diversity and exploita-                          α = softmax(Wg q) ∈ RH .               (6)
+tion for query relevance.                                         Each head’s shared MLP scores candidate triples
+                                                                  via Eq. equation 5, yielding Z ∈ R|E|×H ; gated
+Exploration: Pairwise Similarity Regulation.
+                                                                  aggregation produces
+To encode structural context, we adopt Distance
+Encoding (DE) (details in A.1), which propagates                          s = Zα,          Ppred = softmax(s).       (7)
+signals from the topic entity via Lf forward and Lr
+reverse message-passing layers, yielding per-head                 For each question, we extract the shortest paths
+structural features δk . At each DE layer ℓ, head k               linking its topic and answer entities in the KG.
+integrates neighborhood context via:                              Triples on these paths (Tsp ) form the weak supervi-
+                                                                  sion signal, defining a normalized target distribu-
+   (ℓ+1)
+                        X             1      (ℓ)                  tion:
+ F̃k       (vi ) =                          F (vj )W (ℓ) . (2)
+                                   |N (vi )| k                                               I[τ ∈ Tsp ] wτ
+                     vj ∈N (vi )                                          Ptrue (τ ) = P                         .   (8)
+                                                                                         τ ′ ∈E I[τ ∈ Tsp ] wτ ′
+                                                                                                   ′
+
+While this process spreads information across en-
+                                                                  The retriever is trained end-to-end by minimizing
+tities, multiple heads could converge to similar ac-
+tivation patterns. To maintain diversity, PSR mea-                               L = KL(Ptrue ∥Ppred ),              (9)
+sures the overlap among heads via their activation
+summaries:                                                        which guides the gate and heads to emphasize
+                                                                  triples composing the shortest topic–answer rea-
+               (ℓ+1)
+             F̃k    1d                          X (ℓ) (ℓ)         soning chains.
+  (ℓ)                                   (ℓ)
+ sk =         (ℓ+1)
+                          ,           rk =       ⟨sk , sj ⟩.
+           ∥F̃k     1d ∥2                       j̸=k              3.3   Grounded Reasoning with LLMs
+                                              (3)                 The top-k retrieved triples are linearized and
+Each head’s update is then adaptively scaled by a                 concatenated with the question, together with a
+diversity coefficient:                                            one-shot demonstration, to construct an evidence-
+                                       (ℓ)
+                                                                  grounded prompt for the LLM. This prompt formu-
+                   (ℓ+1)                      (ℓ+1)
+                Fk         = e−βrk F̃k                ,    (4)    lation provides explicit relational context for each
+                                                               26640
+
+===== PDF p.5 =====
+Table 1: Main retrieval recall evaluation results for different models on WebQSP and CWQ datasets.
+
+                                           Shortest Path Triple Recall                     GPT-4o Triple Recall                     Answer Entity Recall
+Model                                WebQSP                    CWQ                 WebQSP                   CWQ               WebQSP                CWQ
+                                     1       2       1       2      ≥3      1       2       1       2      ≥3      1       2       1       2      ≥3
+                                  (65.8%) (34.2%) (28.0%) (65.9%) (6.1%) (65.8%) (34.2%) (28.0%) (65.9%) (6.1%) (65.8%) (34.2%) (28.0%) (65.9%) (6.1%)
+cosine similarity                  0.874    0.405     0.629    0.442     0.333   0.847     0.483    0.629   0.511   0.464   0.943   0.253   0.903   0.472   0.289
+SR+NSM w E2E                       0.565    0.324       -        -         -     0.580     0.376      -       -       -     0.916   0.301     -       -       -
+Retrieve-Rewrite-Answer            0.064    0.046       -        -         -     0.062     0.061      -       -       -     0.745   0.729     -       -       -
+RoG                                0.869    0.415     0.766    0.597     0.253   0.446     0.271    0.347   0.293   0.122   0.874   0.677   0.920   0.827   0.628
+G-Retriever                        0.335    0.216     0.134    0.205     0.168   0.345     0.284    0.159   0.240   0.226   0.596   0.446   0.377   0.384   0.269
+GNN-RAG                            0.532    0.502     0.515    0.498     0.446   0.384     0.445    0.328   0.408   0.418   0.810   0.831   0.853   0.841   0.787
+SubgraphRAG                        0.954    0.720     0.845    0.826     0.609   0.895     0.768    0.787   0.810   0.725   0.979   0.844   0.937   0.918   0.683
+ParallaxRAG (Decoupled + Gated)    0.963    0.756     0.891    0.809     0.568   0.916     0.820    0.829   0.842   0.759   0.976   0.884   0.958   0.928   0.753
+ParallaxRAG                        0.966    0.761     0.916    0.818     0.578   0.923     0.825    0.847   0.845   0.760   0.986   0.899   0.962   0.935   0.771
+
+
+
+
+reasoning step and ensures that the model’s genera-                                      CoT (Zhao et al., 2024), StructGPT (Jiang et al.,
+tion remains aligned with hop-specific evidence de-                                      2023), ToG (Sun et al., 2023), EtD (Liu et al.,
+rived from the multi-view retriever. Details shows                                       2024), SubgraphRAG(Zhang et al., 2022), REL-
+in Appendix B.3.                                                                         RAG(Yao et al., 2025) and GraphRAG-FI(Guo
+                                                                                         et al., 2025) Following (Zhang et al., 2022), we
+4    Experiments                                                                         adopt the RoG-Sep variant to avoid label leakage
+We design a series of experiments to examine                                             in RoG-Joint training.
+whether multi-view decoupling leads to more reli-                                        Implementation Details. All retrievers use the
+able and interpretable multi-hop reasoning. Specif-                                      BGE-M31 encoder for consistency. Baselines are
+ically, we investigate three key questions: RQ1:                                         reproduced from official implementations. Key
+Does ParallaxRAG retrieve cleaner and more rele-                                         hyperparameters and training details are listed in
+vant subgraphs efficiently? RQ2: Do multi-head                                           Appendix B. Results using alternative backbones
+views specialize in different reasoning stages and                                       are shown in Appendix C.3.
+improve retrieval quality? RQ3: Can ParallaxRAG
+enhance answer grounding and reduce hallucina-                                           Metrics. We report both retrieval and end-to-end
+tion in end-to-end KGQA? Sections 4.2, 4.4 and                                           performance. Retrieval: (i) shortest-path triple re-
+4.5 address RQ1, Section 4.3 analyzes RQ2, and                                           call, (ii) GPT-4o–verified triple recall (validating
+Section 4.4 further studies RQ3.                                                         the correctness of recalled triples), and (iii) answer-
+                                                                                         entity recall, averaged per query and broken down
+4.1 Experiment Setup                                                                     by hop length, we report two ParallaxRAG configu-
+Datasets. We use WebQSP (Yih et al., 2016) and                                           rations, one with the decoupled-and-gated architec-
+CWQ (Talmor and Berant, 2018) as benchmarks                                              ture alone and one with additional PSR, to disentan-
+and further test cross-domain generalization on                                          gle the structural contribution from regularization
+BioASQ (Tsatsaronis et al., 2015), which requires                                        effects. Efficiency: wall-clock inference time on
+biomedical factual reasoning.                                                            a 48GB RTX 6000 Ada GPU (excluding KG I/O).
+                                                                                         End-to-end QA: Macro-F1 and Hit scores on We-
+Baselines.
+                                                                                         bQSP/CWQ, plus domain metrics on BioASQ.
+   Retrieval Baselines. We compare against rep-
+resentative retrieval paradigms, structure-free (Co-                                     4.2       Retrieval Performance (RQ1)
+sine Similarity (Li et al., 2024)), path-based                                           Notably, even without PSR, the decoupled-and-
+(SR+NSM (Zhang et al., 2022), Retrieve-Rewrite-                                          gated ParallaxRAG configuration already outper-
+Answer (Wu et al., 2023), RoG (Luo et al.,                                               forms almost all baseline retrievers across both
+2023)), hybrid (G-Retriever (He et al., 2024)), and                                      datasets, especially on Answer Entity Recall, indi-
+GNN-based (GNN-RAG (Mavromatis and Karypis,                                              cating that the core multi-view architecture itself
+2024)), spanning a broad spectrum from flat vector                                       provides a strong inductive bias for multi-hop re-
+matching to graph-structured reasoning.                                                  trieval. Pairwise Similarity Regulation (PSR) fur-
+                                                                                         ther strengthens this effect, particularly on longer-
+   End-to-End KGQA Baselines. We further
+                                                                                         hop queries, by preventing head collapse and im-
+evaluate against state-of-the-art KGQA mod-
+els—UniKGQA (Jiang et al., 2022), KD-                                                       1
+                                                                                                https://huggingface.co/BAAI/bge-m3
+
+                                                                                 26641
+
+===== PDF p.6 =====
+proving robustness under combinatorial expansion.                                            distinct head groups take over successively as rea-
+  In terms of efficiency, ParallaxRAG remains                                                soning deepens.
+computationally lightweight, requiring 40 seconds                                               We quantify this specialization by training a lin-
+on WebQSP and 84 seconds on CWQ (excluding                                                   ear probe to predict reasoning depth from head ac-
+KG I/O), compared to 948 and 2327 seconds for                                                tivations, achieving 52.3% accuracy compared to a
+RoG, 672 and 1530 seconds for G-Retriever.                                                   25% random baseline, demonstrating that head acti-
+                                                                                             vations encode distinct reasoning stages. To exam-
+Table 2: Question-answering performance on WebQSP                                            ine the functional role of specialist heads, we per-
+and CWQ. The Hallucination (Hallu.) score is evaluated                                       form a Difference-in-Differences-in-Differences
+on a subset that excludes samples where the answer
+entity is not in the KG, following (Li et al., 2024). Our
+                                                                                             (DDD) analysis comparing performance drops af-
+generaters use the top 100 retrieved triples by default;                                     ter ablating specialist versus random heads across
+results for 200 and 500 (indicated in parentheses) are                                       short and long queries:
+also shown. Best results are in bold. Results with (↔)
+                                                                                              DDD = [(∆Specialist
+                                                                                                       Long       − ∆Specialist )] − [(∆Random
+                                                                                                                                        Long   − ∆Random
+                                                                                                                                                  Short )]
+evaluate retriever generalizability, where the retriever is                                                          Short
+
+trained on one dataset and applied to the other.                                             where ∆ denotes the post-ablation performance
+                                             WebQSP                      CWQ
+                                                                                             difference. A significant negative DDD value of -
+Model                             Macro-F1      Hit    Hallu. Macro-F1    Hit     Hallu.     0.0184 (95% CI: [-0.0248, -0.0045], p=0.0055) pro-
+(A) Neural Methods                                                                           vides functional evidence that specialist heads are
+UniKGQA                              72.2        -       -       49.0       -       -
+SR+NSM w E2E                         64.1        -     64.44     46.3       -       -        non-substitutable, playing distinct roles in multi-
+(B) Multi-turn LLM Reasoning Methods
+KD-CoT                                52.5      68.6     -        -        55.7     -
+                                                                                             hop reasoning.
+ToG (GPT-4)
+StructGPT
+                                       -
+                                       -
+                                                82.6
+                                               74.69
+                                                         -
+                                                         -
+                                                                  -
+                                                                  -
+                                                                           67.6
+                                                                            -
+                                                                                    -
+                                                                                    -           To further confirm this, we conduct controlled
+Retrieve-Rewrite-Answer                -       79.36     -        -         -       -
+RoG-Joint                            70.26     86.67   76.13    54.63     61.94   55.15      disruption experiments on CWQ under three condi-
+RoG-Sep                              66.45     82.19   72.79    53.87     60.55   54.51
+RoG + GraphRAG-FI                    73.86     89.25     -      55.12     64.82     -        tions: Drop Long-Hop Heads removes the long-
+(C) RAG-based Methods
+G-Retriever                         53.41      73.46   67.97      -         -       -
+                                                                                             hop-associated head groups (8,9,12) identified from
+EtD
+GNN-RAG
+                                      -
+                                     71.3
+                                                82.5
+                                                85.7
+                                                         -
+                                                         -
+                                                                  -
+                                                                 59.4
+                                                                           62.0
+                                                                           66.8
+                                                                                    -
+                                                                                    -
+                                                                                             Figure 3; Shuffle Heads randomly permutes the
+SubgraphRAG + GPT-4o
+REL-RAG + GPT-4o-mini
+                                    76.46
+                                    78.7
+                                               89.80
+                                               92.5
+                                                       81.85
+                                                         -
+                                                                59.08
+                                                                58.6
+                                                                          66.69
+                                                                           68.3
+                                                                                  66.57
+                                                                                    -
+                                                                                             head-to-query-view assignment; and All applies
+(D) Ours Methods                                                                             both simultaneously. As Table 3 shows, drop-
+ParallaxRAG + Llama3.1-8B           71.73      86.85   83.64    48.33     58.41   66.12
+ParallaxRAG + Qwen3-30B             75.24      91.60   75.45    59.25     65.30   57.18      ping long-hop heads has negligible effect on 1-hop
+ParallaxRAG + Qwen3-30B (200)       76.07      92.48   76.23    59.31     66.21   58.06
+ParallaxRAG + Qwen3-30B (500)       76.11      93.26   77.86    59.18     64.52   60.07      queries but substantially degrades ≥3-hop perfor-
+ParallaxRAG + GPT-4o (200)          78.80      93.53   82.94    62.31     70.74   66.69
+(E) Cross-dataset Generalization (↔)
+                                                                                             mance by 0.262 absolute. Shuffling head alignment
+SubgraphRAG + Llama3.1-8B (↔)
+ParallaxRAG + Llama3.1-8B (↔)
+                                     66.42
+                                     69.22
+                                               83.42
+                                               89.51
+                                                       80.09
+                                                       82.64
+                                                                37.96
+                                                                45.28
+                                                                          48.57
+                                                                          54.82
+                                                                                  56.78
+                                                                                  60.04      impairs all hop depths, with degradation scaling
+                                                                                             with query complexity. These asymmetric patterns
+                                                                                             confirm that the identified head groups play co-
+Table 3: Answer Entity Recall under controlled disrup-                                       ordinated, non-interchangeable roles in multi-hop
+tion on CWQ, broken down by hop depth. Long-hop-                                             reasoning over knowledge graphs.
+associated heads are functionally non-substitutable.
+                                                                                             4.4    End-to-End KGQA with RAG (RQ1 &
+                                               Answer Entity Recall                                 RQ3)
+ Condition                         1-hop        2-hop          ≥3-hop      Overall
+                                                                                             We next examine whether the retrieval and head-
+ ParallaxRAG Baseline              0.959        0.926          0.763            0.883
+ Drop Long-Hop Heads               0.958        0.777          0.501            0.745
+                                                                                             specialization advantages of ParallaxRAG lead to
+ Shuffle Heads                     0.734        0.532          0.468            0.578        improvements in downstream question answering.
+ All                               0.734        0.446          0.421            0.534
+                                                                                             As shown in Table 2, when paired with Llama3.1-
+                                                                                             8B and 100 retrieved triples, ParallaxRAG attains
+                                                                                             a Macro-F1 of 71.73 and Hit of 86.85 on WebQSP,
+4.3 Attention Head Specialization (RQ2)                                                      and 48.33 Macro-F1 and 58.41 Hit on CWQ. Com-
+Figure 3 reveals a clear division of labor among                                             bined with GPT-4o and 200 triples, it establishes
+ParallaxRAG’s attention heads that adapts to query                                           new state-of-the-art results, reaching 78.80 Macro-
+complexity. For short-hop questions in WebQSP,                                               F1 and 93.53 Hit on WebQSP, and 62.31 Macro-F1
+early heads dominate across reasoning steps. As                                              and 70.74 Hit on CWQ. The gain from a stronger
+the reasoning chain extends in CWQ, later heads be-                                          generator is disproportionately larger on CWQ, sug-
+come increasingly active at deeper reasoning steps.                                          gesting that for complex multi-hop chains the gen-
+This dynamic shift forms a relay pattern, where                                              erator’s capacity to integrate multi-relational evi-
+                                                                                          26642
+
+===== PDF p.7 =====
+(a) WebQSP: Early-Step Specialization for Short-Chain Reasoning
+
+
+
+
+                      (b) CWQ: Dynamic Head Specialization Switching for Long-Chain Reasoning
+
+Figure 3: Visualization of attention head specialization, revealing a task-adaptive division of labor. The heatmaps
+display three metrics (Contribution, Use Rate, Hit Rate) for the top 5 specialist heads, selected from our BGE-based
+model’s 16 heads according to their overall contribution. The Others row aggregates the remaining 11 heads: for
+Contribution, this value is the sum of their contributions, while for Use Rate and Hit Rate, it is their average, see
+more explanation in (Appendix C). We define steps as the BFS expansion depth along reasoning paths, rather than
+the conventional hop (shortest-path length), in order to capture head behaviors at each layer of candidate exploration.
+(a) On WebQSP (short chains). (b) On CWQ (long chains).
+
+
+dence becomes the binding constraint once retrieval          performance (standard deviation below 1.4 Macro-
+quality is sufficient. Expanding the retrieval budget        F1 points). Improvements over strong baselines
+from 100 to 200 triples yields moderate gains on             are statistically significant via paired bootstrap re-
+both datasets, while further expansion to 500 triples        sampling (p < 0.05); full details are reported in
+provides negligible improvement on WebQSP and                Appendix D.1.
+slightly hurts CWQ, indicating that retrieval pre-
+cision rather than coverage is the key driver of             4.5   Domain Generalization (RQ1)
+downstream accuracy.
+                                                             To evaluate cross-domain robustness, we test Par-
+   Beyond overall accuracy, ParallaxRAG improves             allaxRAG on the biomedical BioASQ benchmark
+reliability by reducing hallucinated generations.            (Task B), which covers Yes/No, Factoid, and List
+On hallucination-controlled subsets (Li et al.,              questions. The retriever is trained on CWQ and
+2024), hallucination scores decrease by 1.22% on             transferred without retraining. We use Qwen3-Plus
+WebQSP and 3.23% on CWQ, indicating that the                 as the generator and report official metrics for each
+retrieved subgraphs are not only sufficient but also         question type.
+cleaner and more grounded. Qualitative examples                 As shown in Table 4, ParallaxRAG achieves the
+in Appendix E further illustrate this effect: for            best Yes/No results, with an accuracy of 0.9351
+long-chain CWQ questions, ParallaxRAG retrieves              and a Macro-F1 of 0.9252, outperforming strong
+fewer but more relevant triples, enabling coher-             general-purpose LLMs. On Factoid questions, it
+ent reasoning chains that accurately support the             attains a lenient accuracy of 0.8222 and an MRR
+final answers. To assess reproducibility, we con-            of 0.8667, reflecting effective multi-view reason-
+ducted five independent runs and observed stable             ing even under domain shift. For List questions,
+                                                        26643
+
+===== PDF p.8 =====
+Table 4: Generalization on BioASQ Task B, where the retriever is trained on CWQ and transferred without fine-
+tuning. We compare the performance of Qwen3-Plus, Single-View and ParallaxRAG (Multi-View), isolating the
+contribution of the retrieval design
+
+                                      Yes/No Questions                     Factoid Questions              List Questions
+ Model
+                              Acc.    F1 Yes   F1 No     Macro F1      Strict    Lenient   MRR      Prec.    Recall         F1
+ Deepseek-R1-8B              0.9077   0.9312   0.8558      0.8935      0.2620     0.2733   0.2677   0.3982   0.3427     0.3517
+ GPT4-Turbo                  0.9129   0.9357   0.8616      0.8986      0.5505     0.6515   0.6010   0.5788   0.4857     0.5051
+ GPT-4o                      0.9140   0.9347   0.8670      0.9009      0.3462     0.3462   0.3462   0.5102   0.4025     0.4330
+ Qwen3-Plus                  0.9012   0.9255   0.8402      0.8829      0.3219     0.6213   0.4132   0.5682   0.3989     0.4563
+ Single-View + Qwen3-Plus    0.9112   0.9267   0.8374      0.8821      0.3773     0.7214   0.8462   0.6833   0.4280     0.4464
+ ParallaxRAG + Qwen3-Plus    0.9351   0.9524   0.8980      0.9252      0.4210     0.8222   0.8667   0.7116   0.4569     0.4737
+
+Table 5: Ablation study on WebQSP and CWQ, analyzing the impact of ParallaxRAG’s core multi-head architecture
+and its synergistic mechanisms. Values in parentheses (↓) indicate the performance drop compared to the full model
+(Llama3.1-8B as generator).
+
+                                                                    WebQSP                                  CWQ
+         Configuration                                  Macro-F1                 Hit           Macro-F1               Hit
+         ParallaxRAG (Full Model)                         71.73                 86.85            48.33             58.41
+ Multi-Head Architecture Validation
+ (a) Split Vector Baseline                             69.42 (↓2.31)     85.02 (↓1.83)       42.27 (↓6.06)     51.54 (↓6.87)
+ (b) Single Vector Baseline                            70.60 (↓1.13)     86.11 (↓0.74)       44.82 (↓3.51)     52.63 (↓5.78)
+ Synergistic Mechanism Validation
+ (c) Without PSR                                    69.73 (↓0.73)        85.47 (↓0.35)      47.12 (↓1.21)     56.32 (↓2.09)
+ (d) Without Query-Aware Gating                     56.25 (↓15.48)       74.69 (↓12.16)     29.14 (↓19.19)    38.26 (↓20.15)
+
+
+
+ParallaxRAG favors precision over recall, yield-               strating PSR’s role in maintaining head diversity.
+ing a slightly lower F1 than GPT-4-Turbo, which                Eliminating the query-aware gating and replacing it
+suggests a bias toward concise, high-confidence                with simple averaging leads to severe performance
+retrieval.                                                     degradation, with Hit rate drops of 12.16 and 20.15
+   We further compares single-view and multi-view              points, underscoring its necessity for dynamic head
+configurations under the same generator, prompting             weighting and precise retrieval.
+format, and context budget, confirming that the                   Together, removing either component degrades
+gains stem from the multi-view retrieval design                performance substantially, with gating removal
+rather than from the choice of generator.                      causing the sharpest drop (Hit −12.16/−20.15),
+                                                               indicating it is the more critical of the two.
+4.6 Ablation Study
+                                                                5      Conclusion
+First, to verify the role of the multi-head design,
+we compare two simplified baselines. The Split                 We propose ParallaxRAG, a multi-view KG-RAG
+Vector variant divides a single query embedding                framework that explicitly leverages attention head
+into pseudo-heads without true head specialization,            specialization for multi-hop reasoning. By decou-
+causing a Macro-F1 drop of 2.31 on WebQSP and                  pling queries and knowledge graphs into aligned
+6.06 on CWQ. Similarly, the Single Vector variant              head-specific semantic spaces and combining di-
+using a flat embedding, shows performance drops                versity regularization with query-aware aggrega-
+of 1.13 and 3.51 points, confirming that learned               tion, ParallaxRAG retrieves accurate and clean
+multi-head representations are crucial for capturing           subgraphs while remaining efficient. Experiments
+distinct relational cues and mitigating representa-            demonstrate state-of-the-art retrieval and QA per-
+tional collapse.                                               formance on WebQSP and CWQ, reduced halluci-
+   Next, we evaluate the synergistic mecha-                    nation, and zero-shot generalization to the biomed-
+nisms. Removing Pairwise Similarity Regulariza-                ical BioASQ benchmark. Beyond performance
+tion (PSR) yields redundant head behavior and re-              gains, our analysis provides functional evidence
+duces Macro-F1 by 0.73 and 1.21 points, demon-                 suggesting that attention heads tend to specialize in
+                                                          26644
+
+===== PDF p.9 =====
+different stages of multi-hop reasoning and play co-     Acknowledgments
+ordinated, non-substitutable roles within the struc-
+                                                         We thank the anonymous reviewers for their in-
+tured multi-view framework. These results suggest
+                                                         sightful comments and suggestions. This work was
+that modeling head-level semantic specialization is
+                                                         supported by the National Natural Science Foun-
+a practical and generalizable direction for retrieval-
+                                                         dation of China (Grant NO. 62576292), the Zhe-
+augmented multi-hop reasoning over KGs.
+                                                         jiang Province Leading Geese Plan (2025C02025),
+                                                         the Science and Technology Program of Huzhou
+6   Limitations and Future Work                          (Grant NOs. 2023GZ42 and 2024GZ09), and
+                                                         in part by the Yangtze Delta Region Institute
+While ParallaxRAG demonstrates strong retrieval          (Huzhou) Guidance Fund of University of Elec-
+performance and effectively captures head-level          tronic Science and Technology of China (Grant
+specialization, we identify several limitations that     NO. U03210054).
+suggest directions for future work.
+   First, our method relies on the quality of the un-
+derlying knowledge graph and embedding model;            References
+errors in these components may propagate to re-          Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, and
+trieval performance. In addition, the current im-          Hannaneh Hajishirzi. 2024. Self-rag: Learning to re-
+                                                           trieve, generate, and critique through self-reflection.
+plementation focuses on static knowledge graphs
+and does not address dynamic or continuously up-         Lorenzo Basile, Valentino Maiorca, Diego Doimo,
+dated settings. We leave extensions to noisier and         Francesco Locatello, and Alberto Cazzaniga. 2025.
+larger-scale knowledge sources as future work.             Head pursuit: Probing attention specialization in mul-
+                                                           timodal transformers. In Advances in Neural Infor-
+   Second, our training relies on shortest-path            mation Processing Systems, volume 38. Spotlight.
+triples as weak supervision signals, following es-
+                                                         Maciej Besta, Ales Kubicek, Robert Gerstenberger,
+tablished practice in prior work (Luo et al., 2023).      Marcin Chrapek, Roman Niggli, Patrik Okanovic,
+While shortest paths are a practical and scalable         Yi Zhu, Patrick Iff, Michal Podstawski, Lucas
+source of supervision, they may not always repre-         Weitzendorf, and 1 others. 2024. Multi-head rag:
+sent the optimal reasoning route, and this choice         Solving multi-aspect problems with llms. arXiv
+                                                          preprint arXiv:2406.05085.
+may introduce a bias toward shortest-path evidence.
+That said, our primary evaluation metric, Answer         Srinadh Bhojanapalli, Ayan Chakrabarti, Andreas Veit,
+Entity Recall, requires only that the gold answer           Michal Lukasik, Himanshu Jain, Frederick Liu, Yin-
+entity appear in the retrieved subgraph regardless          Wen Chang, and Sanjiv Kumar. 2021. Leveraging re-
+                                                            dundancy in attention with reuse transformers. arXiv
+of the specific path taken, which partially mitigates       preprint arXiv:2110.06821.
+this concern. Developing retrieval supervision
+that incorporates diverse, multi-path annotations        Yuchen Bian, Jiaji Huang, Xingyu Cai, Jiahong Yuan,
+                                                           and Kenneth Church. 2021. On attention redundancy:
+remains an important direction for future work.
+                                                           A comprehensive study. In Proceedings of the 2021
+   Third, as illustrated by our case study, the ben-       conference of the north american chapter of the as-
+efits of multi-view retrieval are most pronounced          sociation for computational linguistics: human lan-
+for complex multi-hop queries, while they may be           guage technologies, pages 930–945.
+less critical for shallow queries (e.g., 1-hop tran-     Bin Fu, Yunqi Qiu, Chengguang Tang, Yang Li,
+sitive relations). In such cases, retrieving a richer      Haiyang Yu, and Jian Sun. 2020. A survey on
+set of evidence across multiple views can introduce        complex question answering over knowledge base:
+                                                           Recent advances and challenges. arXiv preprint
+contextual signals that are not strictly required for      arXiv:2007.13069.
+answering the question. This may increase the bur-
+den on downstream LLMs to reconcile partially            Ruiliu Fu, Han Wang, Xuejun Zhang, Jun Zhou, and
+redundant information, occasionally resulting in           Yonghong Yan. 2021. Decomposing complex ques-
+                                                           tions makes multi-hop qa easier and more inter-
+conservative predictions. This observation aligns          pretable. arXiv preprint arXiv:2110.13472.
+with the observation proposed by (Guo et al., 2025).
+A direction for future work is to develop adaptive       Yunfan Gao, Yun Xiong, Xinyu Gao, Kangxiang Jia,
+                                                           Jinliu Pan, Yuxi Bi, Yixin Dai, Jiawei Sun, Haofen
+retrieval strategies that dynamically modulate re-         Wang, and Haofen Wang. 2023. Retrieval-augmented
+trieval breadth based on estimated query complex-          generation for large language models: A survey.
+ity.                                                       arXiv preprint arXiv:2312.10997, 2(1).
+                                                    26645
+
+===== PDF p.10 =====
+Kai Guo, Harry Shomer, Shenglai Zeng, Haoyu Han,           Mufei Li, Siqi Miao, and Pan Li. 2024. Simple is effec-
+  Yu Wang, and Jiliang Tang. 2025. Empowering               tive: The roles of graphs and large language models
+  GraphRAG with knowledge filtering and integration.        in knowledge-graph-based retrieval-augmented gen-
+  In Proceedings of EMNLP 2025.                             eration. arXiv preprint arXiv:2410.20724.
+Haoyu Han, Kai Guo, Harry Shomer, Yu Wang,                 Yuejie Li, Ke Yang, Tao Wang, Bolin Chen, Bowen Li,
+  Yucheng Chu, Hang Li, Li Ma, and Jiliang Tang.             and Chengjun Mao. 2026. Deep GraphRAG: A bal-
+  2026. Reasoning by exploration: A unified approach         anced approach to hierarchical retrieval and adaptive
+  to retrieval and generation over graphs. In Proceed-       integration. arXiv preprint arXiv:2601.11144.
+  ings of the ACM Web Conference 2026, WWW ’26.
+                                                           Tsung-Yi Lin, Priya Goyal, Ross Girshick, Kaiming He,
+Xiaoxin He, Yijun Tian, Yifei Sun, Nitesh Chawla,            and Piotr Dollár. 2017. Focal loss for dense object
+  Thomas Laurent, Yann LeCun, Xavier Bresson, and            detection. In Proceedings of the IEEE International
+  Bryan Hooi. 2024. G-retriever: Retrieval-augmented         Conference on Computer Vision (ICCV), pages 2980–
+  generation for textual graph understanding and ques-       2988.
+  tion answering. Advances in Neural Information
+  Processing Systems, 37:132876–132907.                    Guangyi Liu, Yongqi Zhang, Yong Li, and Quanming
+Gautier Izacard and Edouard Grave. 2020. Leverag-            Yao. 2024. Explore then determine: A gnn-llm syn-
+  ing passage retrieval with generative models for           ergy framework for reasoning over knowledge graph.
+  open domain question answering. arXiv preprint             arXiv e-prints, pages arXiv–2406.
+  arXiv:2007.01282.
+                                                           Nelson F Liu, Kevin Lin, John Hewitt, Ashwin Paran-
+Gautier Izacard, Patrick Lewis, Maria Lomeli, Lu-            jape, Michele Bevilacqua, Fabio Petroni, and Percy
+  cas Hosseini, Fabio Petroni, Timo Schick, Jane             Liang. 2023. Lost in the middle: How lan-
+  Dwivedi-Yu, Armand Joulin, Sebastian Riedel, and           guage models use long contexts. arXiv preprint
+  Edouard Grave. 2022. Few-shot learning with re-            arXiv:2307.03172.
+  trieval augmented language models. arXiv preprint
+  arXiv:2208.03299, 1(2):4.                                Linhao Luo, Yuan-Fang Li, Gholamreza Haffari, and
+                                                             Shirui Pan. 2023. Reasoning on graphs: Faithful and
+Shaoxiong Ji, Shirui Pan, Erik Cambria, Pekka Martti-        interpretable large language model reasoning. arXiv
+  nen, and Philip S Yu. 2021. A survey on knowledge          preprint arXiv:2310.01061.
+  graphs: Representation, acquisition, and applications.
+  IEEE transactions on neural networks and learning        Costas Mavromatis and George Karypis. 2024. Gnn-
+  systems, 33(2):494–514.                                    rag: Graph neural retrieval for large language model
+                                                             reasoning. arXiv preprint arXiv:2405.20139.
+Jinhao Jiang, Kun Zhou, Zican Dong, Keming Ye,
+   Wayne Xin Zhao, and Ji-Rong Wen. 2023. Struct-          Geondo Park, Chihye Han, Wonjun Yoon, and Daeshik
+   gpt: A general framework for large language model         Kim. 2020. Mhsan: Multi-head self-attention net-
+   to reason over structured data. arXiv preprint            work for visual semantic embedding. In Proceedings
+   arXiv:2305.09645.                                         of the IEEE/CVF winter conference on applications
+                                                             of computer vision, pages 1518–1526.
+Jinhao Jiang, Kun Zhou, Wayne Xin Zhao, and Ji-Rong
+   Wen. 2022. Unikgqa: Unified retrieval and reason-       Boci Peng, Yun Zhu, Yongchao Liu, Xiaohe Bo,
+   ing for solving multi-hop question answering over         Haizhou Shi, Chuntao Hong, Yan Zhang, and Siliang
+   knowledge graph. arXiv preprint arXiv:2212.00959.         Tang. 2024. Graph retrieval-augmented generation:
+Vladimir Karpukhin, Barlas Oguz, Sewon Min,                  A survey. arXiv preprint arXiv:2408.08921.
+  Patrick SH Lewis, Ledell Wu, Sergey Edunov, Danqi
+  Chen, and Wen-tau Yih. 2020. Dense passage re-           Ethan Perez, Patrick Lewis, Wen-tau Yih, Kyunghyun
+  trieval for open-domain question answering. In             Cho, and Douwe Kiela. 2020. Unsupervised ques-
+  EMNLP (1), pages 6769–6781.                                tion decomposition for question answering. arXiv
+                                                             preprint arXiv:2002.09758.
+Omar Khattab and Matei Zaharia. 2020. Colbert: Effi-
+ cient and effective passage search via contextualized     Fabio Petroni, Aleksandra Piktus, Angela Fan, Patrick
+ late interaction over bert. In Proceedings of the 43rd      Lewis, Majid Yazdani, Nicola De Cao, James Thorne,
+ International ACM SIGIR conference on research              Yacine Jernite, Vladimir Karpukhin, Jean Mail-
+ and development in Information Retrieval, pages 39–         lard, and 1 others. 2020. Kilt: a benchmark for
+ 48.                                                         knowledge intensive language tasks. arXiv preprint
+                                                             arXiv:2009.02252.
+Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio
+  Petroni, Vladimir Karpukhin, Naman Goyal, Hein-          Jiashuo Sun, Chengjin Xu, Lumingyuan Tang, Saizhuo
+  rich Küttler, Mike Lewis, Wen-tau Yih, Tim Rock-            Wang, Chen Lin, Yeyun Gong, Lionel M Ni, Heung-
+  täschel, and 1 others. 2020. Retrieval-augmented gen-       Yeung Shum, and Jian Guo. 2023. Think-on-
+  eration for knowledge-intensive nlp tasks. Advances         graph: Deep and responsible reasoning of large lan-
+  in neural information processing systems, 33:9459–          guage model on knowledge graph. arXiv preprint
+  9474.                                                       arXiv:2307.07697.
+                                                      26646
+
+===== PDF p.11 =====
+Alon Talmor and Jonathan Berant. 2018. The web as             prompting of large language models over knowl-
+  a knowledge-base for answering complex questions.           edge graphs for knowledge-aware question answer-
+  In Proceedings of the 2018 Conference of the North          ing. In Proceedings of the Thirty-Third International
+  American Chapter of the Association for Computa-            Joint Conference on Artificial Intelligence (IJCAI-
+  tional Linguistics: Human Language Technologies,            24), pages 6642–6650. International Joint Confer-
+  Volume 1 (Long Papers), pages 641–651.                      ences on Artificial Intelligence.
+Harsh Trivedi, Niranjan Balasubramanian, Tushar           Zifan Zheng, Yezhaohui Wang, Yuxin Huang, Shichao
+  Khot, and Ashish Sabharwal. 2022. Interleav-               Song, Mingchuan Yang, Bo Tang, Feiyu Xiong, and
+  ing retrieval with chain-of-thought reasoning for          Zhiyu Li. 2025. Attention heads of large language
+  knowledge-intensive multi-step questions. arXiv            models: a survey. Patterns, 6(2):101176.
+  preprint arXiv:2212.10509.
+                                                          A     Implementation Details of the
+George Tsatsaronis, Georgios Balikas, Prodromos                 ParallaxRAG Framework
+  Malakasiotis, and 1 others. 2015. An overview of the
+  BIOASQ large-scale biomedical semantic indexing         A.1 Detailed Derivation of Pairwise Similarity
+  and question answering competition. BMC Bioinfor-
+  matics, 16(1):138.
+                                                              Regulation (PSR)
+                                                          The Pairwise Similarity Regulation (PSR) mecha-
+Varun Vashisht, Samar Singh, Mihir Konduskar,
+  Jaskaran Singh Walia, and Vukosi Marivate. 2025.        nism is integrated into each layer of the Distance
+  Mage: Multi-head attention guided embeddings for        Encoding (DE) to foster representational diversity.
+  low resource sentiment classification. arXiv preprint
+  arXiv:2502.17987.                                       1. DE Propagation. Given the initial one-hot
+                                                          topic entity features X0 ∈ RN ×2 , the model per-
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob          forms Lf forward and Lr reverse propagation lay-
+  Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz
+  Kaiser, and Illia Polosukhin. 2017. Attention is all    ers. Each layer ℓ computes a preliminary update
+                                                            (ℓ+1)
+  you need. Advances in neural information processing     F̃k     for each head k via message passing (MP):
+  systems, 30.
+                                                                (ℓ+1)               (ℓ)
+                                                              F̃k       = MP(E, Fk )
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+   Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,                     (forward pass, using edge index E)
+   and 1 others. 2022. Chain-of-thought prompting elic-                                                  (10)
+   its reasoning in large language models. Advances       The reverse pass is analogous, using the transposed
+   in neural information processing systems, 35:24824–
+   24837.                                                 edge index ET .
+
+Yike Wu, Nan Hu, Sheng Bi, Guilin Qi, Jie Ren, An-        2. PSR Computation and Application. After
+  huan Xie, and Wei Song. 2023. Retrieve-rewrite-         each propagation step, the preliminary updates H̃
+  answer: A kg-to-text enhanced llms framework for        are modulated by PSR. The process begins by com-
+  knowledge graph question answering. arXiv preprint                                        (ℓ)
+                                                          puting a node intensity vector sk for each head to
+  arXiv:2309.11206.
+                                                          capture its activation distribution:
+Tianjun Yao, Haoxuan Li, Zhiqiang Shen, Pan Li,                                                      !
+  Tongliang Liu, and Kun Zhang. 2025. Learn-                        (ℓ)
+                                                                                       X (ℓ)
+  ing efficient and generalizable graph retriever for              sk = L2Norm             F̃k [:, d]   (11)
+  knowledge-graph question answering. Preprint,                                                 d
+  arXiv:2506.09645.
+                                                          These vectors are then used to derive a redundancy
+Wen-tau Yih, Ming-Wei Chang, Xiaodong He, and Jian-               (ℓ)
+                                                          score rk from pairwise similarities (cf. Eq. equa-
+  feng Gao. 2016. Value-based neighborhood expan-
+                                                          tion 3), which in turn defines the regulation coeffi-
+  sion: A survey. In Proceedings of the Thirtieth AAAI            (ℓ)
+ Conference on Artificial Intelligence, pages 1780–       cient αk :
+ 1786.                                                                          X (ℓ) (ℓ)
+                                                                          (ℓ)
+                                                                         rk =        ⟨si , sj ⟩
+Jing Zhang, Xiaokang Zhang, Jifan Yu, Jian Tang, Jie
+   Tang, Cuiping Li, and Hong Chen. 2022. Subgraph
+                                                                                j̸=k                      (12)
+   retrieval enhanced model for multi-hop knowledge                         (ℓ)                      (ℓ)
+                                                                           αk = exp(−β · rk )
+   base question answering. In Proceedings of the 60th
+   Annual Meeting of the Association for Computational    Finally, this coefficient performs the final update
+   Linguistics (Volume 1: Long Papers), pages 5773–       by scaling the preliminary update to produce the
+   5784.
+                                                          final layer output:
+Ruilin Zhao, Feng Zhao, Long Wang, Xianzhi Wang,
+                                                                            (ℓ+1)         (ℓ)       (ℓ+1)
+  and Guandong Xu. 2024. Kg-cot: Chain-of-thought                         Fk        = αk · F̃k                (13)
+                                                     26647
+
+===== PDF p.12 =====
+3. Final Representation. The final structural                  format and prepended to the question as context for
+representations Fk for each head are formed by                 a LLM generator. We generate final answers using
+                          (ℓ)
+collecting the outputs {Fk } from all layers, which            nucleus sampling with p = 0.95 and a temperature
+are then used for triple scoring.                              of 0.7.
+
+A.2 Weighted Listwise Training Objective                       B.2   GPT-4o Triple Recall Verification
+                                                                     Protocol
+To handle the severe class imbalance in retrieval,
+we convert the binary weak supervision signal y ∈              In the main retrieval evaluation, GPT-4o is used
+{0, 1}|E| into a weighted target distribution for our          solely as a structured extraction tool to identify
+listwise objective.                                            which retrieved triples are necessary for answering
+                                                               a given question (GPT-4o-verified Triple Recall,
+1. Positive Reweighting. The binary vector y is                Rgpt ). It is not used as an answer generator or for
+first normalized. Then, a weight factor wτ is ap-              any open-ended evaluation. The exact prompt used
+plied to construct the final weighted distribution. In         for supporting-triple extraction is as follows.
+our implementation, we use wτ = 10 for positive
+triples (yτ = 1) and wτ = 1 otherwise. This is                    Prompt format used for GPT-4o triple-
+conceptually similar to the α-balancing in Focal                  recall verification.
+Loss (Lin et al., 2017).                                          System Prompt: Based on the
+                                                                  triplets retrieved from a knowledge
+              yτ                            yτ · wτ
+ yτnorm = P             ,   yτweighted = P                        graph, please select the relevant
+                                          τ ′ (yτ ′ · wτ ′ )
+             τ ′ yτ ′
+                                                                  triplets necessary for answering
+                                                       (14)       the question. Return the selected
+                                                                  triplets as a list, each prefixed
+2. Final Loss Formulation. The model is trained                   with “evidence:”.
+by minimizing the weighted listwise cross-entropy                 User: [Retrieved triples]
+                                                                  [Question from the dataset]
+(equivalent to Eq. equation 9) between the pre-
+dicted distribution Ppred and the target y weighted :
+                                                                 After extraction, triple recall is computed deter-
+                 X                                            ministically via scripted string matching against
+ Llistwise = −          yτweighted log Ppred (τ )+ϵ (15)
+                 τ ∈E
+                                                               annotated ground truth, so the final metric does not
+                                                               depend on GPT-4o’s generative tendencies. To as-
+B     Additional Experiment Setting                            sess extraction stability, we repeated the extraction
+                                                               with three different models (GPT-4o, Qwen3-30B,
+B.1    Implementation Details for ParallaxRAG
+                                                               GLM-4.7) and observed negligible variance (std
+Our model is implemented in PyTorch and PyTorch                ≤ 1.5%). We also manually inspected a random
+Geometric. The ParallaxRAG retriever, which con-               10% subset and found high consistency between
+sists of a BGE-M3 text encoder, a PSR-enhanced                 automated extraction and human judgment.
+DE module, and a scoring MLP, is trained end-to-
+end for up to 100 epochs with an early stopping                B.3   Prompt for Answer Generation
+patience of 20. The forward and reverse propaga-               The detailed prompt template used in our experi-
+tion round is set to 2 rounds, with PSR strength               ments for answer generation is as follows.
+of 0.5. We use the AdamW optimizer with a half-
+cycle cosine annealing with warmup learning rate,              B.4   Hyperparameter Sensitivity Analysis
+during a warmup phase for the first few epochs, the            In this section, we analyze the sensitivity of our
+learning rate linearly increases from 0 to a peak              model to the key hyperparameter β, which controls
+value of 1 × 10−3 . Following the warmup, the                  the strength of the Pairwise Similarity Regulation
+learning rate is smoothly decayed along a cosine               (PSR). We argue that a challenging zero-shot trans-
+curve to a minimum value of 1 × 10−5 . to enable               fer task is the most effective setting to demonstrate
+finer parameter adjustments in the later stages of             PSR’s true diversity impact, as it enables the model
+training. An effective batch size of 2 (via gradi-             to maximally leverage its learned head specializa-
+ent accumulation), and employ a weighted listwise              tion. Therefore, we evaluate a model trained on
+ranking loss.                                                  WebQSP on the CWQ test set, varying β within the
+   For the end-to-end KGQA task, the top-100                   range of {0.2, 0.5, 2.0}, with β = 0 serving as the
+triples retrieved are linearized into a natural text           baseline without diversity regulation.
+                                                          26648
+
+===== PDF p.13 =====
+Prompt format used for QA.
+    System Prompt
+    Based on the triplets from a
+    knowledge graph, please answer the
+    given question. Please keep the
+    answers as simple as possible and
+    return all the possible answers as
+    a list, each with a prefix “ans:”.
+    In-Context Learning (Few-shot)
+    Examples
+                                                         Figure 4: Sensitivity analysis of the PSR strength pa-
+    Triplets:                                            rameter β on the generalization task, where the retriever
+    (Lou Seal, sports.mascot.team, San
+    Francisco Giants)
+                                                         was trained on WebQSP and tested on CWQ-sub, using
+    (San Francisco Giants,                               Llama-3.1-8B as the generator.
+    sports.sports team.championships,
+    2012 World Series)
+    (San Francisco Giants,                               We formally define the concepts of reasoning steps
+    sports.sports championship
+    event.champion, 2014 World Series)
+                                                         and the three metrics used to evaluate head-level
+    (San Francisco Giants,                               performance.
+    time.participant.event, 2014 Major
+    League Baseball season)                              C.1    Defining Reasoning Steps
+    ...
+                                                         To formally quantify head performance during
+    Question:
+    What year did the team with mascot                   multi-hop reasoning, we define steps as the
+    named Lou Seal win the World                         Breadth-First Search (BFS) expansion depth along
+    Series?
+                                                         reasoning paths. This is distinct from the conven-
+    To find the year ...... Therefore,
+    the formatted answers are:
+                                                         tional definition of a hop (i.e., the final shortest-
+    ans: 2014 (2014 World Series)                        path length) and allows us to capture head behav-
+    ans: 2012 (2012 World Series)                        iors at each layer of candidate exploration. For ex-
+    ans: 2010 (2010 World Series)
+    User Prompt                                          ample, if the topic entity is “Barack Obama,” Step-1
+    Triplets:
+                                                         includes triples directly connected to him, such as
+    (ea , rab , eb ),                                    (Obama, born_in, Honolulu). Step-2 then expands
+    (ec , rcd , ed ),                                    from the entities retrieved in Step-1, considering
+    ...
+                                                         candidates like (Honolulu, located_in, Hawaii).
+    Question:
+    What ...?                                            C.2    Head Performance Metrics
+                                                         We define three complementary metrics to evaluate
+                                                         the role and effectiveness of each attention head
+   As shown in Figure 4, the results under this strin-
+                                                         during the reasoning process.
+gent evaluation setting are revealing. A moderate
+PSR strength of β = 0.5 achieves the peak perfor-        Contribution Measures a head’s share of credit
+mance, boosting the Macro-F1 from a baseline of              for retrieving correct triples at a given step.
+50.54 to 50.93 and the Hit rate from 61.87 to 62.51.         It is defined as the proportion of correctly re-
+This performance gain suggests that the diverse rep-         trieved triples for which this head provided
+resentations fostered by PSR are indeed learning             the highest score.
+more generalizable reasoning mechanisms. The
+degradation at a high penalty (β = 2.0) indicates                                        |C(h, t) ∩ At ∩ Gt |
+                                                                Contribution(h, t) =
+the limit of this effect, where excessive suppres-                                           |At ∩ Gt |
+sion can hinder signal propagation. These findings                                                        (16)
+validate our choice of β = 0.5 and confirm that          Use Rate Measures the model’s overall reliance on
+the generalization setting is an effective testbed for       a head. It is the proportion of samples where a
+evaluating the impact of PSR.                                triple scored highest by head h was ultimately
+                                                             selected by the model’s gating mechanism at
+C     Attention Head Analysis Details                        step t.
+This section provides the detailed methodology for                                           |S(h, t)|
+the attention head analysis presented in Section 4.3.                   Use Rate(h, t) =                     (17)
+                                                                                               |St |
+                                                    26649
+
+===== PDF p.14 =====
+Hit Rate Measures the precision of a head’s top-         initial-step specialist (Contribution: 0.43, Use Rate:
+    scoring suggestions. It is the percentage of a       0.85 at Step-1). Crucially, Head 6 and Head 12
+    head’s suggestions selected by the gate that         collectively assumed the role of long-range depen-
+    are actually correct.                                dency specialists in later stages. Head 6’s contribu-
+                                                         tion increased significantly at Step-4 (from 0.13 to
+                           |C(h, t) ∩ At ∩ Gt |          0.31), marking a clear functional transition. Most
+        Hit Rate(h, t) =                        (18)
+                             |C(h, t) ∩ At |             notably, Head 12 achieved a maximum Hit Rate
+                                                         of 0.50 at Step-4, despite minimal involvement at
+where, for any given head h and reasoning step t,        Step-1 (Contribution: 0.06). This sharp contrast in
+Gt is the set of ground-truth triples, and At is the     activation profiles unequivocally demonstrates the
+set of triples actually retrieved by the gated model.    learned non-substitutability of specialized heads,
+The term C(h, t) represents the set of candidate         confirming that ParallaxRAG successfully engi-
+triples for which head h provided the highest score      neers a task-adaptive retrieval architecture irrespec-
+among all heads. Finally, St is the set of all samples   tive of the foundational text encoder.
+that require reasoning at step t, while S(h, t) is the
+subset of those samples where a triple from C(h, t)      Table 6: End-to-End QA Performance with Alternative
+was selected by the final gating mechanism.              Backbone Encoders using Llama3.1-8B as KGQA gen-
+                                                         erator
+C.3 Head Specialization with Alternative
+    Backbone Encoders                                       Encoder       WebQSP                CWQ
+                                                                      Macro-F1     Hit    Macro-F1     Hit
+To confirm the generalizability of the head special-
+ization phenomenon, we tested the ParallaxRAG               E5          69.23     85.63     44.59     53.95
+                                                            GTE         69.75     85.92     47.12     57.48
+framework using two alternative, high-performance
+backbone encoders: intfloat/e5-large-v2
+and thenlper/gte-large. Our analysis con-                C.3.3 Correlation with Performance
+firms that the core phenomenon of head specializa-       The observed specialization patterns strongly cor-
+tion persists across all tested encoders, though the     relate with end-to-end performance, particularly
+specific cooperative patterns among heads vary, re-      on the long-chain reasoning CWQ benchmark (Ta-
+flecting different emergent strategies for multi-hop     ble 6). The GTE model, which exhibited a more
+reasoning.                                               pronounced dynamic specialization, significantly
+C.3.1   intfloat/e5-large-v2 Analysis                    outperforms the E5 model on CWQ (Macro-F1:
+        (Figure 5a)                                      47.12 vs. 44.59; Hit Rate: 57.48 vs. 53.95). Perfor-
+The e5-large-v2 encoder consistently vali-               mance on the simpler WebQSP task is comparable
+dates the functional division of labor. Head 10          (Macro-F1 difference is 0.52). This evidence sup-
+(Contribution: 0.60, Use Rate: 0.96) and Head            ports the conclusion that the degree of functional
+2 (Contribution: 0.52, Use Rate: 0.94) emerged           specialization learned by the backbone encoder is a
+as the dominant initial-step specialists (peaking at     critical factor for robustness in multi-hop KGQA.
+Step-1 for entity localization). Conversely, Head        C.4   Head Specialization Verification Details
+3 demonstrated the highest precision for terminal
+                                                         C.4.1 Linear Probing
+reasoning, achieving a Hit Rate of 0.50 at Step-
+4. This confirms the learned segregation between         To quantitatively verify that different attention
+high-activation front-end heads and high-precision       heads specialize in distinct reasoning stages, we
+terminal heads. However, the magnitude of the            conducted a linear probing experiment. For each
+dynamic switching effect was marginally less pro-        reasoning step, we aggregated the output scores
+nounced compared to BGE-M3, suggesting a more            from all attention heads to form a feature vec-
+continuous contribution profile.                         tor. A logistic regression classifier was then
+                                                         trained on these features to decode the current
+C.3.2   thenlper/gte-large Analysis                      step number (from 1 to 4). Evaluated under 5-
+        (Figure 5b)                                      fold cross-validation grouped by sample, the classi-
+The gte-large results offer a clearer and more           fier achieved a decoding accuracy that significantly
+compelling validation of dynamic head specializa-        outperformed a random baseline. This result con-
+tion switching. Head 10 served as the definitive         firms that the activation patterns of the attention
+                                                    26650
+
+===== PDF p.15 =====
+(a) E5-large-v2 on CWQ dataset
+
+
+
+
+                                         (b) GTE-large on CWQ dataset
+
+Figure 5: Attention Head Specialization Analysis on CWQ Dataset with Alternative Backbone Encoders. (a) Results
+using the E5-large-v2 model. (b) Results using the GTE-large model.
+
+
+heads contain sufficient information to distinguish       C.4.3 Head Disruption Experiments
+between different stages of the reasoning process,        Full disruption results and analysis are presented
+supporting the hypothesis of functional specializa-       in Section 4.3 (Table 3).
+tion.
+                                                          D        Additional Experiment Results
+                                                          D.1       Statistical Stability Analysis
+C.4.2   Difference in Difference in Difference            To verify that the reported improvements are not
+                                                          due to random variation, we conducted five inde-
+To causally validate the functional importance of         pendent training runs and evaluated on the CWQ
+specialist heads, we designed a Triple-Difference         test set using Qwen3-30B as the generator. Table 7
+(DDD) intervention. This analysis isolates the ad-        reports the mean and standard deviation across runs.
+ditional performance degradation from ablating            Performance is stable across all metrics, with stan-
+specialist heads versus random heads on long-hop          dard deviations below 2 points, confirming that the
+(> 1-hop) questions, relative to short-hop (1-hop)        gains are consistent and reproducible.
+questions. We first compute the Difference-in-
+Differences (DID) for both the specialist-ablation        Table 7: Performance stability across 5 independent
+                                                          runs on WebQSP and CWQ (Qwen3-30B generator).
+(DIDspec ) and random-ablation (DIDrand ) scenarios.
+                                                          Standard deviations are all below 2.0 points.
+The final causal estimate is then given by the Triple-
+Difference: DDD = DIDspec − DIDrand . Our ex-                                            WebQSP                                         CWQ
+                                                           Model          Macro-F1          Hit           Hallu.       Macro-F1          Hit           Hallu.
+periment yielded a statistically significant DDD           ParallaxRAG   75.97 ± 0.88   92.36 ± 1.60   75.85 ± 0.63   59.15 ± 1.39   66.08 ± 1.92   57.72 ± 1.01
+
+estimate, confirmed via bootstrap confidence inter-
+vals and permutation tests. This provides functional         Additionally, we performed paired bootstrap
+evidence consistent with the view that specialist         resampling (1k samples) on Hit@1 over CWQ
+heads are non-substitutable and disproportionately        using Llama3.1-8B as generator. Improvements
+important for complex, multi-hop reasoning.               over SubgraphRAG (p = 0.022) and GNN-RAG
+                                                    26651
+
+===== PDF p.16 =====
+(p = 0.010) are statistically significant, substan-                                                           creased retrieval breadth may be unnecessary for
+tially reducing the likelihood that the observed                                                              simpler queries.
+gains arise from random fluctuations.
+                                                                                                              Case 1 (Figure 6): Single-Vector RAG retrieves
+D.2 End-to-End Latency Breakdown                                                                              a noisy subgraph, incorrectly following the con-
+                                                                                                              tainment path (Nijmegen, ..., Netherlands) while
+Table 8 and Table 9 report a full per-stage latency                                                           ignoring the adjacency constraint to France, thus
+breakdown (mean ± std, in seconds per query) on                                                               outputting Netherlands. This failure highlights
+WebQSP and CWQ respectively, measured on a                                                                    how its undifferentiated embeddings struggle to
+single NVIDIA RTX 6000 Ada GPU. Retrieval                                                                     enforce multiple constraints. In contrast, Paral-
+latency increases with hop count due to larger                                                                laxRAG’s multi-view retrieval isolates the correct
+subgraph sizes, but is largely invariant to the re-                                                           evidence path: (Nijmegen, nearby_airports, Weeze
+trieval budget k because the multi-view scoring                                                               Airport), (Weeze Airport, containedby, Germany),
+and gating are implemented as fully vectorized ma-                                                            and (Germany, adjoins, France). By decoupling
+trix operations over the entire candidate triple set.                                                         and prioritizing geographic constraints, it correctly
+Consequently, increasing k enriches the LLM con-                                                              answers Germany.
+text without incurring additional retrieval overhead.
+The dominant cost in the pipeline is the LLM gen-                                                             Case 2 (Figure 7): Single-Vector RAG’s flat
+eration stage; the multi-view retrieval mechanism                                                             representation fails to manage two distinct con-
+itself adds only modest overhead.                                                                             straints (symbol and bisection). It retrieves a dif-
+                                                                                                              fuse subgraph, conflates relations, and incorrectly
+Table 8: Per-stage latency (seconds/query, mean ± std)                                                        links the Ring-necked Pheasant to Missouri, thus
+on WebQSP. “Retrieval (mean)” is averaged over all                                                            outputting Missouri. ParallaxRAG, however,
+queries; hop-specific values reflect subgraph complex-                                                        uses constraint-specific heads to retrieve precise
+ity.
+                                                                                                              and separate facts: (Ring-necked Pheasant, offi-
+ Method            1-hop             2-hop        ≥3-hop        Retrieval     KG Access     Generation        cial_symbol_of, South Dakota) and (South Dakota,
+ ParallaxRAG    22.10 ± 7.80     70.47 ± 14.28       –           38.78          0.023      3.124 ± 0.232
+                                                                                                              partially_contains, Missouri River). This decom-
+                                                                                                              position allows it to satisfy both constraints and
+                                                                                                              correctly identify South Dakota.
+Table 9: Per-stage latency (seconds/query, mean ± std)
+on CWQ.                                                                                                       Case 3 (Figure 8): This query requires only sim-
+ Method           1-hop           2-hop           ≥3-hop          Retrieval    KG Access    Generation
+                                                                                                              ple transitive reasoning, where a compact set of
+ ParallaxRAG   25.58 ± 8.20    87.95 ± 17.17   183.63 ± 63.01       82.35        0.026     3.784 ± 0.227
+                                                                                                              facts is sufficient to infer the correct answers. As
+                                                                                                              shown in Figure 8, Single-Vector RAG retrieves a
+  After extraction, triple recall is computed deter-                                                          concise collection of relevant triples, enabling the
+ministically via scripted string matching against                                                             downstream LLM to directly enumerate all cham-
+annotated ground truth, so the final metric does not                                                          pionship years. In contrast, ParallaxRAG retrieves
+depend on GPT-4o’s generative tendencies. To as-                                                              a richer set of team- and season-related triples from
+sess extraction stability, we repeated the extraction                                                         multiple views. While all retrieved evidence is
+with three different models (GPT-4o, Qwen3-30B,                                                               factually correct, the additional contextual informa-
+GLM-4.7) and observed negligible variance (std                                                                tion is not strictly necessary for this shallow infer-
+≤ 1.5%). We also manually inspected a random                                                                  ence. Consequently, the downstream LLM adopts
+10% subset and found high consistency between                                                                 a conservative interpretation strategy and outputs
+automated extraction and human judgment.                                                                      an inconclusive answer. This case highlights the
+                                                                                                              scope of multi-view retrieval. While richer contex-
+E         Case Study                                                                                          tual coverage is crucial for robustness in complex
+We present several representative cases from the                                                              multi-hop reasoning, ParallaxRAG is not explicitly
+CWQ dataset to demonstrate ParallaxRAG’s ef-                                                                  optimized for minimal-context inference in shal-
+ficacy in multi-hop question answering, empha-                                                                low queries, where simpler retrieval strategies may
+sizing its refined subgraph construction, reduced                                                             already suffice.
+hallucinations, and robust handling of constraints
+through multi-view decoupling and head special-
+ization, while also revealing scenarios where in-
+                                                                                                           26652
+
+===== PDF p.17 =====
+WebQTrn-241_dfb6c97ac9bf2f0ac07f27dd80f9edc2
+
+Q: What country bordering France contains an airport that serves Nijmegen?
+A: Germany
+
+
+                         (Nijmegen,location.location.containedby,Netherlands)
+                         (Gelderland,base.aareas.schema.administrative_area.administrative_children,Nijmegen)
+                         (Netherlands,location.location.partially_contains,Rhine)
+                         (France,location.location.partially_contains,Rhine)
+                         (Rhine,geography.river.cities,Nijmegen)
+                         (France,location.country.currency_used,Euro)
+                         (Netherlands,location.country.currency_used,Euro)
+       Single-Vector RAG (Germany,location.location.partially_contains,Rhine)
+                         (Rhine,geography.river.basin_countries,France)
+                         (Belgium,location.location.partially_contains,Meuse)
+                         (Rhine,location.location.partially_containedby,France)
+                         (Euro,finance.currency.countries_used,France)
+                         (Germany,location.country.currency_used,Euro)
+                         (Rhine,film.film_location.featured_in_films,A Bridge Too Far)
+                         (Alps,location.location.partially_containedby,France)
+                           ...
+         LLM
+                               To find the country bordering France that contains an airport that serves Nijmegen, we need to find the
+                               location that contains Nijmegen and is adjacent to France.
+                               From the triplets, we can see that Nijmegen is located in the Netherlands.
+                               Now, we need to find the location that contains Nijmegen and is adjacent to France.
+                               From the triplets, we can see that Nijmegen is contained by Gelderland, which is an administrative area in
+                               the Netherlands.
+                                                                                                                                            A: Netherlands
+                               We also know that Gelderland is an administrative area in the Netherlands.
+                               Therefore, the country bordering France that contains an airport that serves Nijmegen is the Netherlands.
+                               So, the formatted answer is:
+                               Netherlands
+
+
+                               (Nijmegen,location.location.nearby_airports,Weeze Airport)
+                               (Nijmegen,film.film_location.featured_in_films,A Bridge Too Far)
+                               (A Bridge Too Far,film.film.featured_film_locations,Nijmegen)
+                               (Weeze Airport,location.location.containedby,Germany)
+                               (Germany,location.location.partially_contains,Rhine)
+                               (Rhine,geography.river.cities,Nijmegen)
+                               (France,location.location.partially_contains,Rhine)
+          ParallaxRAG          (Germany,film.film_location.featured_in_films,A Bridge Too Far)
+                               (A Bridge Too Far,film.film.featured_film_locations,Germany)
+                               (Germany,location.location.partially_contains,Alps)
+                               (France,location.location.partially_contains,Alps)
+                               (Germany,common.topic.notable_types,Country)
+                               (France,location.country.currency_used,Euro)
+                               (Germany,location.country.currency_used,Euro)
+                               (Euro,finance.currency.countries_used,Germany)
+                                 ...
+         LLM
+                               To find the country bordering France that contains an airport that serves Nijmegen, we need to find the
+                               airport that serves Nijmegen and then find the country that contains that airport.
+                               From the triplets, we can see that Nijmegen is served by Weeze Airport.
+                               Now, we need to find the country that contains Weeze Airport.
+                               From the triplets, we can see that Weeze Airport is located in Germany.
+                                                                                                                                              A: Germany
+                               Therefore, the country bordering France that contains an airport that serves Nijmegen is Germany.
+                               So, the formatted answer is:
+                               Germany
+
+
+
+               Figure 6: Comparison of retrieved subgraphs and reasoning chains for case WebQTrn-241
+
+
+
+
+                                                                              26653
+
+===== PDF p.18 =====
+WebQTest-626_40c4288896adffe97901ff78149912e5
+
+Q: What state with a symbol of a Ring-necked Pheasant does the Missouri River bisect?
+A: South Dakota
+
+
+                         (m.04st88j,location.location_symbol_relationship.symbol,Ring-necked Pheasant)
+                         (Ring-necked
+                         Pheasant,location.symbol_of_administrative_division.official_symbol_of,m.04st88j)
+                         (Missouri,location.location.partially_contains,Missouri River)
+                         (Iowa,location.location.partially_contains,Missouri River)
+                         (South Dakota,government.governmental_jurisdiction.official_symbols,m.04st88j)
+                         (Missouri River,location.location.partially_containedby,Kansas)
+                         (North Dakota,location.location.partially_contains,Missouri River)
+       Single-Vector RAG
+                         (Kansas,location.location.partially_contains,Missouri River)
+                         (Missouri River,location.location.partially_containedby,Iowa)
+                         (South Dakota,location.location.partially_contains,Missouri River)
+                         (m.04st88j,location.location_symbol_relationship.administrative_division,South Dakota)
+                         (Missouri River,location.location.partially_containedby,Missouri)
+                         (Nebraska,location.location.partially_contains,Missouri River)
+                         (Missouri River,location.location.partially_containedby,North Dakota)
+                         (Missouri River,location.location.partially_containedby,Nebraska)
+         LLM              ...
+
+
+                               To find the state with a symbol of a Ring-necked Pheasant that the Missouri River bisects, we need to find the
+                               state with a symbol of a Ring-necked Pheasant and then find the states that the Missouri River bisects.
+                               From the triplets, we can see that the Ring-necked Pheasant is the official symbol of Missouri.
+                               Now, we need to find the states that the Missouri River bisects.
+                               From the triplets, we can see that the Missouri River bisects several states, including: Iowa, Kansas, Missouri,   A: Missouri
+                               Nebraska, North Dakota
+                               So, the state with a symbol of a Ring-necked Pheasant that the Missouri River bisects is Missouri.
+                               Therefore, the formatted answer is:
+                               Missouri
+
+
+                               (Nebraska,location.location.partially_contains,Missouri River)
+                               (Missouri,location.location.partially_contains,Missouri River)
+                               (Kansas,location.location.partially_contains,Missouri River)
+                               (Iowa,location.location.partially_contains,Missouri River)
+                               (Missouri River,location.location.partially_containedby,Missouri)
+                               (Missouri River,location.location.partially_containedby,Kansas)
+                               (North Dakota,location.location.partially_contains,Missouri River)
+           ParallaxRAG         (Missouri River,geography.river.mouth,Mississippi River)
+                               (m.04st88j,location.location_symbol_relationship.symbol,Ring-necked Pheasant)
+                               (Bismarck,travel.travel_destination.tourist_attractions,Missouri River)
+                               (Ring-necked
+                               Pheasant,location.symbol_of_administrative_division.official_symbol_of,m.04st88j)
+                               (Missouri River,location.location.partially_containedby,Iowa)
+                               (South Dakota,location.location.partially_contains,Missouri River)
+                               (Montana,location.location.partially_contains,Missouri River)
+         LLM                   (Missouri,location.location.partially_contains,Mississippi River)
+                                 ...
+
+
+                               To find the state with a symbol of a Ring-necked Pheasant that the Missouri River bisects, we need to find the
+                               state with a symbol of a Ring-necked Pheasant and then find the state that the Missouri River bisects.
+                               From the triplets, we can see that the Ring-necked Pheasant is the official symbol of South Dakota.
+                               Now, we need to find the state that the Missouri River bisects.                                                    A: South
+                               From the triplets, we can see that the Missouri River bisects several states, including Nebraska, Kansas, Iowa,
+                               and South Dakota.                                                                                                  Dakota
+                               Therefore, the state with a symbol of a Ring-necked Pheasant that the Missouri River bisects is South Dakota.
+                               So, the formatted answer is:
+                               South Dakota
+
+
+
+
+              Figure 7: Comparison of retrieved subgraphs and reasoning chains for case WebQTest-626
+
+
+
+                                                                               26654
+
+===== PDF p.19 =====
+WebQTrn-810_c334509bb5e02cacae1ba2e80c176499
+
+Q: What year did the team with mascot named Lou Seal win the World Series?
+A: 2014 World Series
+
+
+                               (San Francisco Giants, sports.sports_team.team_mascot, Lou Seal)
+                               (Lou Seal, sports.mascot.team, San Francisco Giants)
+                               (2014 World Series, sports.sports_championship_event.champion, San Francisco Giants)
+                               (2010 World Series, time.event.participant, San Francisco Giants)
+                               (San Francisco Giants, sports.sports_team.championships, 2014 World Series)
+                               (Crazy Crab, sports.mascot.team, San Francisco Giants)
+                               (2012 World Series, time.event.participant, San Francisco Giants)
+       Single-Vector RAG       (San Francisco Giants, sports.sports_team.team_mascot, Crazy Crab)
+                               (2010 World Series, sports.sports_championship_event.champion, San Francisco Giants)
+                               (San Francisco Giants, time.participant.event, 2010 World Series)
+                               (2012 World Series, sports.sports_championship_event.champion, San Francisco Giants)
+                               (San Francisco Giants, sports.sports_team.championships, 2010 World Series)
+                               (San Francisco Giants, sports.sports_team.championships, 2012 World Series)
+                               (San Francisco Giants, time.participant.event, 2012 World Series)
+                               (2014 Major League Baseball season, time.event.participant, San Francisco Giants)
+                                ...
+         LLM
+                               To find the year the team with mascot named Lou Seal won the World Series, we need to find the team with
+                               mascot named Lou Seal and then find the year they won the World Series.
+                               From the triplets, we can see that Lou Seal is the mascot of the San Francisco Giants.
+                               Now, we need to find the year the San Francisco Giants won the World Series.
+                               From the triplets, we can see that San Francisco Giants won the 2010 World Series and 2012 World Series and
+                               2014 World Series.                                                                                                   A: 2014 (2014
+                               So, the team with mascot named Lou Seal (San Francisco Giants) won the World Series in 2010, 2012, and               World Series)
+                               2014.
+                               Therefore, the formatted answers are:
+                               ans: 2014 (2014 World Series)
+                               ans: 2012 (2012 World Series)
+                               ans: 2010 (2010 World Series)
+
+
+                               (San Francisco Giants, sports.sports_team.team_mascot, Lou Seal)
+                               (Lou Seal, sports.mascot.team, San Francisco Giants)
+                               (2014 World Series, sports.sports_championship_event.champion, San Francisco Giants)
+                               (2010 World Series, time.event.participant, San Francisco Giants)
+                               (San Francisco Giants, sports.sports_team.championships, 2014 World Series)
+                               (Crazy Crab, sports.mascot.team, San Francisco Giants)
+                               (2012 World Series, time.event.participant, San Francisco Giants)
+          ParallaxRAG          (San Francisco Giants, sports.sports_team.team_mascot, Crazy Crab)
+                               (2010 World Series, sports.sports_championship_event.champion, San Francisco Giants)
+                               (San Francisco Giants, time.participant.event, 2010 World Series)
+                               (2012 World Series, sports.sports_championship_event.champion, San Francisco Giants)
+                               (San Francisco Giants, sports.sports_team.championships, 2010 World Series)
+                               (San Francisco Giants, sports.sports_team.championships, 2012 World Series)
+                               (San Francisco Giants, time.participant.event, 2012 World Series)
+                               (2014 Major League Baseball season, time.event.participant, San Francisco Giants)
+                                 ...
+
+           LLM
+                               To find the year the team with mascot named Lou Seal won the World Series, we need to find the team with
+                               mascot named Lou Seal and then find the year they won the World Series.
+                               From the triplets, we can see that Lou Seal is the mascot of the San Francisco Giants.
+                               Now, we need to find the year the San Francisco Giants won the World Series.
+                               From the triplets, we can see that San Francisco Giants won the 2010 World Series and 2012 World Series and
+                               2014 World Series.
+                               Therefore, the team with mascot named Lou Seal (San Francisco Giants) won the World Series in 2010, 2012,              A: None
+                               and 2014.
+                               However, since there is no direct triplet stating that Lou Seal is associated with any of these World Series wins,
+                               we can only conclude that Lou Seal is associated with the San Francisco Giants, but not specifically with any
+                               of their World Series wins.
+                               Therefore, the formatted answer is:
+                               ans: None (We cannot determine which specific World Series win Lou Seal is associated with.)
+
+
+
+              Figure 8: Comparison of retrieved subgraphs and reasoning chains for case WebQTest-810
+
+
+
+
+                                                                              26655

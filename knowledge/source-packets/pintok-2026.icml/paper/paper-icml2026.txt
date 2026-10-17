@@ -1,0 +1,1117 @@
+===== PDF p.1 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+
+                                      Sean Choi* 1 Myungheon Chin* 2 Ernest Ryu 3
+                                           https://github.com/The-Cloud-Lab/PinTok
+
+
+                          Abstract
+       Tokenization is the first point of contact between
+       large language models (LLMs) and text data, yet
+       it has not been viewed by many as a compo-
+       nent of LLMs worth accelerating. During in-
+       ference, tokenizers typically rely on simple dic-
+       tionary lookups and are executed on CPUs as
+       standard processes. This approach, however,
+       introduces significant overhead from schedul-                   Figure 1. The proportion of wall-clock time spent on the Python
+       ing delays, core selection, data copying, and                   tokenizer implementation becomes significant for small language
+       other system-level costs. These inefficiencies be-              models. Details of the experiments are described in Section 4.
+       come problematic in latency-sensitive applica-
+       tions such as embedding, small language mod-                    tween LLMs and text data, and while some recent research
+       els, and agentic AI. In this paper, we present                  has highlighted its importance (Zouhar et al., 2023; Ali
+       the Pinned Tokenizer (PinTok), a novel tok-                     et al., 2024), there is little prior work focused on under-
+       enizer architecture that reduces redundant hard-                standing, optimizing, and accelerating tokenization at the
+       ware, operating system, and networking over-                    compute, system, and hardware levels. Today, most tok-
+       head through three key innovations: core and                    enizers still operate as generic dictionary-lookup processes
+       memory pinning, scheduling and context switch                   running on central processing units (CPUs), and unlike
+       avoidance, and duplicate network packet copy                    many other components of modern machine learning sys-
+       and processing avoidance. Our implementation                    tems, they are rarely implemented as optimized programs
+       of PinTok can serve as a drop-in replacement                    designed for dedicated hardware accelerators.
+       for existing tokenizer deployments, delivering la-              The presumption that the time and resources spent on tok-
+       tency reductions of up to 95% (average), 97%                    enization are negligible is a common misconception, one
+       (P50), 94% (P90), and 87% (P99) along with                      that we argue has contributed to the lack of system-level
+       throughput improvements of up to 2,084%.                        research on tokenizers. As shown in Figure 1, tokenization
+                                                                       can account for a substantial portion of the inference time
+                                                                       in smaller models. The need for accelerated tokenizers will
+1. Introduction                                                        only grow as models become more optimized, hardware ac-
+                                                                       celerators improve, model sizes shrink, and applications in-
+The tokenizer is the neglected child of large language mod-
+                                                                       creasingly depend on ensembles of small language models,
+els (LLMs). Tokenization is the first point of contact be-
+                                                                       such as embedding models, vector databases for Retrieval-
+  *
+    Equal contribution 1 Department of Computer Science and            Augmented Generation (RAG), and agentic AI systems.
+Engineering, Santa Clara University, Santa Clara, California,
+United States of America 2 Department of Electrical Engineer-          Contribution. In this work, we present PinTok, a novel
+ing, Stanford University, Stanford, California, United States of
+America. Young (Myungheon) Chin is currently with Google               fast tokenizer system that reduces previously overlooked
+LLC, Mountain View, California, United States of America               sources of overhead arising from computer hardware, oper-
+3
+  Department of Mathematics, University of California, Los An-         ating system, and networking. Specifically, PinTok accel-
+geles, Los Angeles, California, United States of America. Corre-       erates tokenizer algorithms through three key techniques:
+spondence to: Sean Choi <sean.choi@scu.edu>.                           (1) reducing hardware overhead via core and memory pin-
+Proceedings of the 43 rd International Conference on Machine           ning, (2) reducing OS overhead with scheduling and con-
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026           text switch avoidance, and (3) reducing networking over-
+by the author(s).                                                      head with duplicate copy and packet processing avoidance.
+
+                                                                   1
+
+===== PDF p.2 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+We provide a tokenizer implementation on PinTok and                        tions, whereas most tokenizer algorithms consist of repeti-
+evaluate it with multiple models and usage scenarios,                      tive byte manipulations and dictionary look-ups, thus these
+demonstrating a significant performance increase. More-                    approaches have not shown reasonable latency benefits.
+over, PinTok is agnostic to the specific tokenizer algorithm               Due to such reasons, popular models such as BERT (Devlin
+and can be easily used in a drop-in manner, as demonstrated                et al., 2019), GPT-OSS (Radford et al., 2018), Llama (et al.,
+in the following example code comparison.1                                 2024), and Qwen (Yang et al., 2025) all utilize tokenizers
+                                                                           provided by frameworks such as HuggingFace that run as
+from transformers import pipeline                                          a standard Python, C, or Rust program on a CPU. Unlike
+pipeline = PythonPipeline("model")                                         such works, PinTok does not require hardware changes and
+pipeline.start()
+... # Retrieve and use tokens                                              can be easily run on general-purpose machines.
+pipeline.stop()
+          Standard tokenizer usage example in Python                       Acceleration via network offload. Accelerating appli-
+                                                                           cations using network software or hardware, an idea sim-
+from pintok import pipeline                                                ilar to the use of GPUs for AI, is not entirely new (Kian-
+pipeline = PinTokPipeline("model")                                         pisheh & Taleb, 2023). Recent advances in network of-
+pipeline.start()                                                           fload began with the advent of frameworks such as the Data
+... # Retrieve and use tokens                                              Plane Development Kit (DPDK) (Foundation, 2015) and
+pipeline.stop()
+                                                                           eBPF (Gbadamosi et al., 2024), and programmable net-
+                PinTok usage example in Python                             work hardware such as Tofino (Bosshart et al., 2014) and
+                                                                           Nvidia (NVIDIA Corporation, 2025) Bluefield NICs. Us-
+                                                                           ing such frameworks, early research on programmable net-
+1.1. Prior Work                                                            work offload focus on improving simpler applications, such
+Improving tokenizer algorithm performance. Tok-                            as caches, databases, and consensus protocols (Jin et al.,
+enizers for popular models, such as GPT-2 to GPT-4 (Rad-                   2017; Psaras et al., 2014; Dang et al., 2020). Follow-up
+ford et al., 2018) and Llama 3 (et al., 2024), are built us-               research on advanced applications, such as lambda func-
+ing the Byte-Pair Encoding (BPE) (Gage, 1994) algorithm.                   tions and blockchain, have also shown significant benefits
+However, it is well known that BPE’s greedy nature re-                     from network offload. Lastly, using network offload to
+sults in inefficient tokenization, especially for tokens that              improve ML workloads, there are relevant work on train-
+do not appear often in the dataset. To alleviate this issue,               ing (Lao et al., 2021; Sapio et al., 2021), inference (Sanvito
+algorithms such as WordPiece, adopted by the BERT (De-                     et al., 2018; Zheng et al., 2022; Xiong & Zilberman, 2019;
+vlin et al., 2019) tokenizer, and SentencePiece (Kudo &                    Kapoor et al., 2025), and data processing (Sapio et al.,
+Richardson, 2018), adopted by the XLM tokenizer (Lam-                      2017b). PinTok is a form of network offload for data pro-
+ple & Conneau, 2019), emerged, each of which promises                      cessing, but no work has specifically focused on utilizing
+to solve problems such as inefficient merging or splitting                 network offload for tokenizers.
+of words. Then, there are follow-up works that optimize
+the complexity of these methods by providing improved al-                  2. Computer system preliminaries
+gorithms. Some notable examples include Fast WordPiece
+Tokenization (Song et al., 2021) and (Sennrich et al., 2016).              In this section, we provide a brief introduction to the basic
+Finally, a more recent promising work introduces trans-                    concepts of computer systems that are relevant to this work
+formers to dynamically tokenize incoming data (Pagnoni                     and outline a list of potential overheads that PinTok aims to
+et al., 2025). PinTok is an architecture design that can com-              mitigate. The discussion is intended for broader machine
+plement all listed works to provide additional performance                 learning audiences that may not be familiar with the lower-
+and efficiency gains.                                                      level systems considerations.
+
+
+Using existing ML accelerators for tokenizers. There                       Hardware: Memory, CPU, and disk. Memory (RAM)
+are works that perform tokenization on popular AI accel-                   is a high-speed storage medium with a physical and a vir-
+erators, such as graphical processing units (GPUs). Some                   tual address. Modern operating systems manage memory
+examples include Parallel BPE (You, 2025) and RAPIDS                       by dividing it into fixed-size blocks called pages. Pages
+cuDF tokenizer system (Jawa, 2021). However, AI acceler-                   can also be configured as superpages, which are larger page
+ators excel at large batches of parallel floating point opera-             that improve memory efficiency (Navarro et al., 2002).
+   1
+     PinTok requires a one-time installation of a boot configura-          A central processing unit (CPU) is responsible for ex-
+tion. Details of the configuration and installation instructions can       ecuting software instructions and memory addressing,
+be found in Section A.                                                     i.e., translating between physical and virtual memory ad-
+
+                                                                       2
+
+===== PDF p.3 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+    Table 1. System-level overheads commonly incurred by conventional tokenizers. These inefficiencies are mitigated in PinTok.
+
+                Sources of overhead                                    Type                    Latency
+                Core selection                                                             ∼ 1µs to 20µs
+                TLB miss & no page swap                              Hardware              ∼ 1µs to 10µs
+                Page swap                                                                  ∼ 50µs to 10ms
+                Process context switching                                                   ∼ 2µs to 20µs
+                                                              Operating system
+                Process scheduling                                                          ∼ 1µs to 20ms
+                Packet copy to kernel                                                 ∼ 0.5µs to 2µs per packet
+                Network packet interrupt                         Networking            ∼ 1µs to 5µs per packet
+                Kernel network stack packet processing                                ∼ 10µs to 50µs per packet
+
+
+dresses, with the assistance of the memory management                 by assigning time slices of its cycles to different processes.
+unit (MMU) and the translation lookaside buffer (TLB).                Memory is shared among processes, and page swaps create
+The MMU performs address translation by referring to the              free space if needed.
+page table, while the TLB is a hardware cache designed to
+                                                                      Process management involves scheduling, executing, and
+accelerate this translation. A TLB hit occurs when the re-
+                                                                      terminating processes while providing the resources they
+quired translation is found in the TLB, whereas a TLB miss
+                                                                      require. When a process starts, it first enters a scheduling
+occurs when it is not. Superpages improve the efficiency of
+                                                                      queue. The process scheduler then uses a scheduling algo-
+TLB operations by reducing the number of required trans-
+                                                                      rithm to select the next process to run. Once selected, the
+lations. The CPU is also responsible for servicing inter-
+                                                                      OS determines which core will execute the process. After a
+rupts generated by hardware devices such as the network
+                                                                      core is chosen, the system saves or clears the existing con-
+interface card (NIC). When an interrupt is triggered, the
+                                                                      text on that core and then loads the new process’s context,
+CPU core currently executing a task is paused, and an in-
+                                                                      including its instructions and variables. At this point, the
+terrupt service routine (ISR) is invoked to handle the event.
+                                                                      process begins executing its instructions until it terminates.
+It is possible to dedicate a CPU core to a specific process
+and exclude it from interrupt handling to achieve more pre-
+dictable performance for that process.                                Networking: Processing incoming packets. Once data
+                                                                      packets arrive at the host, they are first received and queued
+Disk is a slower, non-volatile storage medium often used              by the network interface card (NIC). The NIC then sends
+during context switching, which saves the state of a run-             an interrupt to the CPU, signaling it to process the packets
+ning process so it can resume later and frees memory for              when ready. When the CPU begins processing, it runs an
+new processes. When a process is swapped out, its data                interrupt service routine (ISR) to copy the packets from the
+in memory is written to disk in an operation called page              NIC’s memory into the OS’s kernel space. The kernel’s
+swap, a slow process that introduces latency. To reduce               networking stack then performs protocol operations, such
+page swaps, systems often enable superpages, since larger             as TCP/IP header processing, and routes the packets to the
+pages are less likely to be swapped.                                  appropriate applications.
+                                                                      Because this process involves multiple data copies, a
+Operating system: Resource and process management.                    kernel-bypass approach can be used to transfer packets di-
+The operating system (OS) is the software that manages a              rectly from the NIC to user space. Some software further
+computer’s hardware and software resources. At its core               reduces latency by polling for incoming packets instead of
+is the kernel, which contains the critical logic for system           waiting for NIC interrupts, enabling immediate processing
+management. To ensure security, the OS divides the mem-               as packets arrive. Taking this further, certain applications
+ory into user space and kernel space. User space is a less            integrate custom protocol logic to avoid redundant packet
+privileged region where applications run, while the kernel            processing. Frameworks such as the Data Plane Develop-
+space is a highly privileged area for the kernel, drivers, and        ment Kit (DPDK) (Foundation, 2015) enable these tech-
+extensions. Two of the OS’s main responsibilities are re-             niques, allowing applications to process network data with
+source management and process management.                             significantly lower latency.
+Resource management involves allocating and sharing
+hardware resources, such as CPU and memory, among mul-                Hardware overhead. The two main sources of overhead
+tiple concurrently running processes. The CPU is shared               in memory access are TLB misses and page faults, which
+
+                                                                 3
+
+===== PDF p.4 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+are attempts to access data that are currently not in physical       Reducing hardware overhead: Core and memory pin-
+memory. This hardware overhead can be modeled as the                 ning. PinTok implements core pinning by dedicating a set
+following effective memory access time:                              of CPU cores to itself at boot time, ensuring that no other
+                                                                     processes, including hardware interrupts, can use those
+Thw = (1 − m) × (Ttlb + Tmem ) +                                     cores. This eliminates the overhead and nondeterminism
+        m × (Ttlb + Tptw + (1 − p) × Tmem + p × Tpf ),               of runtime core selection and improves tokenizer perfor-
+                                                                     mance, particularly in tail events. PinTok also implements
+where m is the probability of a TLB miss, Ttlb is the time to        memory pinning by reserving a large, fixed, unswappable
+access the TLB, p is the probability of a page fault, Tmem is        page, which prevents scheduler-induced interruptions by
+the time to access the main memory, Tptw is the time for a           removing the possibility of page swaps and improves TLB
+page table walk, and Tpf is the time to service a page fault.        hit rates since a single TLB entry can map the entire page.
+Often, Tpf represents the most significant cost. PinTok’s            In practice, these techniques are implemented through OS
+goal is to reduce both m and p in order to bring the effective       boot configurations. Details on enabling such settings are
+Thw closer to the theoretical minimum of (Ttlb + Tmem ),             provided in Section A.
+and to minimize the contribution of the mp × Tpf term.
+
+Operating system overhead. The three primary sources
+of OS scheduling overhead are core selection, process con-           Reducing OS overhead: Scheduling and context
+text switching, and scheduler execution. This overhead can           switch avoidance. PinTok avoids scheduling and context
+be modeled as                                                        switching by keeping the tokenizer process running contin-
+                                                                     uously and dedicating a set of CPU cores exclusively to to-
+                TOS = Tcs + Tpcs + Texec ,                           kenizers. It operates in a continuous poll mode, continually
+                                                                     consuming CPU cycles to request new queries for tokeniza-
+where Tcs , Tpcs , and Texec respectively correspond to the          tion. This reduces the likelihood of being context-switched,
+three overhead sources. PinTok aims to eliminate Tcs and             since the OS tends to switch out processes that are not
+Tpcs through core pinning and interrupt avoidance.                   actively utilizing the CPU. Furthermore, PinTok prevents
+                                                                     dedicated cores from being allocated to kernel processes by
+Networking overhead.       The networking overhead is de-            allowing the kernel bypass procedure to retrieve network
+fined as                                                             packets directly from the NIC. An additional benefit of
+                                                                     this design is that tokenizers execute in a run-to-completion
+       Tnetworking = Tinterrupt + Tcopy + Tprotocol ,                (RTC) manner, ensuring that once a query is received, it is
+                                                                     processed without interruption. As a result, tokenizer per-
+where Tinterrupt is the time to perform interrupt handling,          formance becomes significantly more predictable, enabling
+Tcopy is the time to copy packets into kernel memory,                tighter service-level guarantees.
+Tprotocol is the time to perform protocol logic. PinTok aims
+to eliminate Tinterrupt via polling, reduce Tcopy via kernel-
+bypassing and reduce redundant processing by merging to-
+kenizer algorithm time with Tprotocol .                              Reducing networking overhead: Copy and duplicate
+                                                                     packet processing avoidance PinTok avoids redundant
+3. PinTok tokenizer system                                           network packet copying and processing by bypassing the
+                                                                     kernel to retrieve packets directly in the user space in a poll-
+The core techniques that differentiate between PinTok and            based manner, and performing tokenization along with the
+conventional tokenizer systems are: (1) reducing hard-               network protocol logic within the same user space program
+ware overhead through core and memory pinning, (2) min-              to reduce multiple packet processing. Conceptually, this
+imizing OS overhead by avoiding scheduling and context               approach is analogous to kernel fusion in deep learning: in-
+switches, and (3) lowering networking overhead through               stead of launching multiple kernels and incurring synchro-
+copy and duplicate packet processing avoidance. This sec-            nization overhead at each boundary, operations are fused
+tion explains how PinTok realizes these techniques, and              into a single execution. In a conventional network data
+Figure 2 illustrates the key ideas. Algorithm 1 presents a           path, packets are first buffered in kernel pages, then pro-
+detailed comparison between conventional tokenizer sys-              cessed by kernel-level protocol logic to identify the target
+tem and the optimized PinTok. PinTok implements stan-                application, and finally copied into application memory for
+dard techniques used in many tokenizer systems, such as              further processing. Each of these stages introduces addi-
+token caching, but we omit the detailed discussion for               tional latency, consumes CPU cycles, and increases mem-
+brevity and provide the source code instead.                         ory bandwidth usage, all of which PinTok avoids.
+
+                                                                 4
+
+===== PDF p.5 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+                                   Network       Host RAM                                                               Disk
+                                    Card
+                                                  Copy to kernel           Copy to Userspace            Page In/Out
+                                                                           vb                                                       vb
+
+                                                                       Q          D                 Q                         Q               D
+              Query Packet (Q)
+                                                        Kernel Pages              Userspace Pages                            Swap Space
+Data Flow
+Instruction Flow               Tokenizer runs
+                                                                                         Delayed memory read
+                              on CPU Interrupt
+
+                                                                                                                        Q: [W1, W2 , ... , Wn]
+                            P1
+
+                                                            Wait for                                                  Token Dictionary (D)
+             Process         Pt     Wait for
+       Pt                                          Pt         core
+             queued                scheduler                                               Context Loading
+                                                            selection
+                             ...
+
+
+
+
+                                                                                ...
+                                                                                                                         V: [T1, T2 , ... , Tn]
+                            Pn
+
+
+1. Pt Initialized   2. Process Queue 3. Process Scheduler         4. Core Selection 5. Context Switch              6. Tokenizer Process
+
+(a) Overview of the tokenizer flow on a conventional Python/Rust tokenizer provided by frameworks like HuggingFace. The red lines
+denote the potential sources of overheads, which include the overheads mentioned in Section 2.
+
+
+                                   Network        Host RAM                                                            Disk
+                                    Card
+                                                    Copy packets bypassing kernel
+                                                                           vb                                                      vb
+
+                                                                                 D                 Q
+                Query Packet (Q)
+                                                  Unused Kernel Pages                 SuperPages                   Unused Swap Space
+Data Flow                                                                                          Faster memory read
+
+Instruction Flow                                                                              Pinned
+                                                                                               CPU                     Q: [W1, W2 , ... , Wn]
+
+
+                                                                                                                      Token Dictionary (D)
+                                                     Start tokenizer
+                                                      w/o waiting
+                                                                                                                        V: [T1, T2 , ... , Tn]
+                                                                                              Continuous poll
+                                                                                                for query
+                                                                                                                       Tokenizer Process
+                                                                                                        Pinned Tokenizer (PinTok)
+
+                       (b) Overview of tokenizer flow on PinTok where the sources of overheads are addressed.
+                       Figure 2. Comparison of the tokenizer flow between conventional tokenizers vs PinTok.
+
+
+4. Experiments                                                         ish, and Chinese) to test cross-lingual performance. This
+                                                                       mix covers typical English web content, diverse languages,
+We evaluated PinTok both as a standalone tokenizer and                 and structured programming text, testing PinTok on a wide
+as part of end-to-end pipelines. All experiments were run              range of token distributions. Beyond domain and language
+on a dedicated Kernel-based Virtual Machine (KVM) (see                 diversity, the chosen corpora exhibit markedly different to-
+Appendix B for details). To ensure diverse evaluation,                 ken frequency profiles. We provide a detailed analysis
+we used three representative corpora spanning different                of these distributions, including coverage saturation and
+domains: openwebtext (English web text, (Gokaslan                      rare token statistics in Appendix C. Evaluating such di-
+et al., 2019)), bertin-project/mc4-sampling                            verse corpora not only ensures a rigorous stress-test of Pin-
+(multilingual web text, (la Rosa et al., 2022)), and                   Tok in varying domains, languages, and token distributions,
+codeparrot/github-code (source code, (CodePar-                         highlighting its efficiency and broad applicability, but also
+rot Team, 2022)). The multilingual corpus included docu-               shows the effect of subtle system characteristics, such as
+ments in five languages (English, French, German, Span-
+
+                                                                 5
+
+===== PDF p.6 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+Algorithm 1 Comparison of Tokenizer Systems
+(a) Conventional Tokenizer System                                   (b) PinTok Optimized System
+Require: P = {p1 , p2 , . . . , pN }                                Require: Token IDs to Python stage without copies
+    ▷ Each pi contains a fraction of the input query                Ensure: Zero-copy handoff of T to Python
+ 1: procedure K ERNEL N ETWORK(P)                                    1: P IN(cores := dedicated RX/token cores)
+ 2:    for each pi in P do                                           2: P IN(mem := superpages/pinned pools)
+ 3:        N IC I NTERRUPT(CPU)                                      3: I NIT NIC(RX queues bound to pinned mbufs)
+ 4:        S TART ISR(CPU)                                           4: ▷ Preallocate token-ID buffer for Python
+ 5:        pki ← C OPY T O K ERNEL(pi )                              5: mz ← A LLOC P INNED M EMZONE()
+ 6:        ▷ Extra copy into kernel memory                           6: procedure P IN T OK
+ 7:        pui ← C OPY T O U SERSPACE(pki )                          7:     for each pi from NICS TREAM() do
+ 8:        ▷ Extra copy into user-space memory                       8:         Trange ← T OKENIZE(pi → mz)
+ 9:        E NQUEUE(queue, pui )                                     9:         P UBLISH T O P YTHON(mz, Trange )
+10:    end for                                                      10:         ▷ zero-copy view
+11: end procedure                                                   11:         R ECYCLE RXB UF(pi )
+Require: N (number of fragments)                                    12:     end for
+12: procedure T OKENIZER(queue)                                    13: end procedure
+13:    WAIT U NTIL |{seq(p) : p ∈ queue}| ≥ N                       *The descriptions of each function are provided in Appendix D.
+14:    B ← D EQUEUE U NTIL(queue, N )
+15:    q ← R EASSEMBLE A ND O RDER(B)
+16:    T ← T OKENIZE(q)
+17: end procedure
+
+
+token caching, that existing tokenizer systems employ.              results for all datasets and configurations are provided in
+                                                                    Appendix E.
+We benchmarked PinTok’s tokenization throughput and
+latency on these corpora to quantify performance gains.
+For comparability, we included a re-implementation of               4.2. End-to-end embedding pipeline results
+the GPT-2 byte-level BPE tokenizer with its origi-                  To assess downstream impact, we paired PinTok,
+nal vocabulary and merge rules (Radford et al., 2019)               Rust, and Python tokenizers with three embedding
+as a baseline.     We also evaluated PinTok in com-                 models: e5-base-v2, ModernBERT-base, and
+plete embedding pipelines by pairing it with three dif-             embeddinggemma-300m.               We measured through-
+ferent embedding models: ModernBERT-base, an 8K-                    put and latency for inputs of 512–1024 tokens
+token BERT encoder (Warner et al., 2025), E5-base-v2,               for ModernBERT-base and 384–512 tokens for
+a 12-layer contrastive model (Wang et al., 2024), and               e5-base-v2, averaged over 5 trials. Figure 5 shows
+EmbeddingGemma-300m, a 300M-parameter multilingual                  the throughput, and Figure 6 reports the latency. These
+embedding model (Choi et al., 2025). These models range             results show that PinTok’s optimizations carry through
+from a widely-used BERT variant to a newly released                 the full embedding pipeline, improving both speed and
+embedding model, demonstrating that PinTok generalizes              predictability. For completeness, the detailed numerical
+across tokenization algorithms and integrates seamlessly            results for all experiments are provided in Appendix F.
+with both established and emerging architectures.
+                                                                    4.3. End-to-end ML applications results
+4.1. Tokenizer benchmark results
+                                                                    We also evaluate the significance of the end-to-end
+We benchmarked the throughput and latency of PinTok                 speedups provided by PinTok in several application do-
+against a high-performance Rust tokenizer and a Python              mains. The first and second applications is the retrieval and
+baseline. All results were averaged over 20 independent             insertion times in a popular open-source vector database,
+trials. Figure 3 shows throughput (tokens per second) as a          ChromaDB (contributors, 2025), which is widely used to
+function of input size (128–2048 tokens), and Figure 4 re-          support RAG use cases. The third application focuses on
+ports the tokenization latency distribution for each dataset,       querying a small language model, Qwen3 4B (Yang et al.,
+showing the average (mean) latency as well as the me-               2025), which is commonly employed as a classifier in the
+dian (P50), 90th percentile (P90), and 99th percentile (P99)        classical machine learning sense or as a router in agentic AI
+tail latencies. PinTok consistently improves the through-           applications (Wu et al., 2025). The fourth application in-
+put and latency. For completeness, the detailed numerical
+
+                                                                6
+
+===== PDF p.7 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+                     1e6 OpenWebText                                     Code                                Multilingual
+               3
+Throughput
+ (tokens/s)
+
+
+               2
+                                                                                                                                             Python
+                                                                                                                                             Rust
+               1                                                                                                                             PinTok
+               0
+                      128     256    512 1,024 2,048        128   256     512 1,024 2,048           128      256    512 1,024 2,048
+                                    Tokens                              Tokens                                     Tokens
+  Figure 3. Tokenizer throughput across input lengths (128-2048 tokens per input) on three datasets. Higher is better. PinTok consistently
+  achieves higher throughput than Rust and Python baselines.
+
+                              Average                       P50                             P90                             P99
+               104
+OpenWebText
+Latency ( s)
+
+
+
+
+               103
+               102
+
+               104
+Latency ( s)
+
+
+
+
+               103                                                                                                                           Python
+   Code
+
+
+
+
+                                                                                                                                             Rust
+               102                                                                                                                           PinTok
+
+               104
+Latency ( s)
+Multilingual
+
+
+
+
+               103
+               102
+                            500 1,000 1,500 2,000      500 1,000 1,500 2,000         500 1,000 1,500 2,000           500 1,000 1,500 2,000
+                               Tokens                     Tokens                        Tokens                          Tokens
+  Figure 4. Latency distributions (average, P50, P90, P99) across datasets and input lengths (128-2048 tokens per input). (Lower is better.)
+  PinTok consistently achieves lower latency than Rust and Python baselines.
+
+                                                                    answerdotai/                             google/
+                            intfloat/e5-base-v2                   ModernBERT-base                     embeddinggemma-300m
+               50000                                                                              18000
+Throughput
+
+
+
+
+                                                       32000
+ (tokens/s)
+
+
+
+
+                                                                                                  15000                                      Python
+               40000                                                                                                                         Rust
+                                                       24000                                      12000
+               30000                                                                                                                         PinTok
+                                                       16000                                       9000
+                              384     448     512                  512      768     1,024                     512      768    1,024
+                                    Tokens                               Tokens                                      Tokens
+  Figure 5.           Embedding throughput with three representative models                                  (e5-base-v2,        ModernBERT-base,
+  embeddinggemma-300m) on varying input lengths (128-2048 tokens per input).                                  (Higher is better). PinTok consistently
+  achieves higher throughput than Rust and Python baselines.
+
+
+  volves querying a large language model (LLM), GPT-OSS                             prehensive question-answering and reasoning tasks. For
+  120b (OpenAI, 2025), which is often used for more com-                            the first and second workflows, we report the total time
+
+                                                                                7
+
+===== PDF p.8 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+                                               Average                 P50                       P90                     P99
+       Latency (us)
+        e5-base-v2
+                              2 × 104
+
+                                  104
+                                         384             512    384            512       384             512     384             512
+                              6 × 104
+embeddinggemma-ModernBERT-
+  Latency (us) Latency (us)
+
+
+
+
+                              4 × 104                                                                                                     Python
+                   base
+
+
+
+
+                              3 × 104                                                                                                     Rust
+                                                                                                                                          PinTok
+                                         512      768   1,024   512    768     1,024     512     768     1,024   512      768    1,024
+
+                              9 × 1044
+                              8 × 104
+     300m
+
+
+
+
+                              7 × 10
+                              6 × 104
+                              5 × 104
+                                         512      768   1,024   512    768     1,024     512     768     1,024   512      768    1,024
+                                               Tokens                 Tokens                    Tokens                  Tokens
+   Figure 6. Latency distributions (average, P50, P90, P99) for embedding pipelines for three models on varying input length (128-2048
+   tokens per input). (Lower is better.) PinTok consistently achieves lower latency than Rust and Python baselines.
+
+   Table 2. Average latency (ms) and the latency saving of PinTok with respect to Python for various ML applications and models.
+   ChromaDB retrieval and insertion are measured using the experimental setup discussed in Section B, whereas SLM and LLM TTFTs
+   are obtained on an H100 GPU.
+
+                                                           Application PinTok            Rust     Python Latency Saving (%)
+                                                ChromaDB retrieval 11.35    16.73   20.06                               43%
+                                               ChromaDB insertion 47.55     52.93   56.26                               16%
+                                            Qwen3 4B query (TTFT) 413.55 418.93 422.26                                  2.1%
+                                         GPT-OSS 120b query (TTFT) 1348.55 1353.93 1357.26                             0.64%
+
+
+   required to complete the operations, whereas for the third                            5. Conclusion
+   and fourth workflows, we report the Time-to-First-Token
+   (TTFT), due to the variable nature of the output depending                            In this work, we present PinTok, a tokenizer system that
+   on the input and infrastructure configuration.                                        achieves acceleration through system-level optimizations.
+                                                                                         We provide experimental results that demonstrate the sig-
+   The results in Table 2 clearly demonstrate that latency re-                           nificance of the speedup provided by PinTok.
+   ductions are more pronounced for shorter workflows, as the
+   improvements from PinTok primarily stem from the tok-                                 Our work highlights how system-level treatment of tok-
+   enizer. However, even for large language models, a latency                            enization can unlock both research and production gains.
+   reduction of approximately 1% can translate into a 1% im-                             A promising direction is to adapt subword algorithms for
+   provement in overall system efficiency. We argue that, at                             streaming so they integrate more naturally with PinTok.
+   scale, such improvements can be highly significant, espe-                             In byte-pair encoding (e.g., GPT-2’s byte-level BPE), tok-
+   cially considering that PinTok is a software-only solution                            enization repeatedly applies ranked pair-merges; in Word-
+   and does not require new hardware.                                                    Piece (e.g., BERT), tokenization performs greedy longest-
+                                                                                         match segmentation over a learned subword vocabulary. In
+                                                                                         both cases, the correct segmentation can depend on con-
+                                                                                         text that spans chunk or packet boundaries. When run
+                                                                                         strictly per-packet, the tokenizer may commit early and
+
+
+                                                                                     8
+
+===== PDF p.9 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+yield segmentations that are suboptimal or that diverge              embeddings. https://developers.googleblo
+from the full-context (offline) tokenizer’s output. Investi-         g.com/en/introducing-embeddinggemma/,
+gating streaming-aware adaptations that preserve accuracy            2025. Google Developers Blog.
+while enabling low-latency execution is therefore a valu-
+able avenue for future work.                                       CodeParrot Team. Github code dataset. https://hugg
+                                                                     ingface.co/datasets/codeparrot/githu
+Another avenue for future work is implementing PinTok                b-code, 2022.
+directly at the hardware level, specifically on the NIC. In-
+network computing is an emerging research area that lever-         contributors, C. chroma-core/chroma: The AI-native open-
+ages the compute capabilities of NIC (instead of CPU or              source vector database. https://github.com/c
+GPU compute) for processing streaming data, with the pri-            hroma-core/chroma, 2025. Accessed: [Date Ac-
+mary goal of reducing latency (Sapio et al., 2017a). De-             cessed].
+ploying PinTok on NICs presents a significant potential for
+further efficiency gains.                                          Dang, H. T., Bressana, P., Wang, H., Lee, K. S., Zilberman,
+                                                                     N., Weatherspoon, H., Canini, M., Pedone, F., and Soulé,
+                                                                     R. P4xos: Consensus as a network service. IEEE/ACM
+Acknowledgment                                                       Transactions on Networking, 28(4):1726–1738, 2020.
+We thank the reviewers, area chairs, and the program chairs
+for their valuable discussions and insightful feedback on          Devlin, J., Chang, M.-W., Lee, K., and Toutanova, K.
+early drafts of this manuscript. SC was supported by the             BERT: Pre-training of deep bidirectional transformers
+National Science Foundation under Grant No. NSF CRII                 for language understanding. North American Chapter of
+2245352. EKR was supported as a fellow of the Alfred P.              the Association for Computational Linguistics: Human
+Sloan Foundation.                                                    Language Technologies, 2019.
+
+                                                                   et al., A. G. The Llama 3 herd of models. arXiv preprint
+Impact Statement                                                      arXiv:2407.21783, 2024.
+This paper presents work whose goal is to advance the field        Foundation, L. Data Plane Development Kit (DPDK),
+of machine learning. There are many potential societal con-          2015. URL http://www.dpdk.org.
+sequences of our work, none of which we feel must be
+specifically highlighted here.                                     Gage, P. A new algorithm for data compression. C Users
+                                                                     Journal, 12(2):23–38, 1994.
+References                                                         Gbadamosi, B., Leonardi, L., Pulls, T., Høiland-Jørgensen,
+Ali, M., Fromm, M., Thellmann, K., Rutmann, R.,                      T., Ferlin-Reiter, S., Sorce, S., and Brunström, A. The
+  Lübbering, M., Leveling, J., Klug, K., Ebert, J., Doll,           ebpf runtime in the linux kernel, 2024. URL https:
+  N., Buschhoff, J., Jain, C., Weber, A., Jurkschat, L., Ab-         //arxiv.org/abs/2410.00026.
+  delwahab, H., John, C., Ortiz Suarez, P., Ostendorff, M.,
+  Weinbach, S., Sifa, R., Kesselheim, S., and Flores-Herr,         Gokaslan, A., Cohen, V., Pavlick, E., and Tellex, S. Open-
+  N. Tokenizer choice for LLM training: Negligible or                WebText Corpus. https://Skylion007.githu
+  crucial? In Duh, K., Gomez, H., and Bethard, S. (eds.),            b.io/OpenWebTextCorpus, 2019.
+  Findings of the Association for Computational Linguis-           Jawa, V. Run state of the art NLP workloads at scale with
+  tics: NAACL 2024, pp. 3907–3924, Mexico City, Mex-                 RAPIDS, HuggingFace, and Dask. NVIDIA Developer
+  ico, June 2024. Association for Computational Linguis-             Blog, May 2021. URL https://developer.nvid
+  tics. doi: 10.18653/v1/2024.findings-naacl.247. URL                ia.com/blog/run-state-of-the-art-nlp
+  https://aclanthology.org/2024.findin                               -workloads-at-scale-with-rapids-hug
+  gs-naacl.247/.                                                     gingface-and-dask/. Accessed: 2025-09-02.
+Bosshart, P., Daly, D., Gibb, G., Izzard, M., McKeown,             Jin, X., Li, X., Zhang, H., Soulé, R., Lee, J., Foster, N.,
+  N., Rexford, J., Schlesinger, C., Talayco, D., Vahdat,              Kim, C., and Stoica, I. NetCache: Balancing key-value
+  A., Varghese, G., and Walker, D. P4: Programming                    stores with fast in-network caching. Symposium on Op-
+  protocol-independent packet processors. SIGCOMM                     erating Systems Principles, 2017.
+  Computer Communication Review, 44(3):87–95, 2014.
+                                                                   Kapoor, R., Anastasiu, D. C., and Choi, S. ML-NIC: Accel-
+Choi, M., Dua, S., and Lisak, A. Introducing embed-                  erating machine learning inference using smart network
+  dinggemma: The best-in-class open model for on-device              interface cards. Frontiers in Computer Science, 6, 2025.
+
+                                                               9
+
+===== PDF p.10 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+Kianpisheh, S. and Taleb, T. A survey on in-network com-            Radford, A., Wu, J., Child, R., Luan, D., Amodei, D., and
+  puting: Programmable data plane and technology spe-                 Sutskever, I. Language models are unsupervised mul-
+  cific applications. IEEE Communications Surveys & Tu-               titask learners. Technical report, OpenAI, 2019. URL
+  torials, 25(1):701–761, 2023.                                       https://cdn.openai.com/better-languag
+                                                                      e-models/language_models_are_unsuperv
+Kudo, T. and Richardson, J. SentencePiece: A simple                   ised_multitask_learners.pdf.
+  and language independent subword tokenizer and detok-
+  enizer for neural text processing. Empirical Methods in           Sanvito, D., Siracusano, G., and Bifulco, R. Can the net-
+  Natural Language Processing: System Demonstrations,                 work be the AI accelerator? Morning Workshop on In-
+  2018.                                                               Network Computing, 2018.
+
+la Rosa, J. D., Ponferrada, E. G., Romero, M., Villegas,            Sapio, A., Abdelaziz, I., Aldilaijan, A., Canini, M., and
+   P., de Prado Salas, P. G., and Grandury, M. BERTIN:                Kalnis, P. In-network computation is a dumb idea
+   Efficient pre-training of a spanish language model using           whose time has come. In Proceedings of the 16th ACM
+   perplexity sampling. Procesamiento del Lenguaje Natu-              Workshop on Hot Topics in Networks, HotNets ’17, pp.
+   ral, 68(0):13–23, 2022.                                            150–156, New York, NY, USA, 2017a. Association for
+                                                                      Computing Machinery. ISBN 9781450355698. doi:
+Lample, G. and Conneau, A. Cross-lingual language model               10.1145/3152434.3152461. URL https://doi.
+  pretraining. Neural Information Processing Systems,                 org/10.1145/3152434.3152461.
+  2019.
+                                                                    Sapio, A., Abdelaziz, I., Canini, M., and Kalnis, P. DAIET:
+Lao, C., Le, Y., Mahajan, K., Chen, Y., Wu, W., Akella, A.,           A system for data aggregation inside the network. Sym-
+  and Swift, M. ATP: In-network aggregation for multi-                posium on Cloud Computing, 2017b.
+  tenant learning. Networked Systems Design and Imple-
+  mentation, 2021.                                                  Sapio, A., Canini, M., Ho, C.-Y., Nelson, J., Kalnis, P.,
+                                                                      Kim, C., Krishnamurthy, A., Moshref, M., Ports, D., and
+Navarro, J., Iyer, S., Druschel, P., and Cox, A. Practi-              Richtarik, P. Scaling distributed machine learning with
+  cal, transparent operating system support for superpages.           in-network aggregation. Networked Systems Design and
+  Operating Systems Design and Implementation, 2002.                  Implementation, 2021.
+
+NVIDIA Corporation. NVIDIA BlueField Networking                     Sennrich, R., Haddow, B., and Birch, A. Neural machine
+ Platform. https://www.nvidia.com/en-us/                              translation of rare words with subword units. Association
+ networking/products/data-processing-u                                for Computational Linguistics, 2016.
+ nit/, 2025. Accessed: September 16, 2025.
+                                                                    Song, X., Salcianu, A., Song, Y., Dopson, D., and Zhou,
+OpenAI. gpt-oss-120b & gpt-oss-20b model card. arXiv                  D. Fast wordpiece tokenization. Empirical Methods in
+  preprint arXiv:2508.10925, 2025.                                    Natural Language Processing, 2021.
+
+Pagnoni, A., Pasunuru, R., Rodriguez, P., Nguyen, J.,               Wang, L., Yang, N., Huang, X., Jiao, B., Yang, L., Jiang,
+  Muller, B., Li, M., Zhou, C., Yu, L., Weston, J. E.,               D., Majumder, R., and Wei, F. Text embeddings by
+  Zettlemoyer, L., Ghosh, G., Lewis, M., Holtzman, A.,               weakly-supervised contrastive pre-training, 2024. URL
+  and Iyer, S. Byte latent transformer: Patches scale better         https://arxiv.org/abs/2212.03533.
+  than tokens. Association for Computational Linguistics,
+  2025.                                                             Warner, B., Chaffin, A., Clavié, B., Weller, O., Hallström,
+                                                                     O., Taghadouini, S., Gallagher, A., Biswas, R., Ladhak,
+Psaras, I., Chai, W. K., and Pavlou, G. In-network cache             F., Aarsen, T., Adams, G. T., Howard, J., and Poli, I.
+  management and resource allocation for information-                Smarter, better, faster, longer: A modern bidirectional
+  centric networks. IEEE Transactions on Parallel and                encoder for fast, memory efficient, and long context fine-
+  Distributed Systems, 25(11):2920–2931, 2014.                       tuning and inference. Association for Computational
+                                                                     Linguistics, 2025.
+Radford, A., Narasimhan, K., Salimans, T., and Sutskever,
+  I. Improving language understanding by generative pre-            Wu, F., Li, Z., Wei, F., Li, Y., Ding, B., and Gao, J. Talk
+  training. Technical report, OpenAI, 2018. URL https:               to right specialists: Routing and planning in multi-agent
+  //cdn.openai.com/research-covers/lang                              system for question answering. CoRR, abs/2501.07813,
+  uage-unsupervised/language_understan                               2025. doi: 10.48550/ARXIV.2501.07813. URL http
+  ding_paper.pdf.                                                    s://doi.org/10.48550/arXiv.2501.07813.
+
+                                                               10
+
+===== PDF p.11 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+Xiong, Z. and Zilberman, N. Do switches dream of ma-
+  chine learning?: Toward in-network classification. ACM
+  Workshop on Hot Topics in Networks, 2019.
+Yang, A., Li, A., Yang, B., Zhang, B., Hui, B., Zheng, B.,
+  Yu, B., Gao, C., Huang, C., Lv, C., Zheng, C., Liu, D.,
+  Zhou, F., Huang, F., Hu, F., Ge, H., Wei, H., Lin, H.,
+  Tang, J., Yang, J., Tu, J., Zhang, J., Yang, J., Yang, J.,
+  Yang, J., Zhou, J., Zhou, J., Lin, J., Dang, K., Bao, K.,
+  Yang, K., Yu, L., Deng, L., Li, M., Xue, M., Li, M.,
+  Zhang, P., Wang, P., Zhu, Q., Men, R., Gao, R., Liu, S.,
+  Luo, S., Li, T., Tang, T., Yin, W., Ren, X., Wang, X.,
+  Zhang, X., Ren, X., Fan, Y., Su, Y., Zhang, Y., Zhang,
+  Y., Wan, Y., Liu, Y., Wang, Z., Cui, Z., Zhang, Z., Zhou,
+  Z., and Qiu, Z. Qwen3 technical report. arXiv preprint
+  arXiv:2505.09388, 2025.
+You, A. BlockBPE: Parallel BPE tokenization. In ES-FoMo
+  III: 3rd Workshop on Efficient Systems for Foundation
+  Models, 2025. URL https://openreview.net
+  /forum?id=y1lzO94o65.
+Zheng, C., Zang, M., Hong, X., Bensoussane, R., Var-
+  gaftik, S., Ben-Itzhak, Y., and Zilberman, N. Automat-
+  ing in-network machine learning, 2022. URL https:
+  //arxiv.org/abs/2205.08824.
+Zouhar, V., Meister, C., Gastaldi, J., Du, L., Vieira, T.,
+  Sachan, M., and Cotterell, R. A formal perspective
+  on byte-pair encoding. In Rogers, A., Boyd-Graber,
+  J., and Okazaki, N. (eds.), Findings of the Association
+  for Computational Linguistics: ACL 2023, pp. 598–614,
+  Toronto, Canada, July 2023. Association for Computa-
+  tional Linguistics. doi: 10.18653/v1/2023.findings-acl
+  .38. URL https://aclanthology.org/2023.
+  findings-acl.38/.
+
+
+
+
+                                                               11
+
+===== PDF p.12 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+A. PinTok initialization configuration
+PinTok requires a one-time modification of the boot configuration. For a more portable deployment of PinTok, these
+configurations can easily be baked into an OS image (e.g., Amazon Machine Images) so that the configurations are done
+seamlessly.
+
+A.1. Core pinning
+Core pinning requires few configurations in detail. First, isolcpus removes the specific CPU from being considered for
+task scheduling. Second, nohz_full make sure that the kernel tries to move away from that CPU as much kernel noise
+as it can Third, we need to remove the CPU from participating in Read-Copy-Update (RCU). RCU system is a lockless
+mechanism for mutual exclusion inside the kernel, so as a consequence of performing RCU operations, call-backs are
+sometimes queued on CPUs to be performed at a future moment when removing memory is safe. We can remove this by
+setting rcu_nocbs. Fourth, we need to remove a CPU from servicing CPU interrupts by setting the irqaffinity
+parameters. All of this can be done by setting the GRUB parameter as follows.
+GRUB_CMDLINE_LINUX="... isolcpus=0 nohz_full=0 \
+    rcu_nocbs=0 irqaffinity=1-"
+
+Finally, we need to ensure that the CPU is running at the fastest clock by updating the setting on the CPU governor to
+performance. This can be done by running the following.
+sudo cpupower frequency-set -g performance
+echo ’GOVERNOR="performance"’ | sudo tee /etc/default/cpupower >/dev/null
+sudo systemctl enable --now cpupower
+
+
+A.2. Memory pinning
+The main idea behind memory pinning is to enable superpages, which is a way to increase each page size, so that the pages
+are not swapped out and TLB efficiency is greatly increased (since each TLB entry maps to a much larger memory space).
+Once superpages are created, they can be dedicated to a specific application, enabling the memory pinning effect to take
+place. The superpages can be enabled by modifying the boot parameter as follows.
+# /etc/default/grub
+GRUB_CMDLINE_LINUX="... default_hugepagesz=1G hugepagesz=1G hugepages=8"
+
+This enables 8 superpages of size 1G, occupying 8GB of RAM in total. The configuration can be easily modified based on
+the type of system and constraints. Once created, you must mount the superpages as follows.
+nodev /mnt/huge hugetlbfs pagesize=1GB 0 0
+
+Then the superpages are ready to use for the tokenizers by using the mount point as the memory location.
+
+A.3. DPDK
+For network level optimization, we utilized DPDK (Foundation, 2015). The DPDK installation instructions are highly
+fluid based on the software version, thus we provide the URL (https://doc.dpdk.org/guides-<version>
+/linux_gsg/index.html) to the installation manual to select the version of DPDK of interest. Similarly to other
+configurations, it is trivial to enable DPDK as part of the OS installation. In fact, DPDK is widely used in data center
+settings to deploy fast networking logic to hundreds of thousands of servers and users maybe using DPDK without them
+knowing. Therefore, we believe that PinTok can follow the same deployment patterns without problems.
+
+B. Experimental setup
+All experiments were conducted on a Linux host running Ubuntu 24.04 with an AMD Ryzen 7 2700 eight-core processor
+(3.2 GHz base frequency), 32 GB DDR4 RAM, and an NVIDIA GeForce RTX 4090 GPU. The GPU was configured
+with the nvidia-driver-535.247.01 (CUDA 12.2).
+To enable portability across heterogeneous hardware, we deployed PinTok inside a KVM-based virtual machine. The
+VM was allocated 4 vCPUs (with one core dedicated and pinned to the DPDK datapath), 24 GB RAM, and full GPU
+
+                                                           12
+
+===== PDF p.13 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+passthrough via the vfio-pci driver. This configuration ensured that the guest environment could directly access the
+RTX 4090 while preserving isolation and reproducibility across hosts.
+Within this virtualized environment, packets were transmitted to a designated port and ingested by DPDK for tokenization.
+Details of core pinning, memory pinning, and DPDK initialization are provided separately in Appendix A. The PinTok
+codebase used in these experiments will be made publicly available to support reproducibility.
+
+C. Corpus Token Frequency Profiles
+The corpora selected for our benchmarks exhibit distinct token frequency profiles, as illustrated in Figure 7. In panel (a), the
+source code corpus achieves coverage saturation with far fewer unique tokens (reflecting its repetitive structure), whereas
+the natural language corpora require many more unique tokens for the same coverage. In panel (b), the code dataset
+contains a larger fraction of rare tokens, while the web text corpora have more mid-frequency tokens.
+
+
+
+
+(a) Cumulative token coverage that shows the number of to-                 (b) The number of unique tokens is distributed across differ-
+kens required to cover the portion of the entire data set. We              ent frequency ranges. For example, in the frequency range
+can see that few unique tokens dominate the github-code                    of 1, the GitHub-code dataset shows many tokens that appear
+dataset, whereas natural language is more diverse.                         only once, whereas such single-occurrence tokens are much
+                                                                           less common in natural language datasets.
+                                     Figure 7. Token distributional characteristics across datasets.
+
+
+
+D. Function Description for Algorithm 1
+In order to aid in understanding of Algorithm 1, this section provides a high-level description of each helper function.
+
+Conventional tokenizer system
+
+   • KERNELNETWORK(P): Top-level routine that receives packets from the NIC and forwards them through kernel
+     memory, user-space memory, and finally to the tokenizer.
+
+   • NICINTERRUPT(CPU): Triggers a hardware interrupt to notify the CPU that new packets have arrived.
+
+   • STARTISR(CPU): Begins the interrupt service routine (ISR) on the CPU to process incoming packets.
+
+   • COPYTOKERNEL(p_i): Copies packet pi from the NIC into kernel memory (first extra copy).
+
+   • COPYTOUSERSPACE(p_{k_i}): Copies the kernel-space packet pki into user-space memory (second extra copy).
+
+   • REASSEMBLEANDORDER(B): Reconstructs the original query q from the packet fragments in B.
+
+                                                                   13
+
+===== PDF p.14 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+PinTok optimized system
+
+  • PIN(cores := dedicated RX/token cores): Pins dedicated CPU cores for NIC receive and tokenization
+    tasks to avoid scheduler overhead.
+
+  • PIN(mem := superpages/pinned pools): Pins memory (e.g., hugepages) so buffers remain resident in
+    RAM and are safe for zero-copy access.
+
+  • INITNIC(RX queues bound to pinned mbufs): Initializes the NIC with RX queues backed by pinned
+    mbuf pools.
+
+  • ALLOCPINNEDMEMZONE: Allocates a pinned memory zone mz to store token IDs for direct Python consumption.
+
+  • TOKENIZE($p_i \rightarrow mz$): Tokenizes packet pi , writing token IDs into the pinned buffer mz and
+    returning the valid token-ID range Trange .
+
+  • PUBLISHTOPYTHON($mz$, $T_{\text{range}}$): Publishes a zero-copy view of token IDs in mz to
+    Python for immediate use.
+
+  • RECYCLERXBUF($p_i$): Recycles the RX packet buffer pi back to the mbuf pool for reuse.
+
+
+E. Standalone tokenizer results
+This section reports the full numeric results complementing the figures in the main paper. We provide throughput values
+(mean ± std over 20 trials) and tokenization latencies (average, median, 90th, and 99th percentiles) across three datasets:
+OpenWebText, GitHub Code, and Multilingual mC4.
+
+                          Table 3. Throughput on OpenWebText (tokens/s); mean ± std over 20 trials.
+
+                         Tokens           PinTok                    Rust                 Python
+                            128    2,184,300 ± 353,365 226,336 ± 11,358             100,009 ± 3,208
+                            256    2,359,882 ± 242,993 358,840 ± 19,385             146,068 ± 6,997
+                            512    1,888,184 ± 269,203 559,276 ± 24,345             152,204 ± 4,371
+                           1024    2,574,805 ± 301,764 964,473 ± 68,975             222,728 ± 4,372
+                           2048    3,301,043 ± 177,819 1,978,916 ± 132,838          279,221 ± 9,422
+
+
+                           Table 4. Throughput on GitHub Code (tokens/s); mean ± std over 20 trials.
+
+                         Tokens           PinTok                    Rust                 Python
+                            128    2,300,917 ± 621,243 289,783 ± 16,447             121,913 ± 3,728
+                            256    3,184,080 ± 552,462 343,288 ± 10,827             136,032 ± 2,729
+                            512    2,773,865 ± 495,923 611,789 ± 23,261             178,328 ± 4,747
+                           1024    2,489,909 ± 396,499 735,289 ± 73,780             189,469 ± 3,269
+                           2048    3,207,417 ± 162,651 1,287,249 ± 178,258          259,777 ± 5,739
+
+
+
+F. End-to-end embedding pipeline results
+This section presents the embedding throughput and latency results across three representative models—e5-base-v2,
+ModernBERT-base, and embeddinggemma-300m—on the OpenWebText dataset. The results highlight both average
+performance and distributional latency metrics to capture system efficiency under different token sizes.
+
+                                                              14
+
+===== PDF p.15 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+            Table 5. Throughput on Multilingual mC4 sample (tokens/s); mean ± std over 20 trials.
+
+                  Tokens            PinTok                      Rust                   Python
+                     128    1,780,746 ± 339,897 258,320 ± 13,596                   101,254 ± 2,703
+                     256    2,422,866 ± 225,410 305,435 ± 12,758                   113,743 ± 4,172
+                     512    1,683,989 ± 260,929 613,960 ± 20,371                   168,092 ± 4,073
+                    1024    1,863,004 ± 122,291 733,934 ± 87,706                   172,058 ± 2,909
+                    2048    2,364,459 ± 111,131 1,248,697 ± 120,072                232,933 ± 4,754
+
+            Table 6. Tokenization latency on OpenWebText (µs); mean over 20 trials. Lower is better.
+
+                            PinTok                    Rust                             Python
+          Tokens
+                    Avg P50 P90      P99     Avg   P50    P90      P99       Avg    P50      P90     P99
+             128     59     36 117 325 566 509 769 1,121 1,280 1,135 1,888 2,412
+             256    108     95 193 542 713 802 1,180 1,776 1,753 1,756 3,222 4,333
+             512    271    216 366 1,650 915 846 1,182 1,664 3,364 2,596 6,077 7,836
+            1024    398    328 577 2,184 1,062 912 1,307 4,011 4,598 2,815 10,037 12,346
+            2048    620    462 926 2,664 1,035 899 1,309 3,170 7,335 2,936 18,269 22,073
+
+            Table 7. Tokenization latency on GitHub Code (µs); mean over 20 trials. Lower is better.
+
+                           PinTok                     Rust                                Python
+         Tokens
+                   Avg P50 P90       P99     Avg   P50      P90    P99       Avg     P50      P90    P99
+            128     56     28 106 473 442 394 618 891 1,050 903 1,583 2,186
+            256     80     50 153 458 746 686 986 1,428 1,882 1,689 2,693 3,486
+            512    185    168 287 1,011 837 1,022 1,477 1,984 2,871 3,718 5,111 6,376
+           1024    411    345 510 2,221 1,393 1,152 1,668 6,233 5,405 4,820 8,381 10,327
+           2048    639    606 841 1,950 1,591 1,184 1,919 8,316 7,884 6,253 13,617 16,175
+
+      Table 8. Tokenization latency on Multilingual (mC4 sample; µs); mean over 20 trials. Lower is better.
+
+                           PinTok                        Rust                              Python
+        Tokens
+                  Avg P50     P90    P99     Avg    P50      P90       P99    Avg     P50     P90     P99
+            128    72     47 140 612 496 440 689 1,121 1,264 1,084 2,026 2,567
+            256   106     79 212 446 838 784 1,115 1,601 2,251 2,142 3,441 4,256
+            512   304    272 413 1,630 834 946 1,488 2,022 3,046 3,653 5,532 8,511
+           1024   550    493 689 1,546 1,395 1,155 1,579 6,108 5,951 5,692 8,566 11,485
+           2048   866    876 1,187 2,386 1,640 1,181 1,731 9,535 8,792 6,253 15,316 18,975
+
+   Table 9. Embedding throughput on OpenWebText (tokens/s) with e5-base-v2; mean ± std over 5 trials.
+
+                  Tokens         PinTok                     Rust                     Python
+                     384 37,706.43 ± 678.93 27,289.27 ± 260.21 22,827.46 ± 166.07
+                     448 44,388.80 ± 645.82 30,598.06 ± 407.97 25,391.84 ± 155.67
+                     512 52,686.38 ± 847.33 33,941.27 ± 74.61 27,562.44 ± 299.99
+
+Table 10. Embedding throughput on OpenWebText (tokens/s) with ModernBERT-base; mean ± std over 5 trials.
+
+                  Tokens         PinTok                     Rust                     Python
+                     512 20,505.75 ± 143.75 16,387.15 ± 101.70 14,908.04 ± 367.73
+                     768 29,680.00 ± 660.51 21,956.97 ± 236.09 19,752.79 ± 346.90
+                    1024 37,855.23 ± 199.71 26,135.28 ± 406.14 23,367.15 ± 401.33
+
+
+                                                       15
+
+===== PDF p.16 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+
+
+
+    Table 11. Embedding throughput on OpenWebText (tokens/s) with embeddinggemma-300m; mean ± std over 5 trials.
+
+                       Tokens           PinTok                   Rust               Python
+                           512 9,709.27 ± 82.91    8,871.95 ± 69.38  8,358.14 ± 53.98
+                           768 14,382.93 ± 119.59 12,515.31 ± 67.31 11,680.84 ± 41.30
+                          1024 19,010.85 ± 99.77 15,963.13 ± 161.73 14,716.64 ± 40.86
+
+
+
+
+      Table 12. Embedding pipeline latency on OpenWebText with e5-base-v2 (µs); mean over 5 trials. Lower is better.
+
+                          PinTok                                Rust                            Python
+     Tokens
+                Avg     P50     P90      P99     Avg      P50          P90    P99   Avg      P50      P90      P99
+         384 10,187 9,959 11,021 13,634 14,072 13,824 15,591 21,063 16,823 16,490 18,511 25,523
+         448 10,094 9,892 10,944 13,372 14,644 14,353 16,298 20,879 17,644 17,401 19,377 22,522
+         512 9,720 9,546 10,419 12,634 15,085 14,891 16,839 19,984 18,578 18,260 20,617 24,360
+
+
+
+
+  Table 13. Embedding pipeline latency on OpenWebText with ModernBERT-base (µs); mean over 5 trials. Lower is better.
+
+                          PinTok                                 Rust                            Python
+     Tokens
+               Avg      P50      P90     P99      Avg      P50          P90   P99    Avg      P50      P90     P99
+        512 24,970 24,324 27,178 33,261 31,245 30,500 34,493 40,895 34,361 33,774 37,863 43,621
+        768 25,886 25,269 28,254 34,897 34,981 34,216 38,555 47,606 38,890 38,285 42,981 49,534
+       1024 27,051 26,247 29,600 36,358 39,188 38,462 43,713 49,983 43,833 43,239 48,914 55,078
+
+
+
+
+Table 14. Embedding pipeline latency on OpenWebText with embeddinggemma-300m (µs); mean over 5 trials. Lower is better.
+
+                          PinTok                                 Rust                            Python
+     Tokens
+               Avg      P50      P90     P99      Avg      P50          P90   P99    Avg      P50      P90     P99
+        512 52,736 51,533 57,201 62,566 57,713 56,787 62,666 68,547 61,260 60,166 66,371 73,348
+        768 53,400 52,064 57,926 63,483 61,366 60,242 66,709 73,986 65,749 64,544 71,485 81,191
+       1024 53,865 52,361 58,296 64,564 64,153 63,004 69,433 77,639 69,582 68,529 75,400 83,681
+
+
+
+
+                                                           16
+
+===== PDF p.17 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+G. Byte pair encoding (BPE) algorithm
+The BPE algorithm that we have utilized for the evaluations has two parts: training and inference, i.e., tokenization.
+Although the focus of this work is mainly on inference, we are sharing both the training and inference logic for reference.
+Furthermore, each model has model-specific training and inference logic that adds custom logic to the provided code, but
+the high-level idea stays the same.
+
+Phase 1: Training (Learning Merges)
+This part of the algorithm takes as input a text corpus and a desired vocabulary size. It iteratively merges the most frequent
+adjacent pairs of symbols to build a vocabulary and a list of merge rules.
+function train_bpe(corpus, vocab size)
+    % 1. Initialization
+    vocab ← set of all unique characters in corpus
+    pre tokenized corpus ← split corpus by whitespace, then split each word into
+    characters
+    num merges ← vocab size - size(vocab)
+    merge rules ← empty list
+
+     % 2. Iterative Merging
+     for i = 1 to num merges do
+         % Get statistics of all adjacent pairs
+         pair counts ← get_pair_stats(pre tokenized corpus)
+
+           % Find the most frequent pair
+           if pair counts is empty then
+               break % No more pairs to merge
+           end if
+           best pair ← argmax(pair counts) % e.g., (’t’, ’h’)
+
+           % Create the new token by merging the best pair
+           new token ← best pair[0] + best pair[1] % e.g., "th"
+
+           % Add the new token and merge rule
+           add new token to vocab
+           add best pair to merge rules (in order of merging)
+
+         % Update the corpus by replacing all occurrences of ‘best_pair‘
+         pre tokenized corpus ← merge_pair(pre tokenized corpus, best pair, new token)
+     end for
+
+    return vocab, merge rules
+end function
+
+% Helper function to compute pair status
+function get_pair_stats(corpus)
+    counts ← empty dictionary
+    for each word in corpus do
+        symbols ← tokens in the word
+        for j = 0 to size(symbols) - 2 do
+             pair ← (symbols[j], symbols[j+1])
+             increment count for pair in counts
+        end for
+    end for
+    return counts
+end function
+
+
+function merge_pair(corpus, pair to merge, new token)
+    new corpus ← empty list
+    for each word in corpus do
+        new word ← replace all occurrences of pair to merge in word with new token
+        add new word to new corpus
+
+                                                             17
+
+===== PDF p.18 =====
+PinTok: Tokenizers Deserve Dedicated Pinned CPU-Compute and Memory
+
+    end for
+    return new corpus
+end function
+                                    Pseudocode for BPE Training to build the dictionaries
+
+
+Phase 2: Inference / Tokenization
+Given a query and the learned merge rules from the training step, this function tokenizes the text by applying the rules in
+the same order that they were learned.
+function bpe_tokenize(text, merge rules)
+    % 1. Pre-tokenization
+    words ← split text by whitespace
+    tokenized output ← empty list
+
+     % 2. Apply merge rules to each word
+     for each word in words do
+         % Start with individual characters
+         word tokens ← split word into characters
+
+         % Iteratively apply all learned merge rules
+         for each pair in merge rules do
+             new word tokens ← empty list
+             i ← 0
+             while i < size(word tokens) do
+                 if i < size(word tokens) - 1 and (word tokens[i], word tokens[i+1]) == pair
+      then
+                      add (word tokens[i] + word tokens[i+1]) to new word tokens
+                      i ← i + 2
+                 else
+                      add word tokens[i] to new word tokens
+                      i ← i + 1
+                 end if
+             end while
+             word tokens ← new word tokens
+         end for
+
+         add word tokens to tokenized output
+     end for
+
+    return flatten(tokenized output)
+end function
+                                            Pseudocode for BPE at Tokenization
+
+
+
+
+                                                             18

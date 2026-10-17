@@ -1,0 +1,2118 @@
+===== PDF p.1 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+
+       Kyle Lee 1 Corentin Delacour 1 Kevin Callahan-Coray 1 Kyle Jiang 1 Can Yaras 2 Samet Oymak 2
+                                  Tathagata Srimani 3 Kerem Y. Camsari 1
+
+
+                        Abstract                                    1. Introduction
+                                                                    Transformers (Vaswani et al., 2017) underpin modern lan-
+                                                                    guage models (OpenAI, 2023; Touvron et al., 2023; Gem-
+     Autoregressive decoding becomes bandwidth-
+                                                                    ini Team et al., 2023). As deployments increasingly rely
+     limited at long contexts, as generating each to-
+                                                                    on long contexts, autoregressive decoding enters a regime
+     ken requires reading all nk key and value vec-
+                                                                    where throughput is often limited by memory bandwidth:
+     tors from KV cache. We present Stochastic Ad-
+                                                                    generating each new token repeatedly streams the Key–
+     ditive No-mulT Attention (SANTA), a method
+                                                                    Value (KV) cache for all prior tokens. For example, for
+     that sparsifies value-cache access by sampling
+                                                                    Llama-3.1-8B-Instruct at a 32k-token context, streaming
+     S ≪ nk indices from the post-softmax distribu-
+                                                                    bf16 keys and values is on the order of ∼128 MB per layer
+     tion and aggregates only those value rows. This
+                                                                    per generated token, and KV memory demands scale lin-
+     yields an unbiased estimator of the post-softmax
+                                                                    early with context length and batch size.
+     value aggregation while replacing value-stage
+     multiply-accumulates with gather-and-add. We                   A broad literature mitigates this bottleneck from several
+     introduce stratified and systematic sampling to                angles. KV-cache quantization/compression reduces bytes
+     design variance-reduced, GPU-friendly variants.                per element (Liu et al., 2024; Hooper et al., 2024); cache-
+     Evaluated on Llama-3.1-8B-Instruct at 32k-token                management policies reduce the number of retained tokens
+     contexts, S2 ANTA matches baseline accuracy                    (Tang et al., 2024; Zhang et al., 2023); and structured spar-
+     while achieving up to 1.5× decode-step attention-              sity or candidate selection reduces attention cost (Child et al.,
+     kernel speedup over FlashInfer and FlashDecod-                 2019; Zaheer et al., 2020; Beltagy et al., 2020; Wang et al.,
+     ing on an NVIDIA RTX 6000 Ada. In batched                      2020; Kitaev et al., 2020; Chen et al., 2025). Architectural
+     long-context generation, these kernel gains trans-             changes such as grouped-query attention (GQA) reduce KV
+     late to up to 1.25× end-to-end decode-latency                  footprint by sharing keys/values across heads (Ainslie et al.,
+     speedup. Finally, we propose Bernoulli qK T                    2023), and decoding kernels improve IO locality for exact
+     sampling as a complementary technique to spar-                 attention (Dao et al., 2023; Ye et al., 2025). However, even
+     sify the score stage, reducing key-feature access              with optimized exact kernels, long-context decoding still
+     through stochastic ternary queries. Both meth-                 incurs a persistent cost: each step touches essentially the full
+     ods are complementary to upstream quantiza-                    KV state. In contrast to methods that decide which tokens
+     tion, low-rank projection, KV-cache compression,               or cache blocks are retained, evicted, or reconstructed, our
+     and KV-cache selection methods. Together, they                 goal is to reduce the cost of the value aggregation operator
+     point toward sparse, multiplier-free, and energy-              over whatever KV state is made available at decode time.
+     efficient inference. We open-source our kernels
+                                                                    We study a complementary inference-time lever: reducing
+     at: https://github.com/OPUSLab/SANTA.git
+                                                                    the amount of KV data accessed per decode step without
+                                                                    permanently discarding cache contents. Our primary focus
+                                                                    is the post-softmax value aggregation, where dense attention
+   1
+     Department of Electrical and Computer Engineering, Uni-        computes AV by multiplying attention weights by all nk
+versity of California, Santa Barbara, CA, USA 2 Department of       value rows. We introduce Stochastic Additive No-mulT
+Electrical and Computer Engineering, University of Michigan,        Attention (SANTA), which samples S ≪ nk indices from
+Ann Arbor, MI, USA 3 Department of Electrical and Computer          the post-softmax distribution and aggregates only those sam-
+Engineering, Carnegie Mellon University, Pittsburgh, PA, USA.
+Correspondence to: Kyle Lee <kylelee@ucsb.edu>.                     pled rows of V via gather-and-add. This yields an unbiased
+                                                                    estimator of the post-softmax value aggregation while re-
+Proceedings of the 43 rd International Conference on Machine        ducing value-cache row reads per query from nk to S (and
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026        eliminating value-stage multiplications in favor of additive
+by the author(s).
+
+                                                                1
+
+===== PDF p.2 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+accumulation). We further propose variance-reduced vari-                  In principle, SANTA can be employed for the prefill or
+ants (S2 ANTA) based on stratified and systematic sampling                decode stages. Since the benefit of sparse memory access
+that bolster accuracy and admit GPU-friendly implementa-                  becomes apparent in decode, we present SANTA as a de-
+tions. Since sparsifying V reads yields the clearest band-                coding algorithm. In autoregressive decoding, we consider
+width benefit in decoding, our systems evaluation targets                 a single query vector q ∈ R1×dk . Scaled dot-product atten-
+decode-step acceleration at long contexts.                                tion (SDPA) is expressed as a function of the key matrix and
+                                                                          value matrix:
+On modern GPUs, these changes translate into measurable
+                                                                                                              qK T
+                                                                                                                  
+kernel-level gains: our S 2 ANTA CUDA kernels achieve                            Attn(q, K, V ) = softmax √           V = AV,       (1)
+up to 1.5× decode-step attention-kernel speedup over                                                            dk
+FlashInfer and FlashDecoding at 32k-token contexts while
+                                                                          where K ∈ Rnk ×dk is the key matrix, V ∈ Rnk ×dk is the
+matching baseline accuracy on long-context prompts (Sec-
+                                                                          value matrix, and A ∈ R1×nk represents the attention scores
+tion 3).
+                                                                          as a probability distribution.
+Finally, we propose Bernoulli qK T sampling as a comple-
+                                                                          To approximate AV , we treat A as a categorical distribution
+mentary technique for the score stage: it represents query el-
+                                                                          over keys and sample S indices i.i.d. from it (with replace-
+ements as Bernoulli variables to form sparse ternary queries
+                                                                          ment). For query vector q, we fetch the corresponding S
+in {−1, 0, +1}, yielding an unbiased estimator of qK T and
+                                                                          rows of V and average them. This yields an estimate of the
+inducing feature-sparse key access during decoding. In this
+                                                                          attention output using only row indexing and addition.
+work, our implemented kernels and measured speedups are
+driven primarily by value-stage sparsification; Bernoulli                 As an illustrative example, consider number of keys nk =
+qK T is presented as a complementary mechanism that can                   3. We sample S = 3 one-hot attention vectors from the
+be combined with SANTA to sparsify both branches.                         categorical distribution A:
+Contributions. Concretely, we: (i) introduce SANTA and                      d = 1 1 0 0 + 1 0 0 + 0 0 1 V, (2)
+                                                                                                                       
+                                                                           AV
+variance-reduced S 2 ANTA as unbiased estimators of the                            3
+post-softmax value aggregation that reduce value-cache                    which simplifies by distributivity of matrix multiplication
+reads from nk to S; (ii) design GPU kernels that paral-                   over addition:
+lelize sampling and sparse accumulation, demonstrating
+                                                                           d=1 1 0 0 V + 1 0 0 V + 0 0 1 V
+                                                                                                                            
+up to 1.5× decode-step attention-kernel speedup and up to                 AV
+                                                                                  3
+1.25× end-to-end decode-latency speedup in batched long-                          1                
+context generation while matching baseline long-context                        = V1 + V 1 + V 3 .
+                                                                                  3
+accuracy; (iii) empirically characterize tunable accuracy–                                                                         (3)
+efficiency trade-offs on GSM8K, MMLU, and long-context                    where each Vi ∈ R1×dk is a sampled row of V . The one-
+benchmarks; and (iv) propose Bernoulli qK T sampling as a                 hot attention vectors in Eqs. 2, 3 are only for illustrative
+complementary score-stage estimator that can reduce key-                  purposes; they represent an indexing and gather operation,
+feature access during decoding.                                           and are not materialized as vectors in memory.
+                                                                          Finally, SANTA can be summarized as:
+2. Stochastic Additive No-mulT Attention
+                                                                                                 S
+   (SANTA)                                                                                 d= 1
+                                                                                                X
+                                                                                           AV      Vi ≈ AV,                        (4)
+                                                                                              S s=1 s
+                                                                          where is is a sampled index and each Vis denotes a gath-
+ Stochastic Additive No-mulT Attention (SANTA)
+                                                                          ered row from V . Multiplications in the value stage have
+                            Gather
+                                              KT ∈   dk × nk
+
+
+
+
+       Sample                                                  Sum
+                                                                          therefore been eliminated in favor of sampling, indexing
+                                                                          and addition. If S is chosen as a power of 2 (and the model
+                                                                          has a fixed point representation), normalization may be
+                                                                          implemented as a bit-shift. Fig. 1 illustrates SANTA’s mem-
+                                                                          ory access benefits for autoregressive decoding: SANTA
+                                                                          sparsely reads only S ≪ nk sampled rows of V and com-
+   Attn distribution
+                                                                          putes an additive average without multiplications after the
+                                                                          softmax.
+Figure 1. SANTA requires S ≪ nk memory accesses to sampled                We provide a formal mathematical description of SANTA in
+rows of V , eliminating multiplications following the softmax oper-       Appendix A. SANTA is an unbiased estimator of the atten-
+ation. Normalization by S is a bit shift if S is a power of 2.            tion function whose variance scales as 1/S (Appendix A.1,
+
+                                                                      2
+
+===== PDF p.3 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+A.2). A dimension-free high-probability concentration                2.2. Theoretical Operations and Memory Accesses
+bound for SANTA is deferred to Appendix B.
+                                                                     By virtue of SANTA’s sparsity, in autoregressive decoding,
+                                                                     SANTA demonstrates a S/nk reduction in post-softmax
+2.1. S 2 ANTA: Stratified and Systematic Sampling
+                                                                     additions and reads to rows of V , where S is the sample
+S 2 ANTA reduces variance via stratified sampling: dividing          budget and nk is the number of keys. SANTA removes post-
+the CDF into S equal probability mass intervals and sam-             softmax multiplications in favor of additive accumulation
+pling once per interval for better coverage of the attention         (see Appendix E for analysis of decode-step operations and
+distribution. We devise two variants: independent strat-             memory accesses).
+ified sampling (S 2 ANTA-strat) and systematic sampling              In prefill, while similar arguments hold for SANTA’s re-
+(S 2 ANTA-sys).                                                      duced additions and removed multiplies, there is no longer
+The mechanics of S 2 ANTA-strat remain identical to default          sparse memory access to the value matrix V . Each of
+SANTA, except the S samples are drawn per stratum in-                nq = nk queries may each sample S rows of V , therefore
+stead of iid from the full distribution. Systematic sampling         requiring ≫ S rows of V when the union across all queries
+(S 2 ANTA-sys) similarly splits the attention distribution           is considered (see Appendices F, G for prefill analysis).
+CDF into S equal probability mass partitions. However,
+whereas independent stratified sampling draws S random               3. GPU Kernels for Variance-Reduced SANTA
+offsets for each of S strata, systematic sampling draws a
+single offset U and applies the same offset to all strata, ef-       Section 2 introduced SANTA and variance-reduced sam-
+fectively drawing S samples with a single random number.             pling rules (stratified/systematic), which specify what to
+                                                                     sample to form an unbiased estimator of the value-stage
+                                                                     aggregation AV . In this section we focus on how to realize
+Construction. Fix a query q. Let Aq = (pq1 , . . . , pqnk )
+                                                                     these samplers efficiently at decode time on GPUs: we in-
+be the attention weights and Fq the associated CDF on [0, 1).
+                                                                     troduce two kernel strategies, S 2 ANTA-prop and S 2 ANTA-
+Partition [0, 1) into S equal intervals
+                                                                     flash, which differ in how they allocate samples across tiles
+                                                                     (global proportional allocation vs. speculative per-tile sam-
+   Im := [m/S, (m + 1)/S),           m = 0, . . . , S − 1.           pling with deferred normalization). Both kernels instantiate
+                                                                     the systematic S 2 ANTA sampling rule introduced in Sec-
+Define two schemes:                                                  tion 2.1; the suffixes “prop” and “flash” refer to GPU execu-
+                                                                     tion strategies rather than distinct mathematical estimators.
+                                                                     Thus, Fig. 4 and Table 1 evaluate GPU-engineered versions
+   • Independent stratified (S 2 ANTA-strat). Draw
+                                                                     of S 2 ANTA-sys.
+     Tm ∼ Unif(Im ) independently for m = 0, . . . , S −
+                                               ind
+     1, set Jm := Fq−1 (Tm ), and output AV
+                                          d
+                                               q      :=             3.1. Parallelizing Stochastic Attention on GPUs
+     1
+       PS−1
+     S    m=0 VJm .
+                                                                     Efficient implementation on GPUs presents a unique sys-
+                                                                     tems challenge: parallelizing the sampling control flow.
+   • Systematic (S 2 ANTA-sys). Draw a single U ∼                    Standard attention (SDPA) is amenable to “split-KV” strate-
+     Unif([0, 1/S)) and take thresholds Tm := U +                    gies (e.g., FlashDecoding (Dao et al., 2023)) because the
+                                             sys
+     m/S. With Jm := Fq−1 (Tm ), output AVd
+                                             q   :=                  reduction of values is associative: partial sums can be com-
+     1
+       PS−1
+     S   m=0 VJm .
+                                                                     puted locally and merged later. Sampling, however, creates
+                                                                     a sequential dependency: determining which rows of V to
+                                                                     access generally requires a global Cumulative Distribution
+S 2 ANTA-strat and S 2 ANTA-sys are unbiased estimators of           Function (CDF). A naive implementation would require a
+attention (see Appendix A.4). Only S 2 ANTA-strat has a the-         sequential pass over the global probability distribution to
+oretical guarantee of variance reduction compared to default         draw sample indices, leaving the GPU compute units idle
+SANTA (see Appendix A.5). Despite lacking a variance                 and preventing parallel access to the value matrix.
+reduction guarantee, we validate that S 2 ANTA-sys exhibits
+comparable performance to S 2 ANTA-strat on reasoning                To unlock parallel V -access, we must determine the num-
+benchmarks and long-context benchmarks. S 2 ANTA-sys                 ber of samples per tile before or independently of the full
+demonstrates similar variance reduction to S 2 ANTA-strat            global reduction. We propose two strategies to break this
+in practice (see Appendix D). Systematic sampling with               dependency:
+S 2 ANTA-sys is appealing because it draws samples using
+one random number instead of S random numbers, which                   1. Proportional Sample Allocation (S 2 ANTA-prop):
+may be easier to implement in hardware.                                   We pre-calculate the probability mass of each tile to
+
+                                                                 3
+
+===== PDF p.4 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+     deterministically assign sample budgets. This requires             Comprehensive pseudocode is in Appendix P.
+     a global barrier but ensures exact load balancing.
+                                                                        3.3. S 2 ANTA-Flash: Speculative Sampling with
+ 2. Speculative Local Sampling (S 2 ANTA-flash): Tiles
+                                                                             Deferred Normalization
+    sample independently with uniform budgets, speculat-
+    ing that all tiles are equally important, followed by a               (1) Per-tile systematic sampling, equal sample budgets
+                                                                                                                                   Partial tile outputs
+    post-hoc re-weighting. This removes the barrier but
+    introduces sample waste.
+
+We implement both strategies and evaluate their decode-
+                                                                                                                    No global
+step kernel latency and long-context accuracy at 32k-token                                                            sync
+
+prompts in Section 3.4.
+                                                                                              samples per tile
+
+      2
+3.2. S ANTA-Prop: Exact Budget Allocation via Global
+     Sync                                                                 (2) Reweight partial tile outputs by probability mass:
+
+
+ (1) Tiled score matrix computation       (3) Per-tile systematic                    Figure 3. S 2 ANTA-flash kernel overview.
+                                          sampling, gather
+
+                                                                        To eliminate the latency of the global synchronization bar-
+                                                                        rier, S 2 ANTA-flash (Figure 3) adopts a speculative ap-
+                                                                        proach structurally similar to FlashDecoding.
+(2) Allocate tile samples (global sync)                                 Instead of pre-calculating the global budget, each tile is
+           Attn distribution                                            allocated a fixed, uniform budget Stile ≈ S/T , where T
+                                                                        is the number of tiles. Each tile samples locally as if it
+                                                                        contained the entire probability mass. A second reduction
+                                                                        kernel then computes the true global partition function Z
+               samples                                                  and down-weights the partial outputs of tiles that had low
+                                                                        probability mass.
+          Figure 2. S 2 ANTA-prop kernel overview.
+                                                                        This method maximizes parallelism by removing the global
+ 2
+S ANTA-prop (Figure 2) breaks the sequential sampling                   barrier but suffers from sample waste: tiles with low proba-
+dependency by resolving the global partition function Z in              bility mass still consume compute and bandwidth to draw
+a lightweight initial pass.                                             samples that are effectively down-weighted during the final
+                                                                        merge. In our 32k-token evaluation (Section 3.4), match-
+The algorithm proceeds in three stages. The key dimension               ing SDPA accuracy requires substantially larger budgets for
+nk is partitioned into tiles of length Btile .                          S 2 ANTA-flash; the accuracy-matching operating point is
+                                                                        S=2048 for S 2 ANTA-flash versus S=128 for S 2 ANTA-
+ 1. Pass 1 (score stash & tile stats): We compute atten-                prop (Table 1). See Appendix Q for full pseudocode.
+    tion scores exactly. The exponentiated scores (or a
+    normalized equivalent) are written to global memory.                3.4. Kernel Results at Long Contexts (32k)
+    Crucially, since the scores are scalars (1×nk ) while the
+    values are vectors (nk × dk ), this stash consumes negli-           We evaluate decode-step attention kernel latency together
+    gible bandwidth (1/dk ) compared to a full value fetch.             with end-task accuracy in the long-context decoding regime.
+    We also compute and write local partition functions                 Within this section, SDPA is used for prefill and only the
+    Ztile .                                                             decode step uses S 2 ANTA. Kernel timings are reported for
+                                                                        a single decoding step on an NVIDIA RTX 6000 Ada GPU
+ 2. Global budget allocation: A separate kernel sums the                (batch size 1) using bf16 Q/K/V tensors with Llama-3.1-8B-
+    tile statistics to find the global Z. It then assigns a             Instruct (Meta AI, 2024) tensor shapes; we compare against
+    specific sample count to each tile: Stile ∝ S ·(Ztile /Z).          optimized FlashInfer and FlashDecoding backends. The
+                                                                        measurement protocol and tensor layouts are provided in
+ 3. Pass 2 (parallel gather): Using the stashed scores and
+                                                                        Appendix R.
+    the assigned Stile , each tile systematically samples
+    indices and accumulates rows from V . Tiles with low                To make latency comparisons meaningful, we select one op-
+    probability mass are assigned Stile = 0, allowing them              erating point per kernel family as the smallest sample budget
+    to skip the expensive V -read entirely.                             S that matches SDPA accuracy on 32k-token long-context
+
+                                                                    4
+
+===== PDF p.5 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+ tasks. This yields S=128 for S 2 ANTA-prop and S=2048                                         Table 1. Accuracy of Llama 8B on 4 long-context tasks with a
+                                                                                               32,768-token prompt. SDPA is used in prefill. Tasks: frequent
+ for S 2 ANTA-flash. These are exactly the configurations                                      word extraction (FWE), needle-in-a-haystack (NIAH), single-hop
+ that deliver ≈ 1.5× decode-step attention-kernel speedup                                      QA (QA1 ), multi-hop QA (QA2 ). S: sample budget. Accuracy
+ in Fig. 4 while matching SDPA within confidence intervals                                     shows 95% bootstrap confidence intervals.
+ in Table 1.
+                                                                                               Kernel              S        FWE         NIAH          QA1          QA2
+                                                (a)                                              2
+                                                                                               S ANTA-prop        128 95.40±1.10 98.25±0.62 64.40±4.50 60.20±4.20
+                                                                                               S 2 ANTA-prop
+                   0.25       S2ANTA-prop (S = 128)       FlashInfer                                              256 95.47±1.10 98.50±0.57 63.40±4.10 60.60±4.00
+                              S2ANTA-prop (S = 256)       FlashDecoding                        S 2 ANTA-prop     1024 95.40±1.07 98.40±0.60 64.20±4.00 59.60±4.40
+                              S2ANTA-prop (S = 1024)
+Kernel time (ms)
+
+
+
+
+                                                                                  1.50 ×
+                   0.20                                                                        S 2 ANTA-flash     256 66.20±2.40 88.95±1.43 63.00±4.20 57.20±4.30
+                                                                                               S 2 ANTA-flash    1024 91.60±1.43 98.10±0.62 62.20±4.10 61.00±4.30
+                                                                                               S 2 ANTA-flash    2048 94.13±1.13 98.25±0.62 64.60±4.20 60.00±4.40
+                   0.15
+                                                                                               SDPA (baseline)    — 95.60±1.00 98.35±0.62 64.00±4.10 58.80±4.10
+                   0.10
+
+                                                                                               Table 2. LongBench v2 accuracy for Llama 8B at the main
+                   0.05
+                                                                                               accuracy-matching operating points. S: sample budget. Accu-
+                                                                                               racy shows 95% bootstrap confidence intervals.
+                          4096 8192            16384                      32768
+                                         Sequence length nk                                             Kernel              S        Acc. (%)   Avg. scored tok.
+
+                                                (b)
+                                                                                                         2
+                                                                                                        S ANTA-prop        128   28.098±1.028           29998.4
+                                                                                                        S 2 ANTA-flash    2048   28.827±3.422           29996.4
+                   0.25       S2ANTA-flash (S = 256)      FlashInfer
+                              S2ANTA-flash (S = 1024)     FlashDecoding                                 SDPA (baseline)     —    28.363±1.509           29996.0
+                              S ANTA-flash (S = 2048)
+                               2
+Kernel time (ms)
+
+
+
+
+                   0.20
+                                                                                  1.51 ×
+
+
+
+
+                   0.15                                                                        At these operating points, the speedups are driven primarily
+                                                                                               by reduced memory traffic from sparsifying reads of the
+                   0.10
+                                                                                               value matrix V . For S 2 ANTA-prop, S=128 corresponds to
+                                                                                               extremely sparse value access at 32k contexts; even account-
+                   0.05
+                                                                                               ing for the worst-case union across Llama 8B’s four-query
+                          4096 8192            16384                      32768                GQA group, this is ≲ 1.56% of value rows.
+                                         Sequence length nk
+                                                                                               S 2 ANTA-flash attains comparable speedup, but requires a
+ Figure 4. S 2 ANTA kernel latency on Llama 8B tensor shapes for 1                             larger total sample budget because uniform per-tile sam-
+ decoding step. (a) S 2 ANTA-prop demonstrates a 1.50× speedup                                 pling expends samples on low-mass tiles before the deferred
+ relative to FlashInfer at a 32k-token context. (b) S 2 ANTA-flash                             renormalization step (“sample waste”).
+ similarly exhibits a 1.51× speedup. Both operating points (S =
+ 128 for prop, S = 2048 for flash) correspond to configurations                                Appendix H compares against top-k at matched budgets
+ that recover baseline accuracy (Table 1).                                                     k = S; top-k is competitive on short-context GSM8K, but
+                                                                                               S 2 ANTA variants outperform top-k across nearly all 8k-
+ We next verify that these speedup points preserve long-                                       token long-context tasks, with the largest gaps on multi-hop
+ context accuracy. We evaluate on tasks from RULER (Hsieh                                      QA.
+ et al., 2024) using 32,768-token prompts: frequent-word                                       These timings isolate the decode-step attention kernel. We
+ extraction (FWE), needle-in-a-haystack (NIAH), single-hop                                     next verify that the kernel-level gain survives integration into
+ QA (QA1 , derived from SQuAD (Rajpurkar et al., 2018)),                                       a full generation loop, where prefill, MLPs, normalization,
+ and multi-hop QA (QA2 , derived from HotpotQA (Yang                                           projections, and framework overheads remain unchanged.
+ et al., 2018)). Results are shown in Table 1.
+                                                                                               The full LongBench v2 budget sweep, additional 8k-token
+ We further evaluate the same accuracy-matching operat-                                        kernel-accuracy results, and relative numerical error/tile size
+ ing points on LongBench v2 (Bai et al., 2025), a broader                                      analyses are available in Appendices I, S, and U, respec-
+ long-context reasoning benchmark. Results are shown in                                        tively.
+ Table 2. Across three runs, prompts longer than 32k to-
+ kens are truncated to 32k following the repository protocol.
+                                                                                               3.5. End-to-End Batched Decoding
+ In this 30k-token regime, S 2 ANTA-prop with S=128 and
+ S 2 ANTA-flash with S=2048 match SDPA within bootstrap                                        We next measure end-to-end decode latency by integrating
+ confidence intervals, using the same operating points where                                   our kernels into a batched generation loop. The experiment
+ Fig. 4 reports ≈ 1.5× decode-step attention-kernel speedup.                                   uses Llama-3.1-8B-Instruct on an NVIDIA RTX 6000 Ada
+
+                                                                                           5
+
+===== PDF p.6 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+GPU with bf16 model weights and KV cache. We use                            3.6. Energy Considerations
+representative QA prompts truncated to 30k tokens, batch
+                                                                            Beyond latency, S 2 ANTA’s design offers two complemen-
+size 6, and decode 2048 new tokens per prompt. Prefill
+                                                                            tary paths to energy reduction. First, sparse memory access
+is kept dense for all methods; S 2 ANTA is applied only
+                                                                            reduces value-cache traffic from nk to S rows per query;
+during autoregressive decoding. We use the same accuracy-
+                                                                            at accuracy-matching operating points, this corresponds to
+matching operating points as in Section 3.4: S = 2048 for
+                                                                            >90% reductions in value-stage memory access at 32k con-
+S 2 ANTA-flash and S = 128 for S 2 ANTA-prop.
+                                                                            texts. Second, replacing dense multiply-accumulate with
+                                                                            gather-and-add eliminates multiplication operations entirely.
+Table 3. End-to-end batched generation latency for Llama 8B                 While our current GPU kernels primarily exploit the first
+on RTX 6000 Ada. Prompts are truncated to 30k tokens, batch                 benefit, hardware architectures optimized for sparse, adder-
+size is 6, and each prompt decodes 2048 new tokens. Prefill                 centric computation could realize both. These characteris-
+remains dense; S 2 ANTA is applied only during decode. Results              tics make S 2 ANTA a natural fit for emerging AI accelerators
+are averaged over 9 batches.
+                                                                            where memory bandwidth and multiplier energy are primary
+                         Prefill     Decode     ms / output   Decode        constraints.
+Method             S    (s/batch)   (s/batch)     token       speedup
+
+FlashAttn-2         –      56.69     101.22          8.237    1.000×
+S 2 ANTA-flash   2048      56.61      80.97          6.589    1.250×
+                                                                            4. General Reasoning & Accuracy Verification
+S 2 ANTA-prop     128      57.03      82.36          6.702    1.229×
+                                                                            Having established the long-context decode regime in Sec-
+                                                                            tion 3, we additionally test SANTA, S 2 ANTA-strat, and
+                                                                            S 2 ANTA-sys as mathematical constructions on GSM8K,
+Table 3 shows that the decode-step kernel gains trans-                      MMLU, and 8k-token long-context tasks using PyTorch ref-
+late to end-to-end generation: S 2 ANTA-flash achieves a                    erence implementations. These experiments apply SANTA
+1.25× decode-latency speedup and S 2 ANTA-prop achieves                     in both prefill and decoding, so we use the short-context
+a 1.229× speedup relative to FlashAttention-2 (Dao, 2024).                  results primarily as accuracy checks rather than speedup
+The prefill times remain essentially unchanged, as expected,                claims; sparse value-cache memory savings are most mean-
+since these measurements use dense prefill and replace only                 ingful during autoregressive decoding. HumanEval code-
+the decode-time softmax–V aggregation. Thus, SANTA                          generation results are reported in Appendix T.
+is best viewed as a specialized backend for long-context,
+decode-heavy workloads rather than a prefill accelerator.                   4.1. GSM8K
+The observed end-to-end speedup is consistent with a simple
+Amdahl-style bandwidth model. SANTA modifies only the                       Table 4. GSM8K accuracy and average context length (prompt
+                                                                            + answer) for Llama-3.1-8B-Instruct. S: SANTA sample budget.
+decode-time softmax–V aggregation, so its realized bene-                    Accuracy shows 95% bootstrap confidence intervals.
+fit is bounded by the share of decode bandwidth spent on
+the KV pathway. In bf16, for one batched decode step,                                 S 2 ANTA-sys        S 2 ANTA-strat          SANTA
+the Llama 8B weights contribute roughly 15 GB of traffic,                    S      Acc. (%)     Tok.    Acc. (%)     Tok.    Acc. (%)    Tok.
+while the KV cache for a batch of six 30k-token prompts                       2    1.11±0.34     1071    1.01±0.32    1071    1.26±0.34   1075
+contributes roughly 24 GB. Combining this bandwidth share                     4    1.67±0.40      569    1.54±0.38     611    1.57±0.37    825
+with the measured long-context attention-kernel speedup                       8    2.10±0.45      340    1.74±0.40     325    1.44±0.38    207
+                                                                             16   44.63±1.58     349    39.12±1.50    352     5.51±0.72   350
+sKV ≈ 1.5 predicts 1/((15/39) + (24/39)/1.5) ≈ 1.26×,                        32   68.59±1.42     339    67.00±1.48    343    38.26±1.43   348
+close to the observed 1.25× decode speedup in Table 3.                       64   76.42±1.34     341    74.43±1.31    343    63.63±1.49   346
+This also explains why longer contexts and larger batches                   128   77.33±1.34     342    75.64±1.33    341    70.23±1.42   341
+should increase SANTA’s marginal benefit, while shorter                     256   77.56±1.34     343    78.17±1.28    343    75.61±1.42   342
+
+contexts, prefill-heavy workloads, or aggressive KV-cache                   SDPA (baseline)                                  78.06±1.33   344
+quantization may reduce it; model-weight quantization may
+have the opposite effect by increasing the relative share of
+                                                                            We consider Llama-3.1-8B-Instruct (“Llama 8B”) (Meta AI,
+KV traffic.
+                                                                            2024) on the GSM8K dataset as a mathematical reasoning
+Our measured kernel and end-to-end speedups are on RTX                      benchmark (Cobbe et al., 2021; OpenAI, 2023). Table 4
+6000 Ada GPUs. Because SANTA reduces KV-cache traf-                         provides both accuracy and the average number of tokens
+fic, we expect the qualitative benefit to remain relevant                   (prompt + answer). Because the compute and memory ac-
+in bandwidth-bound decode on datacenter GPUs such as                        cess costs of SANTA are contextualized relative to the se-
+A100/H100, but exact speedups will depend on memory                         quence length nk , these sequence lengths justify the regimes
+bandwidth, cache hierarchy, batching, and kernel integra-                   where S ≪ nk and SANTA is, in principle, cheaper than
+tion.                                                                       SDPA in attention’s value stage.
+
+                                                                        6
+
+===== PDF p.7 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+Default SANTA exhibits respectable performance, but                        Table 6. Accuracy of Llama 8B on 4 long-context tasks with
+                                                                           an 8k-token prompt. Tasks: frequent word extraction (FWE),
+variance-reduced S 2 ANTA variants demonstrate superior                    needle-in-a-haystack (NIAH), single-hop QA (QA1 ), multi-hop
+performance across every sample budget S. S 2 ANTA imple-                  QA (QA2 ). S: SANTA sample budget. Accuracy shows 95%
+mentations approach the accuracy of full SDPA (within 1%)                  bootstrap confidence intervals.
+while S remains shorter than the sequence length nk , trans-
+lating to memory-access savings and FLOP energy savings.                    Kernel             S       FWE        NIAH        QA1         QA2
+                                                                             2
+In deployment settings where LLM users do not require                       S ANTA-sys         64 96.27±0.97 94.05±1.07 71.80±3.90 67.20±4.20
+maximum model performance, the sample budget S can be                       S 2 ANTA-sys      128 97.80±0.70 94.15±1.02 68.20±4.10 66.80±4.00
+                                                                            S 2 ANTA-sys      256 97.87±0.70 95.00±0.95 71.20±3.90 69.40±4.10
+tuned to save computation cost. For instance, S 2 ANTA-sys
+                                                                            S 2 ANTA-strat     64 95.93±0.94 94.35±1.15 71.40±4.00 65.40±4.20
+achieves 76.42% accuracy at S = 64, which is about 19%
+                                                                            S 2 ANTA-strat    128 97.73±0.80 94.30±1.10 70.80±4.20 67.40±4.20
+of the average sequence length of nk = 341 tokens. For                      S 2 ANTA-strat    256 98.33±0.60 94.55±1.05 71.20±4.00 67.00±4.20
+a modest accuracy trade-off compared to SDPA’s 78.06%,                      SANTA              64 92.53±1.27 93.95±1.30 64.60±4.20 63.40±4.20
+S 2 ANTA-sys in principle costs 19% of the additions, 19%                   SANTA             128 94.53±1.13 91.45±1.38 67.80±4.10 63.40±4.30
+of the V -matrix accesses, and no multiplies.                               SANTA             256 96.20±0.93 93.15±1.18 68.00±4.10 66.40±4.10
+
+                                                                            SDPA (baseline)   — 98.53±0.60 94.55±1.00 71.80±3.90 68.60±4.20
+We provide additional DeepSeek-R1-Distill-Qwen-
+7B (DeepSeek-AI, 2025) (DeepSeek 7B) results and
+comparisons to sparse top-k attention in Appendix H.
+                                                                           uses just S/nk = 3.125% of the value-stage additions
+4.2. MMLU                                                                  and memory accesses compared to full attention (follow-
+                                                                           ing Table 10). It achieves this while using no multiplica-
+Table 5. MMLU accuracy and average context length (prompt +                tions and recovering baseline SDPA accuracy (within ±1%)
+answer) for Llama-3.1-8B-Instruct. S: SANTA sample budget.                 across every task.
+Accuracy shows 95% bootstrap confidence intervals.
+                                                                           For full clarity, when Llama 8B’s grouped-query atten-
+          S 2 ANTA-sys        S 2 ANTA-strat            SANTA              tion (Ainslie et al., 2023) with 4 grouped queries is fully
+ S      Acc. (%)     Tok.    Acc. (%)       Tok.    Acc. (%)    Tok.       accounted for, then memory access to unique rows of V can
+  2   24.52±1.22     1141   24.28±1.21     1141    24.89±1.27   1144       in the worst case reach 12.5%, which remains extremely
+  4   24.49±1.18      774   24.65±1.26      807    25.13±1.20    961       sparse. Extended results with top-k comparisons are pro-
+  8   24.47±1.23      292   25.63±1.23      286    25.06±1.23    284
+ 16   34.14±1.39     353    32.46±1.32     350     26.24±1.26   313
+                                                                           vided in Appendix H.
+ 32   45.48±1.45     403    43.78±1.50     398     33.81±1.34   354
+ 64   48.70±1.39     418    49.25±1.48     415     41.11±1.40   397
+128   50.60±1.37     421    49.92±1.47     421     47.46±1.45   412
+                                                                           5. Bernoulli qK T for Sparse Key Access
+256   51.12±1.46     421    50.90±1.49     422     49.75±1.51   417
+
+SDPA (baseline)                                    49.86±1.47   424                                Bernoulli
+                                                                                                       Gather
+We further evaluate SANTA on the MMLU bench-                                     Sample                                             Sum
+mark (Hendrycks et al., 2021; Center for AI Safety, 2024),
+which tests factual recall and general reasoning. MMLU
+benchmarking observes similar trends as GSM8K, where
+                                                                           Normalized query
+SANTA virtually recovers baseline accuracy at S = 256,
+which is significantly shorter than the average sequence                   Figure 5. Bernoulli qK T represents elements of the query vector
+length nk = 417. S 2 ANTA variants outperform default                      as Bernoulli probabilities, sparsifying along the feature dimension
+SANTA across S budgets of 64–256, recovering baseline                      dk with multiplier-free arithmetic.
+SDPA accuracy (within 1%) with multiplier-free arithmetic
+and sparse memory access to rows of V since S ≪ nk .                       SANTA reduces memory access for the value matrix by
+Extended results with DeepSeek 7B and top-k comparisons                    sampling from the softmax distribution; however, it leaves
+are provided in Appendix H.                                                the score computation (qK T ) intact. As illustrated in Fig. 5,
+                                                                           we demonstrate that Bernoulli sampling of the query natu-
+4.3. Long-Context Benchmarks                                               rally zeroes out query-irrelevant features, thereby effectively
+                                                                           reducing memory access for the key matrix.
+We benchmark SANTA on long-context tasks borrowed
+from RULER (Hsieh et al., 2024) with a prompt length of                    We propose representing each query element as an inde-
+8192 tokens. The theoretical benefit of S 2 ANTA’s sparse                  pendent Bernoulli variable, allowing the corresponding key
+computation is most stark in this long-context regime. With                feature to be pruned when the sampling probability is low.
+a budget of S = 256 in an 8192-token sequence, S 2 ANTA                    While this method is applicable to the prefill phase, it in-
+
+                                                                       7
+
+===== PDF p.8 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+duces sparse key access specifically during decoding; there-                          Consequently, the set of accessed features becomes the
+fore, we focus on a single query q. First, the query vector is                        union of those required by all queries in the group, sig-
+normalized as q ← q/norm, where norm ≥ maxi |qi |. This                               nificantly increasing memory traffic. Table 7 illustrates this
+ensures that each element qi ∈ [−1, 1] can be interpreted as                          effect: with B = 4 samples, K T access jumps from 67.5%
+a probability. Next, we estimate the product p = qK T as:                             per head to 97.9% for the group. To preserve sparsity in
+                                                                                      this scenario, we propose using a representative query m
+                                           B
+                                 norm X (n) T                                         for the entire group, defined as the mean of the queries’
+                          pb =          qb K ,                              (5)       absolute values. We then construct the estimator m  b for the
+                                  B n=1
+                                                                                      mean query m via Monte Carlo sampling (detailed in Ap-
+where B is the sample count and qb(n) is a sparse ternary                             pendix C.2), which stochastically prunes the low-amplitude
+vector constructed via Bernoulli sampling (detailed in Ap-                            mean features.
+pendix C). The linearity of expectation ensures this esti-                            With B = 4 samples, m    b contains approximately 15% of
+mator is unbiased. Because qb(n) contains only values in                              zero elements, which allows fetching only 85% of key fea-
+{−1, 0, +1}, pb can be computed without multiplications by                            tures for the group (Table 7). The product p = qK T for
+gathering and accumulating selected rows of K T , followed                            each query is finally estimated as:
+by normalizing bit shifts for fixed-point representations.
+                                                                                                                      q T
+Table 7 shows GSM8K results for Bernoulli qK T applied                                                     pb = mb⊙       K ,               (6)
+                                                                                                                      m
+to BitNet 2B (Ma et al., 2025) for both prefill and decoding.
+Using B = 4 stratified samples nearly recovers the accuracy                           where ⊙ denotes element-wise multiplication. In this sce-
+of standard SDPA for the GSM8K benchmark, although the                                nario, calculating pb requires normalization by m to compen-
+approximated scores typically have a 30% error (Appendix                              sate for the bias introduced by the mean group query. As
+C.1). This suggests that the qK T product within the highly                           shown in Table 7, the resulting estimator achieves similar
+quantized BitNet 2B architecture can tolerate numerical                               accuracy to the single-query configuration while saving 15%
+errors while maintaining strong overall performance.                                  of key memory accesses. We employ the mean group query
+                                                                                      estimator (Eq. 6) in all the following experiments.
+Crucially, Bernoulli qK T enables sparse access to cached
+keys, a benefit that is uniquely effective during decoding
+(the prefill phase requires nearly all features). This is shown                       5.2. Long-Context Benchmarks
+in Table 7: with B = 4, the model needs only 67.5% of key                             We evaluate our method on long-context tasks using Llama
+features per head (vs. ∼ 100% for prefill), while maintain-                           8B, applying Bernoulli qK T strictly during decoding since
+ing accuracy within 2% of the SDPA baseline.                                          prefill requires full feature access. As detailed in Table 8,
+                                                                                      using B = 8 samples reduces key feature access to 72.8%
+Table 7. Performance of Bernoulli qK T (stratified) on GSM8K                          for Llama 8B, with minimal accuracy loss (< 2% on NIAH,
+(BitNet 2B) with the test set evaluated three times, and confidence
+intervals obtained by bootstrapping.                                                  QA1 , and QA2 ). Furthermore, this experiment highlights
+                                                                                      that key memory access patterns vary significantly across
+                                      Acc. (%)      Avg.   K T Access (%)             models. In contrast to Llama 8B, BitNet 2B requires access-
+       Method                B        (95% CI)      Tok.   Head Group                 ing 97.1% of features for the same budget (B = 8, Table 7),
+       SDPA                      –   65.7 ± 1.5    306.1   100     100                a difference we attribute to distinct query distributions.
+                              1       1.9 ± 0.43 1478.6    25.6    65.8
+                                                                                      Table 8. Accuracy of Llama 8B on 4 long-context tasks with
+                              2      48.7 ± 1.4   345.9    46.3    88.0
+                      T
+                                                                                      a 4,096-token prompt. Tasks: frequent word extraction (FWE),
+       Bernoulli qK           4      64.5 ± 1.5   309.4    67.5    97.9
+                                                                                      needle-in-a-haystack (NIAH), single-hop QA (QA1 ), multi-hop
+                              8      65.1 ± 1.5   316.9    82.6    99.8
+                                                                                      QA (QA2 ). B: Bernoulli qK T (mean group query) sample budget.
+                             16      65.8 ± 1.5  317.7     91.1    100
+                                                                                      Accuracy shows 95% bootstrap confidence intervals.
+                              2      48.6 ± 1.5    318.6   57.9    57.9
+       Mean Group Query       4      63.8 ± 1.5    311.4   84.7    84.7                 Kernel             KT
+                                                                                        (qK T )    B    Access (%)    FWE        NIAH       QA1        QA2
+       Bernoulli qK T         8      65.6 ± 1.6    311.4   97.1    97.1
+                             16      66.2 ± 1.5    310.2   99.7    99.7                Bernoulli    4      47.3      70.4±2.0   87.2±1.9   72.0±3.8   66.2±4.1
+                                                                                       Bernoulli    8      72.8      89.4±1.4   93.8±1.4   73.6±3.9   70.2±3.9
+                                                                                       Bernoulli   16      92.1      92.7±1.2   94.5±1.2   74.8±3.5   71.6±4.2
+                                                                                        SDPA       –        –        94.0±1.1   95.0±1.2   73.8±3.8   70.8±4.0
+5.1. Mean Group Query
+While Bernoulli qK T effectively prunes irrelevant features
+                                                                                      5.3. Combining Bernoulli qK T and SANTA
+for individual heads, Grouped Query Attention (GQA)
+(Ainslie et al., 2023) complicates this by sharing keys and                           Combining SANTA with Bernoulli qK T enables sparse key–
+values across multiple heads (e.g., groups of 4 in BitNet).                           value accesses during decoding while replacing the majority
+
+                                                                                  8
+
+===== PDF p.9 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+of multiplications with additions. Table 9 shows the accu-           work. MLA-style architectures (DeepSeek-AI et al., 2024)
+racy for the GSM8K benchmark using BitNet 2B and B = 4               may similarly reduce the KV bandwidth share targeted by
+Bernoulli samples for the qK T computation, as the number            SANTA, making them an important future benchmark.
+of SANTA samples S is varied for the value stage. Using
+                                                                     Approximating attention and sampling vs. truncation.
+B = 4 for queries and S = 64 for attention weights almost
+                                                                     Structured sparsity and low-rank approximations reduce at-
+recovers the SDPA baseline with less than 2% accuracy
+                                                                     tention cost (often in prefill) (Child et al., 2019; Zaheer et al.,
+drop. Critically, this combined approach reduces key access
+                                                                     2020; Beltagy et al., 2020; Wang et al., 2020). In decoding,
+by 15.3% and value access by 89.2%.
+                                                                     candidate selection and query-pruning methods reduce the
+Table 9. Performance of Bernoulli qK T (mean group query) +          cost of identifying relevant tokens or approximating qK T
+SANTA on GSM8K (BitNet 2B) with the test set evaluated three         (Kitaev et al., 2020; Chen et al., 2025; Ribar et al., 2024).
+times (CI computed by bootstrapping).                                This is where our two methods differ in scope: SANTA op-
+                                                                     erates in the value stage and is orthogonal to score-stage
+                       Acc. (%)     Avg.    (K,V) Access (%)
+      Config                                                         approximations, while Bernoulli qK T is an alternative
+                        (95% CI)    Tok.         Group               score-stage estimator that induces feature-sparse key ac-
+      SDPA             65.7 ± 1.5   306.1      (100, 100)            cess via stochastic ternary queries.
+      B = 4, S = 8     55.0 ± 1.6   319.2      (84.7, 2.4)           Sampling-based attention approximations have also been
+      B = 4, S = 16    60.7 ± 1.5   313.3      (84.7, 3.7)
+                                                                     explored (Kim & Ko, 2022). A direct deterministic base-
+      B = 4, S = 32    62.3 ± 1.5   308.4      (84.7, 6.2)
+      B = 4, S = 64    63.8 ± 1.5   304.6     (84.7, 10.8)
+                                                                     line is top-k attention (Gupta et al., 2021), which reduces
+      B = 4, S = 128   64.1 ± 1.5   303.2     (84.7, 14.3)           value reads by truncation but is biased. In contrast, SANTA
+                                                                     provides an unbiased estimator of the post-softmax value
+                                                                     aggregation with controllable variance, and we empha-
+6. Related Work                                                      size variance reduction (stratified/systematic sampling) to-
+                                                                     gether with GPU kernels that realize measured speedups
+Exact attention kernels and memory-bound decoding.                   in the memory-bound decoding regime. Related stochastic-
+FlashAttention-style kernels optimize IO locality and utiliza-       computing implementations in spiking Transformer archi-
+tion for exact attention, including decoding-focused variants        tectures are orthogonal to this focus (Song et al., 2024). We
+(Dao et al., 2023; Ye et al., 2025). However, exact decod-           do not claim that stochastic sampling dominates determinis-
+ing still streams essentially the full KV state each step at         tic truncation in all regimes: Appendix H shows that top-k
+long contexts. Our approach is complementary: rather than            is competitive on short-context GSM8K. In the long-context
+further optimizing a full KV scan, we reduce the amount              regime targeted by SANTA, however, the same appendix
+of KV data accessed at runtime by sparsifying value-cache            shows S 2 ANTA outperforming top-k across nearly all 8k-
+reads (and, for Bernoulli qK T , key-feature reads).                 token tasks at matched budgets, especially on multi-hop QA,
+Reducing KV footprint, retention, and selection. KV                  where the answer may depend on several parts of the context
+quantization/compression reduces bytes per KV ele-                   rather than only the tokens with the largest attention scores.
+ment (Liu et al., 2024; Hooper et al., 2024), weight-only
+quantization targets model parameters (Frantar et al., 2023;         7. Conclusion
+Dettmers et al., 2023), and GQA reduces KV size through
+head sharing (Ainslie et al., 2023). Recent long-context             We introduced SANTA, a stochastic sparse-attention method
+systems also reduce the effective cache through selection,           for long-context autoregressive decoding that samples S ≪
+retention, or offloading: ShadowKV (Sun et al., 2025), Om-           nk value rows from the post-softmax distribution and aggre-
+niKV (Hao et al., 2025), and DuoAttention (Xiao et al.,              gates them with gather-and-add. The estimator is unbiased,
+2025) decide which KV states are retained, reconstructed,            admits practical variance reduction through stratified/sys-
+selected, or assigned to retrieval/streaming heads. These            tematic sampling, and gives a tunable accuracy–latency
+methods answer a different systems question from SANTA.              knob through the sample budget S. On Llama-3.1-8B-
+They reduce or restructure the candidate KV state before at-         Instruct, our S 2 ANTA kernels match baseline accuracy on
+tention is evaluated, whereas SANTA modifies the softmax–            32k-token RULER tasks and LongBench v2 while achiev-
+V aggregation over whatever KV state is presented to the             ing up to 1.5× decode-step attention-kernel speedup and
+operator. Thus, after an upstream method reduces the can-            up to 1.25× end-to-end decode-latency speedup on RTX
+didate set from n to n′ , SANTA can in principle replace             6000 Ada. SANTA is specialized for long-context, decode-
+dense aggregation over n′ value rows with sampled aggre-             heavy workloads and is complementary to cache compres-
+gation over S rows. The marginal benefit will depend on              sion, retention, offloading, and selection methods. We also
+n′ , hardware, batching, and task, so we view such hybrids           presented Bernoulli qK ⊤ sampling as a forward-looking
+as complementary but leave empirical evaluation to future            score-stage mechanism for sparse key-feature access.
+
+                                                                 9
+
+===== PDF p.10 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+Acknowledgments                                                       Center for AI Safety. MMLU: Massive multitask language
+                                                                        understanding dataset. https://huggingface.
+Research was sponsored by the Army Research Office and                  co/datasets/cais/mmlu, 2024. MIT license.
+was accomplished under Grant Number W911NF-24-1-                        Commit c30699e (uploaded 2024-03-08). Accessed 2025-
+0228. The views and conclusions contained in this doc-                  05-14.
+ument are those of the authors and should not be interpreted
+as representing the official policies, either expressed or im-        Chen, M., Tworek, J., Jun, H., Yuan, Q., de Oliveira Pinto,
+plied, of the Army Research Office or the U.S. Government.              H. P., Kaplan, J., Edwards, H., Burda, Y., Joseph, N.,
+The U.S. Government is authorized to reproduce and dis-                 Brockman, G., Ray, A., Puri, R., Krueger, G., Petrov,
+tribute reprints for Government purposes notwithstanding                M., Khlaaf, H., Sastry, G., Mishkin, P., Chan, B., Gray,
+any copyright notation herein.                                          S., Ryder, N., Pavlov, M., Power, A., Kaiser, L., Bavar-
+This material is based upon work supported by the National              ian, M., Winter, C., Tillet, P., Such, F. P., Cummings,
+Science Foundation Graduate Research Fellowship Program                 D., Plappert, M., Chantzis, F., Barnes, E., Herbert-
+under Grant No. 2139319. Any opinions, findings, and                    Voss, A., Guss, W. H., Nichol, A., Paino, A., Tezak,
+conclusions or recommendations expressed in this material               N., Tang, J., Babuschkin, I., Balaji, S., Jain, S., Saun-
+are those of the author(s) and do not necessarily reflect the           ders, W., Hesse, C., Carr, A. N., Leike, J., Achiam,
+views of the National Science Foundation.                               J., Misra, V., Morikawa, E., Radford, A., Knight, M.,
+                                                                        Brundage, M., Murati, M., Mayer, K., Welinder, P., Mc-
+This work used resources available through the National                 Grew, B., Amodei, D., McCandlish, S., Sutskever, I., and
+Research Platform (NRP) at the University of California,                Zaremba, W. Evaluating large language models trained
+San Diego. NRP has been developed, and is supported in                  on code, 2021. URL https://arxiv.org/abs/
+part, by funding from National Science Foundation, from                 2107.03374.
+awards 1730158, 1540112, 1541349, 1826967, 2112167,
+2100237, and 2120019, as well as additional funding from              Chen, Z., Sadhukhan, R., Ye, Z., Zhou, Y., Zhang, J., Nolte,
+community partners.                                                     N., Tian, Y., Douze, M., Bottou, L., Jia, Z., and Chen, B.
+                                                                        MagicPIG: LSH sampling for efficient LLM generation.
+Impact Statement                                                        In The Thirteenth International Conference on Learning
+                                                                        Representations, 2025. URL https://openreview.
+This paper presents work whose goal is to advance the field             net/forum?id=ALzTQUgW8a.
+of machine learning. There are many potential societal
+consequences of our work, none of which we feel must be               Child, R., Gray, S., Radford, A., and Sutskever, I. Gen-
+specifically highlighted here.                                          erating long sequences with sparse transformers. arXiv
+                                                                        preprint arXiv:1904.10509, 2019.
+References
+                                                                      Clark, K., Khandelwal, U., Levy, O., and Manning, C. D.
+Ainslie, J., Lee-Thorp, J., de Jong, M., Zemlyanskiy, Y.,               What does BERT look at? an analysis of BERT‘s at-
+  Lebron, F., and Sanghai, S. GQA: Training generalized                 tention. In Linzen, T., Chrupała, G., Belinkov, Y., and
+  multi-query transformer models from multi-head check-                 Hupkes, D. (eds.), Proceedings of the 2019 ACL Work-
+  points. In The 2023 Conference on Empirical Methods in                shop BlackboxNLP: Analyzing and Interpreting Neu-
+  Natural Language Processing, 2023.                                    ral Networks for NLP, pp. 276–286, Florence, Italy,
+                                                                        August 2019. Association for Computational Linguis-
+Bai, Y., Tu, S., Zhang, J., Peng, H., Wang, X., Lv, X.,
+                                                                        tics. doi: 10.18653/v1/W19-4828. URL https://
+  Cao, S., Xu, J., Hou, L., Dong, Y., et al. LongBench v2:
+                                                                        aclanthology.org/W19-4828/.
+  Towards deeper understanding and reasoning on realis-
+  tic long-context multitasks. In Proceedings of the 63rd             Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun, H.,
+  Annual Meeting of the Association for Computational                   Kaiser, L., Plappert, M., Tworek, J., Hilton, J., Nakano,
+  Linguistics (Volume 1: Long Papers), pp. 3639–3664,                   R., et al. Training verifiers to solve math word problems.
+  2025.                                                                 arXiv preprint arXiv:2110.14168, 2021.
+Beltagy, I., Peters, M. E., and Cohan, A.        Long-
+  former: The long-document transformer. arXiv preprint               Cochran, W. G. Sampling Techniques. Wiley, New York,
+  arXiv:2004.05150, 2020.                                               3rd edition, 1977.
+
+Boucheron, S., Lugosi, G., and Massart, P. Concentration              Dao, T. FlashAttention-2: Faster attention with better paral-
+  Inequalities: A Nonasymptotic Theory of Independence.                 lelism and work partitioning. In The Twelfth International
+  Oxford University Press, Oxford, 2013.                                Conference on Learning Representations, 2024.
+
+                                                                 10
+
+===== PDF p.11 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+Dao, T., Haziza, D., Massa, F., and Sizov, G.                               multimodal models. arXiv preprint arXiv:2312.11805,
+  Flash-Decoding       for    long-context    inference.                    2023.
+  https://crfm.stanford.edu/2023/10/
+  12/flashdecoding.html, October 2023. Stanford                           Gupta, A., Dar, G., Goodman, S., Ciprut, D., and Be-
+  Center for Research on Foundation Models (CRFM) blog                      rant, J. Memory-efficient transformers via top-k atten-
+  post, accessed 2026-01-20.                                                tion. In Moosavi, N. S., Gurevych, I., Fan, A., Wolf, T.,
+                                                                            Hou, Y., Marasović, A., and Ravi, S. (eds.), Proceedings
+DeepSeek-AI. DeepSeek-R1: Incentivizing reasoning ca-                       of the Second Workshop on Simple and Efficient Natu-
+  pability in LLMs via reinforcement learning, 2025. URL                    ral Language Processing, pp. 39–52, Virtual, Novem-
+  https://arxiv.org/abs/2501.12948.                                         ber 2021. Association for Computational Linguistics.
+                                                                            doi: 10.18653/v1/2021.sustainlp-1.5. URL https://
+DeepSeek-AI, Liu, A., Feng, B., Wang, B., Wang, B., Liu,                    aclanthology.org/2021.sustainlp-1.5/.
+  B., Zhao, C., Dengr, C., Ruan, C., Dai, D., Guo, D., Yang,
+  D., Chen, D., Ji, D., Li, E., Lin, F., Luo, F., Hao, G.,                Hao, J., Zhu, Y., Wang, T., Yu, J., Xin, X., Zheng, B., Ren,
+  Chen, G., Li, G., Zhang, H., Xu, H., Yang, H., Zhang,                     Z., and Guo, S. OmniKV: Dynamic context selection for
+  H., Ding, H., Xin, H., Gao, H., Li, H., Qu, H., Cai, J. L.,               efficient long-context LLMs. In The Thirteenth Interna-
+  Liang, J., Guo, J., Ni, J., Li, J., Chen, J., Yuan, J., Qiu, J.,          tional Conference on Learning Representations, 2025.
+  Song, J., Dong, K., Gao, K., Guan, K., Wang, L., Zhang,
+  L., Xu, L., Xia, L., Zhao, L., Zhang, L., Li, M., Wang,                 Hendrycks, D., Burns, C., Basart, S., Zou, A., Mazeika, M.,
+  M., Zhang, M., Zhang, M., Tang, M., Li, M., Tian, N.,                     Song, D., and Steinhardt, J. Measuring massive multitask
+  Huang, P., Wang, P., Zhang, P., Zhu, Q., Chen, Q., Du,                    language understanding. In International Conference
+  Q., Chen, R. J., Jin, R. L., Ge, R., Pan, R., Xu, R., Chen,               on Learning Representations, 2021. URL https://
+  R., Li, S. S., Lu, S., Zhou, S., Chen, S., Wu, S., Ye, S.,                openreview.net/forum?id=d7KBjmI3GmQ.
+  Ma, S., Wang, S., Zhou, S., Yu, S., Zhou, S., Zheng, S.,
+                                                                          Hooper, C., Kim, S., Mohammadzadeh, H., Mahoney,
+ Wang, T., Pei, T., Yuan, T., Sun, T., Xiao, W. L., Zeng,
+                                                                            M. W., Shao, Y. S., Keutzer, K., and Gholami, A.
+ W., An, W., Liu, W., Liang, W., Gao, W., Zhang, W., Li,
+                                                                            KVQuant: Towards 10 million context length LLM in-
+  X. Q., Jin, X., Wang, X., Bi, X., Liu, X., Wang, X., Shen,
+                                                                            ference with kv cache quantization. Advances in Neural
+  X., Chen, X., Chen, X., Nie, X., Sun, X., Wang, X., Liu,
+                                                                           Information Processing Systems, 37:1270–1303, 2024.
+  X., Xie, X., Yu, X., Song, X., Zhou, X., Yang, X., Lu,
+  X., Su, X., Wu, Y., Li, Y. K., Wei, Y. X., Zhu, Y. X., Xu,              Horowitz, M. 1.1 computing’s energy problem (and what we
+ Y., Huang, Y., Li, Y., Zhao, Y., Sun, Y., Li, Y., Wang,                    can do about it). In 2014 IEEE International Solid-State
+ Y., Zheng, Y., Zhang, Y., Xiong, Y., Zhao, Y., He, Y.,                     Circuits Conference Digest of Technical Papers (ISSCC),
+  Tang, Y., Piao, Y., Dong, Y., Tan, Y., Liu, Y., Wang, Y.,                 pp. 10–14, 2014. doi: 10.1109/ISSCC.2014.6757323.
+  Guo, Y., Zhu, Y., Wang, Y., Zou, Y., Zha, Y., Ma, Y., Yan,
+ Y., You, Y., Liu, Y., Ren, Z. Z., Ren, Z., Sha, Z., Fu, Z.,              Hsieh, C.-P., Sun, S., Kriman, S., Acharya, S., Rekesh, D.,
+  Huang, Z., Zhang, Z., Xie, Z., Hao, Z., Shao, Z., Wen,                    Jia, F., and Ginsburg, B. RULER: What’s the real context
+  Z., Xu, Z., Zhang, Z., Li, Z., Wang, Z., Gu, Z., Li, Z.,                  size of your long-context language models? In First
+  and Xie, Z. DeepSeek-V2: A strong, economical, and                        Conference on Language Modeling, 2024.
+  efficient mixture-of-experts language model, 2024. URL
+  https://arxiv.org/abs/2405.04434.                                       Kim, H. and Ko, J. Fast Monte-Carlo approximation of the
+                                                                            attention mechanism. In Proceedings of the AAAI Confer-
+Dettmers, T., Pagnoni, A., Holtzman, A., and Zettlemoyer,                   ence on Artificial Intelligence, volume 36, pp. 7185–7193,
+  L. QLoRA: Efficient finetuning of quantized LLMs. Ad-                     2022.
+  vances in Neural Information Processing Systems, 36:
+ 10088–10115, 2023.                                                       Kitaev, N., Kaiser, L., and Levskaya, A. Reformer:
+                                                                            The efficient transformer. In International Conference
+Frantar, E., Ashkboos, S., Hoefler, T., and Alistarh, D.                    on Learning Representations, 2020. URL https://
+  OPTQ: Accurate quantization for generative pre-trained                    openreview.net/forum?id=rkgNKkHtvB.
+  transformers. In The Eleventh International Confer-
+  ence on Learning Representations, 2023. URL https:                      Lightman, H., Kosaraju, V., Burda, Y., Edwards, H., Baker,
+  //openreview.net/forum?id=tcbBPnfwxS.                                     B., Lee, T., Leike, J., Schulman, J., Sutskever, I., and
+                                                                            Cobbe, K. Let’s verify step by step. In The Twelfth
+Gemini Team, Anil, R., Borgeaud, S., Alayrac, J.-B., Yu,                    International Conference on Learning Representations,
+  J., Soricut, R., Schalkwyk, J., Dai, A. M., Hauth, A.,                    2024. URL https://openreview.net/forum?
+  Millican, K., et al. Gemini: a family of highly capable                   id=v8L0pN6EOi.
+
+                                                                     11
+
+===== PDF p.12 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+Liu, Z., Yuan, J., Jin, H., Zhong, S., Xu, Z., Braverman, V.,        Song, Z., Katti, P., Simeone, O., and Rajendran, B. Stochas-
+  Chen, B., and Hu, X. KIVI: A tuning-free asymmetric                  tic spiking attention: Accelerating attention with stochas-
+  2bit quantization for KV cache. In International Con-                tic computing in spiking networks. In 6th IEEE Inter-
+  ference on Machine Learning, pp. 32332–32344. PMLR,                  national Conference on AI Circuits and Systems, AICAS
+  2024.                                                                2024, 2024.
+
+Lohr, S. L. Sampling: Design and Analysis. Brooks/Cole,              Sun, H., Chen, Z., Yang, X., Tian, Y., and Chen, B. TriForce:
+  Boston, 2nd edition, 2010.                                           Lossless acceleration of long sequence generation with
+                                                                       hierarchical speculative decoding. In First Conference on
+Ma, S., Wang, H., Huang, S., Zhang, X., Hu, Y., Song,                  Language Modeling, 2024.
+ T., Xia, Y., and Wei, F. BitNet b1.58 2B4T technical re-
+ port, 2025. URL https://arxiv.org/abs/2504.                         Sun, H., Chang, L.-W., Bao, W., Zheng, S., Zheng, N.,
+ 12285.                                                                Liu, X., Dong, H., Chi, Y., and Chen, B. ShadowKV:
+                                                                       KV cache in shadows for high-throughput long-context
+Meta AI.    Meta Llama 3.1 8B Instruct: Version                        LLM inference. In International Conference on Machine
+ 1. https://huggingface.co/meta-llama/                                 Learning, pp. 57355–57373. PMLR, 2025.
+ Llama-3.1-8B-Instruct, 2024. Llama 3.1 Com-
+ munity License. Model release 2024-07-23. Accessed                  Tang, J., Zhao, Y., Zhu, K., Xiao, G., Kasikci, B., and
+ 2025-05-14.                                                           Han, S. QUEST: query-aware sparsity for efficient long-
+                                                                       context LLM inference. In Proceedings of the 41st Inter-
+OpenAI. GPT-4 technical report, 2023. URL https:                       national Conference on Machine Learning, pp. 47901–
+ //arxiv.org/abs/2303.08774.                                           47911, 2024.
+
+                                                                     Touvron, H., Lavril, T., Izacard, G., Martinet, X., Lachaux,
+OpenAI. GSM8K: Grade school math word problems
+                                                                       M.-A., Lacroix, T., Rozière, B., Goyal, N., Hambro,
+ (v1.0). https://huggingface.co/datasets/
+                                                                       E., Azhar, F., Rodriguez, A., Joulin, A., Grave, E., and
+  openai/gsm8k, 2023. MIT License, commit e53f048.
+                                                                       Lample, G. LLaMA: Open and efficient foundation lan-
+ Accessed 2025-05-14.
+                                                                       guage models, 2023. URL https://arxiv.org/
+                                                                       abs/2302.13971.
+Owen, A. B. Monte Carlo Theory, Methods and Examples.
+ 2013. Monograph.
+                                                                     Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+                                                                       L., Gomez, A. N., Kaiser, Ł., and Polosukhin, I. Atten-
+Pinelis, I. Optimum bounds for the distributions of martin-            tion is all you need. Advances in Neural Information
+  gales in Banach spaces. The Annals of Probability, 22(4):            Processing Systems, 30, 2017.
+  1679–1706, 1994.
+                                                                     Wang, S., Li, B. Z., Khabsa, M., Fang, H., and Ma, H.
+Rajpurkar, P., Jia, R., and Liang, P. Know what you                   Linformer: Self-attention with linear complexity. arXiv
+  don’t know: Unanswerable questions for SQuAD. In                    preprint arXiv:2006.04768, 2020.
+  Gurevych, I. and Miyao, Y. (eds.), Proceedings of the
+  56th Annual Meeting of the Association for Computa-                Williams, R. J. Simple statistical gradient-following algo-
+  tional Linguistics (Volume 2: Short Papers), pp. 784–789,           rithms for connectionist reinforcement learning. Machine
+  Melbourne, Australia, July 2018. Association for Compu-             Learning, 8(3-4):229–256, 1992.
+  tational Linguistics. doi: 10.18653/v1/P18-2124. URL
+  https://aclanthology.org/P18-2124/.                                Xiao, G., Tang, J., Zuo, J., junxian guo, Yang, S., Tang, H.,
+                                                                       Fu, Y., and Han, S. Duoattention: Efficient long-context
+Ribar, L., Chelombiev, I., Hudlass-Galley, L., Blake, C.,              LLM inference with retrieval and streaming heads. In
+  Luschi, C., and Orr, D. SparQ Attention: Bandwidth-                  The Thirteenth International Conference on Learning
+  efficient LLM inference. In International Conference on              Representations, 2025. URL https://openreview.
+  Machine Learning, pp. 42558–42583. PMLR, 2024.                       net/forum?id=cFu7ze7xUm.
+
+Samaga B L, Y., Yerram, V., You, C., Bhojanapalli, S.,               Xie, X., Luo, Y., Peng, H., and Ding, C. RTop-K: Ultra-fast
+  Kumar, S., Jain, P., and Netrapalli, P. HiRE: High                   row-wise top-k selection for neural network acceleration
+  recall approximate top-k estimation for efficient LLM                on GPUs. In The Thirteenth International Conference
+  inference, 2024. URL https://arxiv.org/abs/                          on Learning Representations, 2025. URL https://
+  2402.09360.                                                          openreview.net/forum?id=PHg4rAXFVH.
+
+                                                                12
+
+===== PDF p.13 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+Yang, Z., Qi, P., Zhang, S., Bengio, Y., Cohen, W.,                     A.2. Variance of SANTA
+  Salakhutdinov, R., and Manning, C. D. HotpotQA: A
+                                                                        Proposition A.3 (Variance scaling of SANTA). The covari-
+  dataset for diverse, explainable multi-hop question an-
+                                                                        ance of the SANTA estimator scales as 1/S.
+  swering. In Riloff, E., Chiang, D., Hockenmaier, J.,
+  and Tsujii, J. (eds.), Proceedings of the 2018 Confer-
+  ence on Empirical Methods in Natural Language Pro-                    Throughout this subsection, fix a query index q ∈
+  cessing, pp. 2369–2380, Brussels, Belgium, October-                   {1, . . . , nq }. Let Aq ∈ ∆nk −1 denote the attention weights
+                                                                                                                       Pnk
+  November 2018. Association for Computational Lin-                     over keys, write pqj ≜ Aqj , and let µq ≜ j=1         pqj Vj =
+  guistics. doi: 10.18653/v1/D18-1259. URL https:                       (AV )q be the exact attention output for that query. Default
+  //aclanthology.org/D18-1259/.                                                                           i.i.d.
+                                                                        SANTA draws iq,1 , . . . , iq,S ∼ Categorical(Aq ) and re-
+Ye, Z., Chen, L., Lai, R., Lin, W., Zhang, Y., Wang, S.,                turns
+  Chen, T., Kasikci, B., Grover, V., Krishnamurthy, A., and
+  Ceze, L. FlashInfer: Efficient and customizable attention                                           S
+                                                                                       dq = 1
+                                                                                              X
+  engine for LLM inference serving. In Eighth Conference                               AV        Vi ∈ Rdk .
+                                                                                            S s=1 q,s
+  on Machine Learning and Systems, 2025. URL https:
+  //openreview.net/forum?id=RXPofAsL8F.
+Zaheer, M., Guruganesh, G., Dubey, K. A., Ainslie, J., Al-              Define centered summands Xs ≜ Viq,s − µq and the (query-
+  berti, C., Ontanon, S., Pham, P., Ravula, A., Wang, Q.,                                                      Pnk
+                                                                        specific) covariance Σq ≜ Cov(Vi ) =      j=1 pqj (Vj −
+  Yang, L., et al. Big Bird: Transformers for longer se-
+                                                                        µq )(Vj − µq )⊤ .
+  quences. Advances in Neural Information Processing
+  Systems, 33:17283–17297, 2020.                                        We now aim to show that SANTA’s covariance scales as
+                                                                        1/S (Proposition A.3):
+Zhang, Z., Sheng, Y., Zhou, T., Chen, T., Zheng, L., Cai,
+  R., Song, Z., Tian, Y., Ré, C., Barrett, C., et al. H2O:
+  Heavy-hitter oracle for efficient generative inference of                                                            1
+  large language models. Advances in Neural Information
+                                                                                  d q ] = µq ,
+                                                                                E[AV                      dq ) =
+                                                                                                      Cov(AV             Σq .
+                                                                                                                       S
+  Processing Systems, 36:34661–34710, 2023.
+                                                                                       h             i
+                                                                                         d q − µq ∥2 = 1 tr(Σq ).
+                                                                        Equivalently, E ∥AV        2   S
+A. Formal Description of SANTA
+For query q, the SANTA estimator can be written as
+            S
+    dq = 1
+           X
+    AV        Vi ,              iq,s ∼ Categorical(Aq ).    (7)
+         S s=1 q,s                                                      Proof. Unbiasedness was shown in Proposition A.2. For
+                                                                        the variance, write AV d q − µq = 1 PS Xs with
+                                                                                                                 S    s=1
+Definition A.1 (SANTA estimator).√ Let        Q ∈     Rnq ×dk ,        E[X s ] = 0 and Cov(X  s ) = Σ q . The Xs are  i.i.d., hence
+         nk ×dk                      T             nq ×nk
+K∈R                 , A = softmax QK / dk ∈ R             , and                   PS               PS
+                                                                        Cov S1 s=1 Xs = S12 s=1 Cov(Xs ) = S1 Σq . Taking
+V ∈ Rnk ×dk . For each query index r ∈ {1, . . . , nq }, sam-
+                        i.i.d.                                          the trace gives the mean-squared error identity.
+ple ir,1 , . . . , ir,S ∼ Categorical(Ar ) and define AV
+                                                       dr =
+1
+  P  S                                      d ∈ R q ×dk .
+                                                      n
+S    s=1    Vi . Stacking all queries gives AV
+            r,s                                                         A.3. S2 ANTA Estimator
+
+A.1. Unbiasedness of SANTA                                              Proposition A.4 (Unbiasedness of S 2 ANTA). Let µq :=
+                                                                        P                               ind        sys
+                                                                          j pqj Vj = (AV )q . Then E[AV q ] = E[AV q ] = µq .
+                                                                                                     d          d
+                                  d ] = AV.
+Proposition A.2 (Unbiasedness). E[AV
+
+Proof of Proposition A.2. Fix any q. Since Pr(iq,s = j) =               The proof is shown in Section A.4.
+Aqj ,                                                                   Remark A.5 (Systematic vs. independent). S 2 ANTA-strat
+                     S nk             nk
+                                                                        is unbiased and admits a variance-dominance theorem, guar-
+                  1 XX               X
+                                                                        anteeing lower variance than that of i.i.d. sampling with
+      dq ] =
+    E[AV                    Aqj Vj =     Aqj Vj = (AV )q .
+                  S s=1 j=1          j=1
+                                                                        default SANTA (Section A.5). S 2 ANTA-sys is also unbi-
+                                                                        ased, but does not provide tractable variance guarantees;
+Linearity of expectation completes the result.                          empirically it performs comparably.
+
+                                                                   13
+
+===== PDF p.14 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+A.4. Unbiasedness of S 2 ANTA                                           B. Vector Bernstein Tail for SANTA
+Proof of Proposition A.4. For S 2 ANTA-strat,                           Theorem B.1 (Vector Bernstein tail for SANTA). Assume
+                                                                        a uniform almost-sure bound ∥Vj − µq ∥2 ≤ Vmax for all
+                   S−1
+         ind     1 X h               i                                  j (hence ∥Xs ∥2 ≤ Vmax ). Let vq ≜ E ∥Vi − µq ∥22 =
+   dq ] =
+ E[AV                  E VFq−1 (Tm )                                    tr(Σq ). Then for all t > 0,
+                 S m=0
+                 Z 1X
+                                                                                                                         S t2
+                                                                                                                                  
+               =         1{Fq (j−1) ≤ t < Fq (j)} Vj dt                 Pr AV q − µq 2 ≥ t ≤ 2 exp −
+                                                                            d                                                             .
+                       0       j                                                                                  2 (vq + Vmax t/3)
+                   X
+               =           pqj Vj                                       Equivalently, with probability at least 1 − δ,
+                    j
+
+               = µq .
+                                                                                             r
+                                                                          d q − µq                2 vq log(2/δ)   2Vmax log(2/δ)
+                                                                          AV       2
+                                                                                     ≤                          +                .
+                                                                                                        S              3S
+For S 2 ANTA-sys, observe that marginally each Tm is uni-
+form on Im (though dependent across m). By linearity of
+expectation, the sum of expectations is unchanged by this               Proof sketch. This is a Hilbert-space (vector) Bernstein in-
+dependence, so the same integral argument applies; see                  equality: apply Bernstein to the mean of independent, mean-
+Cochran (1977, Ch. 8) and Owen (2013).                                  zero, L-bounded vectors with variance proxy vq ; see, e.g.,
+                                                                        Boucheron et al. (2013, Thm. 2.10; see also Cor. 2.11) and
+A.5. Variance Reduction for S 2 ANTA-Strat                              Pinelis (1994).
+
+TheoremPA.6 (Variance reduction for S 2 ANTA-strat). Let
+                                      ⊤                                 C. Estimating qK T via Bernoulli Sampling
+Σq :=      j pqj (Vj − µq )(Vj − µq )   and define within-
+stratum covariances                                                     We first normalize the query vector as q ← q/norm, where
+                                                                      norm ≥ maxi |qi | so that each element qi ∈ [−1, 1] is
+        Σ(m)
+         q    :=  Cov   V  −1
+                         Fq (T ) T ∼   Unif(I m )   .                   interpreted as a probability. Then, we introduce the unbiased
+                                                                        query estimator qb where each element qbi is an independent
+Then                                                                    ternary Bernoulli variable:
+
+                            S−1                                                      bi ∼ Bernoulli(|qi |),                         (8)
+          ind           1 X (m)           1
+Cov AV
+    d
+       q           =            Σ ≤Loewner            d q ),
+                                             Σq = Cov(AV
+                        S 2 m=0 q          S                                         qbi = bi × sign(qi ) ∈ {−1, 0, +1}.
+
+with strict improvement unless all stratum means coincide.              Sampling from qb provides an unbiased estimator for the
+See Lohr (2010, Ch. 4) and Cochran (1977, Ch. 5).                       product p = qK T :
+
+                                                                                                        B
+                                                                                                  norm X (n) T
+                                                 ind                                       pb =          qb K ,                     (9)
+Proof.                                        dq )
+         Independence across strata gives Cov(AV             =                                     B n=1
+                               
+ 1
+   P
+S2     m Cov       VFq−1 (T ) | T ∈ Im . By the law of total co-
+variance with T ∼ Unif(0, 1) and partition {Im },                       where qb(n) is a Bernoulli query vector, and B is the number
+                                                                        of samples.
+               h                       i
+         Σq = E Cov VFq−1 (T ) | T ∈ Im
+                     h                   i                            C.1. Bernoulli qK T Error
+              + Cov E VFq−1 (T ) | T ∈ Im                               Fig. 6 shows the scaling of the L2 norm error with the
+                       h                     i                        number of samples B, defined as e = ||b    p − p||2 /||p||2 . In
+            ≥Loewner E Cov VFq−1 (T ) | T ∈ Im .
+                                                                        similar fashion as SANTA, stratified Bernoulli sampling
+                                                                        reduces the variance of each independent element pbi . The
+and averaging then dividing by S yields the claim. Strictness           variance scales as O(1/B 2 ), resulting in an overall L2 norm
+holds unless the stratum means are all equal.                           scaling as O(1/B). For this numerical experiment, which
+                                                                        uses a head dimension dk = 128 and a context length nk =
+                                                                        1024, using only B = 4 samples induces a mean L2 norm
+Corollary  A.7 i (MSE  ordering). i For any q,
+ h     ind
+                    h                                                   error of approximately 60% for standard Bernoulli sampling,
+E ∥AV q − µq ∥ ≤ E ∥AV q − µq ∥2 = 1 tr(Σq ).
+   d          2       d
+                           2                2     S                     compared to a much lower 30% for stratified sampling.
+
+                                                                   14
+
+===== PDF p.15 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+
+                Bernoulli qKT L2 norm error
+
+
+                                                   𝟏
+                                              ~
+                                                   𝐁
+
+
+                                                   𝟏
+                                               ~
+                                                   𝐁
+
+                                                                       Figure 7. Empirical variance of SANTA on single-hop QA prompts
+                                                                       (8k tokens).
+
+
+Figure 6. Mean L2 norm error for Bernoulli qK T . The score            sweep the sample budget S on 8k-token single-hop QA
+error is calculated during decoding with dk = 128, a context           prompts, averaged across model layers and 30 prompts (nor-
+                √ and averaged over 100 instances q ∼ N (0, 1),
+length nk = 1024,                                                      malized per head). S 2 ANTA variants exhibit significantly
+K ∼ N (0, 1)/ dk , V ∼ N (0, 1).                                       lower variance than SANTA. Though systematic sampling
+                                                                       admits no tractable theoretical variance guarantees, it em-
+C.2. qK T for Grouped Query Attention                                  pirically demonstrates similar variance to independent strat-
+                                                                       ified sampling (and requires 1 random number per query
+To maintain sparse key access when keys share multiple                 instead of S random numbers). On a log-log scale, slopes
+queries, as in GQA, we define a common representative                  for SANTA, S 2 ANTA-strat, and S 2 ANTA-sys are −1.1,
+query for the group, such as the mean of the absolute values           −1.27, and −1.29, respectively, matching the 1/S scaling
+of the queries:                                                        prescribed by theory (see Appendix N for details regarding
+                                                                       the measurement protocol).
+
+                             1 X
+                     m=          |qg |,                   (10)         E. Theoretical Operations and Memory
+                            |G|
+                                g∈G                                       Accesses in Autoregressive Decoding
+where G denotes the query group. We then estimate the
+                                                                       Table 10. Per-query, per-head value-stage compute and memory
+mean query using Monte Carlo sampling, after normalizing
+                                                                       for dense scaled dot-product attention (SDPA) and SANTA. nk is
+by norm ≥ maxi mi :                                                    the number of keys, dk is the head dimension, and S is the SANTA
+                                                                       sample budget per query. Value reads counts V elements accessed
+                 bi ∼ Bernoulli(mi /norm)                 (11)         per query; Writes counts output elements.
+                              B
+                       norm   X
+                 m
+                 b =          b(n)                        (12)                        Metric         SDPA      SANTA
+                        B n=1
+                                                                                      Adds            nk dk     Sdk
+        (n)
+                                                                                      Mults / Divs    nk dk     dk
+where b are Bernoulli query vectors with independent                                  Value reads     nk dk     Sdk
+elements bi . After fetching the corresponding K T rows                               Writes           dk       dk
+                                       b the product p =
+corresponding to non-zero elements of m,
+qK T for each query is estimated as:                                   Table 10 displays the theoretical additions, multiplications,
+                               q T                                    and memory accesses incurred by SANTA in the value stage
+                   pb = m b⊙      K ,                (13)              of attention, where the attention scores A multiply V . The
+                               m
+                                                                       score computation qK T is similar for both SANTA and
+where ⊙ denotes element-wise multiplication. In this mean
+                                                                       SDPA, and is therefore omitted in this analysis (see Ap-
+group query scenario, calculating pb requires multiplications
+                                                                       pendix G). We count individual scalar elements which are
+by the original query q and normalization by m to compen-
+                                                                       added together, multiplied together, or accessed by memory.
+sate for the bias introduced by the mean query approxima-
+                                                                       Architecture-dependent effects such as multiply-accumulate
+tion.
+                                                                       (MAC) instructions, caching effects, or operation paral-
+                                                                       lelism are not accounted for; arguments are fundamental
+D. Empirical Variance                                                  and hardware-agnostic.
+To further validate our results, we empirically measure the            By virtue of SANTA’s sparsity, SANTA demonstrates a
+variance of SANTA, S 2 ANTA-strat, and S 2 ANTA-sys. We                S/nk reduction in post-softmax additions and reads to rows
+
+                                                                  15
+
+===== PDF p.16 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+of V , where S is the sample budget and nk is the number                     memory access in prefill. Arguments concerning SANTA’s
+of keys (sequence length). A key distinction is that SANTA                   reduced addition and multiplication operations are still valid
+costs fewer additions than SDPA; SANTA does not seek                         in prefill (Table 12).
+to replace the multiplications in the AV computation, but
+rather, leverages sparse sampling to decrease the total num-                 G. Theoretical Operations and Memory
+ber of additions while eliminating multiplications. So long
+as S ≪ nk , the advantage of attention sparsity holds true.
+                                                                                Accesses in Prefill
+Sampling overhead is not included; it is highly dependent                    Table 12. Per-head FLOPs and memory for scaled dot-product
+on implementation, but drawing S ≪ nk samples should                         attention (SDPA), top-k, and SANTA. nq : number of queries, nk :
+be lightweight relative to memory accesses, multiplies, and                  number of keys, dk : head dimension, k: top-k budget, S: SANTA
+adds (indeed, this proves to be the case with GPU kernel                     sample budget per query. “Reads” count logical value/key elements
+                                                                             accessed; “Writes” count output or score elements. Softmax, top-k
+latency demonstrations in Section 3).                                        selection, and sampling overheads are omitted.
+Whereas SDPA incurs nk dk multiplications from computing
+                                                                              Stage / Variant          Adds     Mults / Divs      Reads       Writes
+dot products, SANTA only costs dk normalizing multiplies
+by 1/S. dk is a constant model parameter and does not                         Score stage (QK T )
+                                                                              SDPA / top-k / SANTA   nq nk dk    nq nk dk      (nq + nk )dk   nq nk
+increase with the sequence length nk . Furthermore, if S
+                                                                              Value stage
+is chosen as a power of 2 and the model has a fixed point
+                                                                              SDPA                   nq nk dk    nq nk dk        nq nk dk     nq d k
+representation, this normalization may be implemented as a                    Top-k                  nq kdk      nq kdk          nq kdk       nq d k
+bit-shift.                                                                    SANTA                  nq Sdk       nq dk          nq Sdk       nq d k
+
+In prefill, while similar arguments hold for SANTA’s re-
+duced additions and multiplies, there is no longer sparse                    While SANTA’s apparent memory sparsity benefits are most
+memory access to the value matrix V . Each of nq queries                     viable in autoregressive decoding, for full clarity, this sec-
+may each sample S rows of V , therefore requiring ≫ S                        tion provides generalized analysis for prefill. We consider
+rows of V when the union across all queries is considered                    the computational cost of SANTA, SDPA, and top-k atten-
+(see Appendices F, G).                                                       tion, focusing on FLOPs and memory traffic in the value
+                                                                             stage. Table 12 summarizes the theoretical costs per atten-
+                                                                             tion head. For the score stage (QK T ), the “Reads” entry
+F. Unique V -Row Coverage for SANTA Prefill                                  (nq + nk )dk counts each query and key vector once per
+                                                                             head, assuming they are loaded once from DRAM and then
+Table 11. Unique V rows read (union over all query positions in a
+causal prefill pass), reported as a percentage of all nk rows in the         reused in on-chip memory during the matmul. In contrast,
+value matrix. Each entry is the mean over 10 trials and all attention        for the value stage we report nq nk dk , nq kdk , and nq Sdk
+heads, with Gaussian inputs Q, K, V ∼ N (0, 1) (FP16), H=32                  for dense SDPA, top-k, and SANTA, respectively, which
+heads, and head dimension dk =128.                                           count the per-query accesses rather than unique loads of
+                                                                             elements from memory.
+                      Unique V rows read (% of nk )
+               S
+                   nk =1024 2048 4096 8192 16384                             While top-k attention is memory-efficient and generally per-
+               1    49.90    50.04   49.96   49.95   49.95
+                                                                             forms well, it introduces bias and can degrade significantly
+               4    79.95    80.00   79.96   79.96   79.95                   when the attention distribution is heavy-tailed. For example,
+               8    88.92    88.83   88.86   88.86   88.85                   recent work (Chen et al., 2025) shows that tasks such as
+              16    94.07    94.11   94.10   94.09   94.08
+                                                                             common word extraction suffer when relevant information
+                                                                             is not concentrated in the top-k entries. In contrast, stochas-
+Table 11 shows the percentage of unique V rows read by                       tic estimators like SANTA provide an unbiased estimate of
+SANTA during prefill passes of differing sequence lengths                    full attention and retain robustness in such cases.
+nk . Standard Gaussian distributed inputs Q, K, V are
+                                                                             For both top-k and SANTA, we define a notion of compute
+passed into SANTA with dk = 128 and H = 32 heads for
+                                                                             budget, where k is the number of keys selected by top-k
+multi-headed attention. Even in the long-context, S ≪ nk
+                                                                             for each query of each attention head, while S is a sample
+regime, any appreciable number of samples S results in
+                                                                             budget representing the number of samples that SANTA
+SANTA sampling most rows of V when the union across
+                                                                             draws for each query of each attention head. By default, we
+all queries is considered. For S = 16, selected sequence
+                                                                             employ uniform S across model layers, though ablations
+lengths from nk = 1k − 16k show SANTA reading almost
+                                                                             suggest that S can be optimized per layer (Appendix J, K).
+all (> 94%) rows of V , because each of nq = nk queries
+stochastically attend to S sampled keys. Therefore, while                    We omit softmax computation, top-k sorting overhead, and
+SANTA features sparse V access during autoregressive de-                     sampling from this analysis, as they are lightweight relative
+coding, SANTA does not have apparent benefit from sparse                     to memory accesses and the V matrix multiply, and are
+
+                                                                        16
+
+===== PDF p.17 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+highly implementation-dependent. For example, many im-                                     Table 15. MMLU accuracy and average context length (prompt +
+                                                                                           answer) for DeepSeek-R1-Distill-Qwen-7B. k: number of keys in
+plementations use partial sorting (Samaga B L et al., 2024;                                top-k, S: SANTA sample budget. Accuracy shows 95% bootstrap
+Xie et al., 2025).                                                                         confidence intervals.
+In both FLOPs and memory reads, SDPA scales as nq nk ,
+                                                                                                                       Top-k                                 SANTA
+reflecting the cost of full quadratic attention computation.
+                                                                                           k|S              Acc. (%)              Tok.              Acc. (%)              Tok.
+Both top-k and SANTA reduce this to nq k and nq S, respec-
+tively, assuming fixed budgets with k, S ≪ nk . This shifts                                  2          24.97±1.24                3598           4.33±0.58                4178
+                                                                                             4          38.93±1.32                2236          23.10±1.20                3666
+the overall complexity of the value stage from quadratic to                                  8          55.08±1.47                1659          44.55±1.47                2080
+linear in sequence length, given a fixed budget k or S.                                     16          59.07±1.36                1301          58.81±1.42                1506
+                                                                                            32          60.77±1.40                1173          61.05±1.45                1228
+Top-k still incurs multiplication costs while SANTA elim-                                   64          62.03±1.38                1103          60.59±1.43                1104
+inates multiplies. Top-k performs nq kdk multiplications                                   128          61.68±1.49                1061          62.38±1.32                1075
+                                                                                           256          62.05±1.46                1041          62.27±1.39                1074
+(per head), while SANTA requires only nq dk divisions for
+normalization (if S is chosen as a power of 2, even these                                  SDPA (baseline)                                      63.16±1.45                1020
+few divisions become simple bit-shifts).
+                                                                                           Table 16. MMLU accuracy and average context length (prompt +
+                                                                                           answer) for Llama-3.1-8B-Instruct.
+H. Additional DeepSeek and Top-k Results
+                                                                                                    Top-k                 SANTA          S 2 ANTA-strat        S 2 ANTA-sys
+Table 13. GSM8K accuracy and average context length (prompt +                              k|S   Acc. (%)    Tok.      Acc. (%)   Tok.   Acc. (%)     Tok.     Acc. (%)   Tok.
+answer) for DeepSeek-R1-Distill-Qwen-7B. k: number of keys in
+top-k, S: SANTA sample budget. Accuracy shows 95% bootstrap                                  2 23.56±1.20 588 24.89±1.27 1144 24.28±1.21 1141 24.52±1.22 1141
+                                                                                             4 28.37±1.27 359 25.13±1.20 961 24.65±1.26 807 24.49±1.18 774
+confidence intervals.
+                                                                                             8 39.54±1.43 532 25.06±1.23 284 25.63±1.23 286 24.47±1.23 292
+                                                                                            16 45.26±1.37 484 26.24±1.26 313 32.46±1.32 350 34.14±1.39 353
+                            Top-k                                 SANTA
+                                                                                            32 49.49±1.44 448 33.81±1.34 354 43.78±1.50 398 45.48±1.45 403
+k|S              Acc. (%)              Tok.              Acc. (%)              Tok.         64 48.33±1.37 433 41.11±1.40 397 49.25±1.48 415 48.70±1.39 418
+                                                                                           128 49.47±1.44 418 47.46±1.45 412 49.92±1.47 421 50.60±1.37 421
+  2           0.23±0.15                4049           0.00±0.00                4217        256 49.75±1.43 421 49.75±1.51 417 50.90±1.49 422 51.12±1.46 421
+  4          23.88±1.31                3298           0.08±0.09                4208
+  8          72.25±1.35                2332          52.46±1.57                2799        SDPA (baseline)                                                   49.86±1.47 424
+ 16          82.51±1.21                1860          79.00±1.28                1778
+ 32          86.23±1.02                1694          83.19±1.23                1667
+ 64          86.76±1.03                1624          84.99±1.09                1587
+128          87.54±1.02                1626          85.42±1.00                1594        ferent computational profiles. We present results for sample
+256          88.20±0.97                1600          86.93±1.01                1627        budget S equal to the top-k budget k not as an iso-compute
+SDPA (baseline)                                      88.75±1.00                1532        benchmark, but to demonstrate that SANTA achieves com-
+                                                                                           parable or superior accuracy while using a fundamentally
+                                                                                           cheaper set of operations. At S = k: top-k costs nq kdk
+Table 14. GSM8K accuracy and average context length (prompt +                              multiplications + nq kdk additions, whereas SANTA costs 0
+answer) for Llama-3.1-8B-Instruct.
+                                                                                           multiplications + nq Sdk additions (Table 12).
+         Top-k                 SANTA          S 2 ANTA-strat        S 2 ANTA-sys           A 32-bit FP multiply costs 3.7 pJ versus 0.9 pJ for addi-
+k|S   Acc. (%)    Tok.      Acc. (%)   Tok.   Acc. (%)     Tok.     Acc. (%)   Tok.        tion (Horowitz, 2014). For equal budgets k = S, the value-
+  2 1.21±0.32 430 1.26±0.34 1075 1.01±0.32 1071 1.11±0.34 1071                             stage energy consumption for the two methods are approxi-
+  4 6.27±0.72 583 1.57±0.37 825 1.54±0.38 611 1.67±0.40 569                                mately: k × (3.7 + 0.9) = 4.6k pJ per element for top-k, vs.
+  8 41.32±1.50 549 1.44±0.38 207 1.74±0.40 325 2.10±0.45 340
+                                                                                           S × 0.9 = 0.9S pJ per element for SANTA. Relative to top-
+ 16 62.88±1.57 430 5.51±0.72 350 39.12±1.50 352 44.63±1.58 349
+ 32 72.50±1.34 384 38.26±1.43 348 67.00±1.48 343 68.59±1.42 339                            k, SANTA yields an ≈ 5× energy reduction for value-stage
+ 64 76.12±1.32 358 63.63±1.49 346 74.43±1.31 343 76.42±1.34 341                            FLOPs. We acknowledge that these are approximate energy
+128 77.13±1.30 349 70.23±1.42 341 75.64±1.33 341 77.33±1.34 342                            estimates; we aim to provide hardware-agnostic compar-
+256 78.19±1.33 340 75.61±1.42 342 78.17±1.28 343 77.56±1.34 343
+                                                                                           isons, as modern GPU hardware is optimized for matmuls
+SDPA (baseline)                                                   78.06±1.33 344
+                                                                                           and contiguous memory access, while SANTA involves
+                                                                                           adds and sparse memory access.
+Tables 13, 14, 15, and 16 feature additional GSM8K
+                                                                                           Regarding memory accesses: SANTA’s accesses to elements
+and MMLU results with comparisons using DeepSeek-R1-
+                                                                                           of the V matrix scale as nq Sdk , which in the worst case
+Distill-Qwen-7B and top-k attention. Table 17 exhibits
+                                                                                           matches top-k’s nq kdk memory accesses at k = S. How-
+long-context benchmark results identical to Table 6, except
+                                                                                           ever, since SANTA samples with replacement, the number
+with additional top-k comparisons.
+                                                                                           of unique keys is ≤ S. In practice, as we quantify in Ap-
+Comparing SANTA and top-k requires care, as they have dif-                                 pendix M, the number of unique keys sampled is < S, which
+
+                                                                                      17
+
+===== PDF p.18 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+Table 17. Accuracy of Llama 8B on 4 long context tasks with               grade substantially, consistent with the sample-waste behav-
+an 8k-token prompt. Tasks: frequent word extraction (FWE),
+needle-in-a-haystack (NIAH), single-hop QA (QA1 ), multi-hop
+                                                                          ior discussed in Section 3.4, while S 2 ANTA-prop remains
+QA (QA2 ). k: number of keys for top-k. S: SANTA sample                   near the SDPA baseline across the tested budgets.
+budget. Accuracy shows 95% bootstrap CIs.
+                                                                          Table 18. Full LongBench v2 sweep for Llama 8B. S: sample
+ Kernel            k|S      FWE        NIAH        QA1        QA2         budget. Accuracy shows 95% bootstrap confidence intervals.
+ S 2 ANTA-sys       64 96.27±0.97 94.05±1.07 71.80±3.90 67.20±4.20
+                                                                                                       Kernel                                    S                             Acc. (%)      Avg. scored tok.
+ S 2 ANTA-sys      128 97.80±0.70 94.15±1.02 68.20±4.10 66.80±4.00
+ S 2 ANTA-sys      256 97.87±0.70 95.00±0.95 71.20±3.90 69.40±4.10                                     S 2 ANTA-flash                        128              8.748±2.964                                           30035.5
+  2                                                                                                    S 2 ANTA-flash                        256             14.049±3.504                                           30024.0
+ S ANTA-strat       64 95.93±0.94 94.35±1.15 71.40±4.00 65.40±4.20
+                                                                                                       S 2 ANTA-flash                        512             26.574±3.740                                           29990.0
+ S 2 ANTA-strat    128 97.73±0.80 94.30±1.10 70.80±4.20 67.40±4.20
+                                                                                                       S 2 ANTA-flash                       1024             27.170±1.509                                           29994.2
+ S 2 ANTA-strat    256 98.33±0.60 94.55±1.05 71.20±4.00 67.00±4.20
+                                                                                                       S 2 ANTA-flash                       2048             28.827±3.422                                           29996.4
+ SANTA              64 92.53±1.27 93.95±1.30 64.60±4.20 63.40±4.20
+                                                                                                       S 2 ANTA-prop                          64             29.092±2.534                                           29997.5
+ SANTA             128 94.53±1.13 91.45±1.38 67.80±4.10 63.40±4.30
+                                                                                                       S 2 ANTA-prop                         128             28.098±1.028                                           29998.4
+ SANTA             256 96.20±0.93 93.15±1.18 68.00±4.10 66.40±4.10
+                                                                                                       S 2 ANTA-prop                         256             28.694±1.029                                           29995.4
+ SDPA (baseline)    — 98.53±0.60 94.55±1.00 71.80±3.90 68.60±4.20                                      S 2 ANTA-prop                        1024             28.562±1.588                                           29996.2
+
+ top-k              64 93.07±1.20 92.55±1.10 65.60±4.10 60.80±4.10                                     SDPA (baseline)                           —           28.363±1.509                                           29996.0
+ top-k             128 95.40±0.96 93.60±1.15 69.20±3.90 62.20±4.50
+ top-k             256 97.27±0.80 94.55±1.05 70.60±3.90 64.20±4.10
+
+                                                                          J. Ablation Study: One-Hot Attention Samples
+may offer significant caching advantages.                                                100            (a) Deepseek 7B - GSM                                                100           (b) Deepseek 7B - MMLU
+                                                                          Accuracy (%)
+
+
+
+
+                                                                                                                                                              Accuracy (%)
+For benchmarking, we apply SANTA and top-k to both pre-                                   50                                                                                 50
+
+
+fill and autoregressive decoding. However, in practice, these                                                                               baseline
+                                                                                                                                            1-hot schedule
+                                                                                                                                                                                                                               baseline
+                                                                                                                                                                                                                               1-hot schedule
+                                                                                           0                                                                                  0
+sparse attention implementations may see greater benefit                                           5          10            15
+                                                                                                                   1-hot layer index
+                                                                                                                                       20         25                                   5         10            15
+                                                                                                                                                                                                      1-hot layer index
+                                                                                                                                                                                                                          20         25
+
+
+during decoding, when only a single query sparsely selects                               100
+                                                                                                        (c) Llama 8B - GSM
+                                                                                                                                                                             100
+                                                                                                                                                                                           (d) Llama 8B - MMLU
+
+rows of V .
+                                                                          Accuracy (%)
+
+
+
+
+                                                                                                                                                              Accuracy (%)
+                                                                                          50                                                                                  50
+
+
+SANTA variants demonstrate strong performance relative to                                                                                   baseline
+                                                                                                                                            1-hot schedule
+                                                                                                                                                                                                                               baseline
+                                                                                                                                                                                                                               1-hot schedule
+                                                                                           0                                                                                   0
+top-k on GSM8K and MMLU benchmarks, despite SANTA                                              5         10            15        20
+                                                                                                                   1-hot layer index
+                                                                                                                                            25         30                          5        10            15         20
+                                                                                                                                                                                                      1-hot layer index
+                                                                                                                                                                                                                               25         30
+
+
+requiring no multiplications and a similar number of addi-
+                                                                          Figure 8. Ablations with one-hot stochastic attention. Baseline
+tions and memory accesses for k = S. However, the most                    scores employ a fixed sampling budget of 16 and 256 for DeepSeek
+remarkable result is shown in Table 17, where S 2 ANTA vari-              7B and Llama 8B models, respectively. The horizontal axis shows
+ants outperform top-k across virtually every long-context                 the index of the model layer which is reduced to stochastic hard
+task for all k = S. S 2 ANTA’s lead over top-k is most                    attention.
+apparent for multi-hop question answering (QA2 ), where
+S 2 ANTA variants lead in performance by ≈ 5% in several                  This section probes a fundamental question: how much does
+cases. It is plausible that long context tasks — multi-hop QA             each attention layer matter? We find that one-hot stochastic
+in particular — have information that is not concentrated in              attention, a limiting case of SANTA with S = 1, acts as a
+the top-k keys, and therefore SANTA’s unbiased estimate                   surprisingly sharp diagnostic. It reveals which transformer
+of attention outperforms top-k, which drops information                   layers are robust to severe approximation and which are
+and cannot attend to keys outside of the k largest attention              not, offering a practical lens into where attention precision
+scores.                                                                   matters most.
+                                                                          We perform these ablations by setting S = 1 in a single
+I. Additional LongBench v2 Results                                        layer while keeping all other layers at fixed sample budgets:
+                                                                          S = 16 for DeepSeek 7B (28 layers) and S = 256 for
+Table 18 reports the full LongBench v2 budget sweep cor-
+                                                                          Llama 8B (32 layers). In this setting, each query attends to
+responding to the compact operating-point summary in Ta-
+                                                                          only one randomly sampled key, making that layer a hard
+ble 2. Accuracy is reported with 95% bootstrap confidence
+                                                                          attention bottleneck.
+intervals. Results are averaged over three runs; prompts
+longer than 32k tokens are truncated to 32k following the                 Models are evaluated on GSM8K and MMLU with the
+repository protocol. The main operating points, S 2 ANTA-                 same protocol as Tables 4 and 5. The effect of this localized
+prop with S=128 and S 2 ANTA-flash with S=2048, match                     bottleneck on accuracy is summarized in Fig. 8. Some
+SDPA within bootstrap confidence intervals in this 30k-                   layers exhibit almost no degradation when ablated in this
+token regime. Lower-budget S 2 ANTA-flash settings de-                    way, while others collapse entirely, most notably middle
+
+                                                                     18
+
+===== PDF p.19 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+layers in DeepSeek 7B and the first layer in Llama 8B.                                        (a) Learned sample schedule
+                                                                                     14
+In DeepSeek 7B, layers 12–18 are highly sensitive to ap-
+proximation, while early and final layers are much more                              12
+
+
+
+
+                                                                      # Samples
+tolerant. In contrast, Llama 8B exhibits extreme sensitivity
+in just the first layer. These patterns suggest that attention                       10
+importance is neither uniform nor trivially architectural.
+                                                                                      8
+We observe similar qualitative trends regardless of the base-
+line sample budget; the S = 16 and S = 256 settings are                               6
+arbitrary. The early-layer sensitivity in Llama 8B is consis-
+tent with prior findings on high-entropy attention in shallow                         4
+                                                                                          1     5       9      13     17      21         25
+layers (Clark et al., 2019), and with prior work that avoids
+approximating early layers (Tang et al., 2024; Sun et al.,                                               Layer
+2024). The middle-layer fragility in DeepSeek 7B remains                                   (b) Reinforcement learning curve
+an open and intriguing observation.                                                  70
+
+                                                                                     60
+
+
+
+
+                                                                      Accuracy (%)
+K. Layer-Wise Sample Budget Through RL
+                                                                                     50
+Algorithm 1 Layer-wise sample-budget optimization via
+REINFORCE                                                                            40
+Require: initial logits θ ∈ R28 (θi = 0), total budget
+                                                                                     30
+    N =224, learning-rate α=0.02
+ 1: while training do                                                                20
+ 2:   Workers (in parallel):                                                           0          100       200       300          400        500
+ 3:   for e = 1, . . . , E do {E=10
+                                 P episodes / worker run}                                                    Iteration
+ 4:     Compute pi ← exp(θi )        j exp(θj )                       Figure 9. Learned schedule with a total budget of 224 samples
+ 5:     Sample schedule S ∼ Multinomial(N, p)                         across all 28 transformer blocks (DeepSeek 7B). (b) RL iterations
+ 6:     Evaluate 16 GSM8K questions using schedule s;                 over time.
+        obtain reward r ∈ [0, 1]
+ 7:     Append (s, r) to shared folder
+ 8:   end for                                                          room for the learned schedule to improve.
+ 9:                                                                    Fig. 9 shows the final learned schedule after 501 iterations.
+10:   Aggregator:                                                      The allocation aligns strikingly with the ablation trends from
+11:   Collect all new (s(k) , r(k) )P
+                                    tuples    {k = 1 . . . K}          Fig. 8: more samples are assigned to the first and middle
+                                 1        (k)
+12:   Compute baseline b ← K          k r                              layers, where one-hot attention was most detrimental. That
+                        1 X (k)
+                                (r − b) s(k) − N p                     REINFORCE independently rediscovers this structure from
+                                                       
+13:   Gradient: g ←
+                        K                                              only reward signals confirms that these patterns are not
+                              k
+14:   Update logits θ ← θ + α g                                        artifacts of the ablation method but instead are intrinsic to
+15:   Write back updated θ                                             the models.
+16: end while
+                                                                       This experiment is not tuned for peak accuracy, but demon-
+                                                                       strates that adaptive per-layer budgets meaningfully outper-
+We now consider a global sample budget shared across
+                                                                       form fixed ones. Please see Appendix L for implementation
+all 28 transformer layers of DeepSeek 7B, allowing each
+                                                                       details of distributed reinforcement learning using a Kuber-
+layer to have a distinct sample count. We optimize this
+                                                                       netes compute cluster.
+allocation using a REINFORCE-style algorithm (Williams,
+1992), detailed in Algorithm 1.                                       Table 19. RL sample-schedule performance. Accuracy shows 95%
+                                                                      bootstrap confidence intervals.
+We train the policy on the GSM8K training set. The policy
+logits θ ∈ R28 define a softmax distribution over layers. At                           Schedule                Task         Accuracy (%)
+each iteration, we sample schedules using a multinomial
+                                                                                       Baseline (8 samples)    GSM8K        52.46 ± 1.47
+draw over this distribution, with a total budget of 224 sam-
+                                                                                       Baseline (8 samples)    MMLU         44.55 ± 1.47
+ples (i.e., 8 × 28). Each episode evaluates 16 questions; the                          Learned schedule        GSM8K        66.06 ± 1.47
+reward is the fraction answered correctly. We intentionally                            Learned schedule        MMLU         48.86 ± 1.53
+starve the baseline with S = 8 samples per layer to create
+
+                                                                 19
+
+===== PDF p.20 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+L. Distributed Reinforcement Learning on                               mix of RTX 3090, L4, and A10 cards (24 GB) for roughly 20
+   Kubernetes                                                          hours, totaling ≈ 1000 GPU-hours. The aggregator requests
+                                                                       just one CPU core and a few hundred MiB of RAM.
+                       Aggregator                                      Terminology. We keep the names aggregator and worker
+                                                                       to highlight the simple “parameter-server” flavor of the de-
+      read (schedule, reward)    write                                 sign, but these roles align exactly with the common learn-
+                                                                       er/actor split in distributed reinforcement learning.
+
+
+
+
+                                              ap che
+                                                pe du
+                   Shared filesystem
+
+
+
+                                                (s
+
+                                                  nd le
+                                                                       M. Unique Key-Count
+         e
+        pl
+       m
+
+
+
+
+                                                        ,
+                                                       re
+     sa
+
+
+
+
+                                                        wa
+                                                                        Table 20. Unique-key count vs. S (8192 tokens, single-query).
+
+
+
+
+                                                          rd
+                                                            )
+  GPU 1                   GPU 2          ... GPU 50                                 S
+
+                                                                                   32
+                                                                                        SANTA
+
+                                                                                         11.0
+                                                                                                 S 2 ANTA-strat
+
+                                                                                                      12.7
+                                                                                                                  S 2 ANTA-sys
+
+                                                                                                                      13.0
+                                                                                   64    16.7         21.2            21.7
+         Figure 10. Kubernetes deployment schematic.                              128    25.9         35.8            36.4
+                                                                                  256    38.3         60.3            61.6
+
+Topology. All pods mount a single read–write volume that
+                                                                       Since all versions of SANTA sample keys with replacement,
+serves as the rendezvous point.
+                                                                       the number of unique keys may be less than the sample
+                                                                       budget S. In Table 20, we empirically measure the average
+ • Aggregator pod. Holds the current policy and records a
+                                                                       number of unique keys sampled by the last query position for
+   running history of baselines and gradients.
+                                                                       8192-token single-hop QA prompts (normalized per head
+ • Worker pods. Operate in a tight loop: (i) read the                  and averaged across model layers). This is indicative of
+   latest policy; (ii) sample a 28-dimensional schedule; (iii)         the key diversity observed in autoregressive decoding. For
+   evaluate ten batches of 16 questions; (iv) append a small           a given S, S 2 ANTA variants achieve higher key diversity
+   JSON-lines result file to a designated “inbox” directory            than default SANTA. Furthermore, the number of unique
+   on the volume.                                                      keys tends to be ≪ S, implying that fewer than S unique
+                                                                       rows of V require memory accesses. See Appendix N for
+Aggregator loop. Whenever at least one new result file                 details about the measurement protocol.
+appears, the aggregator moves all current files into a private
+folder for the next iteration, computes the REINFORCE                  N. Implementation & Measurement Protocol
+update and writes a new policy snapshot. It never pauses                  for Empirical Variance and Unique Keys
+or signals the workers; it simply processes whatever has
+                                                                          Sampled
+arrived. In practice, workers are unlikely to finish evaluation
+simultaneously, thus nearly every policy update comes from             Setting. For a single layer/head at the last prefill position
+one worker output (10 × 16 questions). If two land together,           q ⋆ , let
+                                                                              Pthe  post-softmax attention over nk keys be pj ≥ 0
+                                                                                 nk
+the aggregator just uses a double-sized batch, which lowers            with j=1     pj = 1, and let Vj ∈ Rdk denote the correspond-
+the gradient’s variance.                                               ing value vectors. The dense-attention mean is
+                                                                                                nk
+Asynchrony and fault-tolerance.                                                          µ =
+                                                                                                X
+                                                                                                      pj Vj ∈ Rdk .
+                                                                                                j=1
+ • Workers can be terminated at any time; partial output
+   vanishes harmlessly.                                                SANTA estimator. Given a per-head sampling budget S,
+ • Workers always proceed with the newest policy that has              all SANTA variants estimate µ with
+   reached disk; no locking is needed.                                                                       S
+                                                                                           d = 1
+                                                                                                 X
+ • If the aggregator restarts it scans the history directory,                              AV       VJ ,
+                                                                                               S s=1 s
+   resumes from the last completed iteration, and continues.
+                                                                       where the key indices {Js } are drawn by one of three
+Scaling and resources. The worker Deployment’s replica                 schemes: (i) multinomial; (ii) independent equal-mass strat-
+count can be scaled up or down at any time during learning.            ified; or (iii) systematic (random-start, fixed-stride). These
+For the 501 iterations in Fig. 9 we ran 50 GPU workers on a            are the same variants used in the main paper; the code paths
+
+                                                                  20
+
+===== PDF p.21 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+that implement them also record the per-head statistics de-             average over layers, and finally average over prompts to
+scribed below at q ⋆ .                                                  obtain the quantities reported in the variance plots:
+
+N.1. What We Measure (per Head at q ⋆ )                                  U (S, variant)                                 d ).
+                                                                                          and T (S, variant) = VarTrace(AV
+
+(1) Unique keys. The number of distinct keys touched by                 This yields the curves summarized in the main text as a
+the sampler,                                                            function of the budget S and the SANTA variant.
+                U := {J1 , . . . , JS } ,
+upper-bounded by S (can be < S if high-probability keys                 Protocol summary. All measurements use evaluation-
+repeat). This is a proxy for how many memory locations                  mode forward passes, prefill-only, and record statistics at
+each head actually reads.                                               the last token per head; no additional dense attention pass
+                                                                        is performed to form empirical errors. For multinomial and
+(2) Variance trace of the estimator. We report the trace                stratified we use the exact formulas above; for systematic
+of the covariance (expected squared ℓ2 error) of AV
+                                                 d,                     we use the replicate-based estimator.
+                                                    
+                          d − µ∥22 = tr Cov(AV
+                                   
+VarTrace(AV d ) := E ∥AV                           d) ,                 O. Prompting, Parsing, and Grading
+specialized to each sampling scheme:                                    In Section 4.1, we evaluate the GSM8K test split (1319
+                                                                        prompts) 3 times. Evaluation code uses straightfor-
+                                          Pnk                           ward answer parsing and borrows grading code from
+   • Multinomial (closed form). Let Σ := j=1      pj (Vj −              PRM800K (Lightman et al., 2024).           For all runs,
+               ⊤                                2        2
+                                    P
+     µ)(Vj − µ) so that tr(Σ) =       j pj ∥Vj ∥2 − ∥µ∥2 .              temperature = 0.6, top-p = 0.95, and repetition penalty =
+     Then                                                               1.1. We use left-padded batches of 8–16 prompts.
+
+                                           1                            In Section 4.2, we average results over three runs on the
+                              d) =
+               VarTracemulti (AV             tr(Σ).                     MMLU validation set (1531 questions), using identical de-
+                                           S
+                                                                        coding parameters as GSM8K.
+   • Independent equal-mass stratified (closed form).
+     Partition [0, 1) into S equal strata; for each stratum m,          In Section 4.3, long-context benchmark results are averaged
+     form the within-stratum discrete distribution induced              over 500 prompts and greedy decoding is employed with no
+     by p and let Σm be the corresponding value covariance.             repetition penalty applied.
+     Because draws across strata are independent,                       In Section 3.4 and Appendix I, LongBench v2 (Bai et al.,
+                                           S−1
+                                                                        2025) results are averaged over three runs. Prompts longer
+                                        1 X                             than 32k tokens are truncated to 32k following the repository
+                          d) =
+           VarTracestrat (AV                   tr(Σm ).
+                                       S 2 m=0                          protocol. We report accuracy with 95% bootstrap confidence
+                                                                        intervals and the average number of scored tokens.
+   • Systematic (replicate-based estimate). There is no
+     general closed form that holds uniformly for systematic            DeepSeek 7B + GSM8K
+     sampling, so we estimate variance by repeated random
+     starts. With R ≥ 2 independent offsets, we compute                 Aspect                Procedure
+         (r)
+     AV
+     d for each replicate, then use                                     Prompt                Question, blank line, then Please
+                                                                                              reason step by step, and
+                                      R                                                       put your final numeric
+                                 1 X d (r)                 2                                  answer within \boxed{}.
+       VarTrace
+        \ sys (AV
+                d) =                     AV −V             2
+                                                             ,
+                               R − 1 r=1                                Answer extraction     Perform a brace-balanced search for the
+                                                                                              last occurrence of \boxed{...} (ro-
+                                   R                                                          bust to nested braces). If none is found,
+                               1 X d (r)
+                         V =         AV .                                                     fall back to the final ∼200 characters of
+                               R r=1                                                          the model output.
+                                                                        Grading               Numeric equality judged by the MIT-
+     This estimator is applied per head at q .⋆                                               licensed PRM800K grader; every prompt
+                                                                                              is counted, and blank or unparsable pre-
+                                                                                              dictions score 0.
+N.2. How We Aggregate and Report                                        Table 21. Prompting and grading for DeepSeek 7B on GSM8K.
+For each prompt, we compute U and the variance-trace
+scalar per head at q ⋆ , then average over heads within a layer,
+
+                                                                   21
+
+===== PDF p.22 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+DeepSeek 7B + MMLU                                                      Aspect               Procedure
+                                                                        Prompt               Meta chat template. System: “You are
+                                                                                             a knowledgeable and concise subject-
+Aspect              Procedure                                                                matter expert. Work through the problem
+Prompt              Question, four labeled choices, then                                     step by step. Finally, on a new line, out-
+                    Answer briefly. Put your                                                 put ONLY the single capital letter (A, B,
+                    final answer as a single                                                 C, or D) that corresponds to the correct
+                    letter inside \boxed{}.                                                  choice.” User: the question followed by
+Answer extraction   Brace-balanced search for the last oc-                                   the four labeled choices A–D.
+                    currence of \boxed{...}; if none is                 Answer extraction    Take the substring after the last newline
+                    found, inspect the final ∼300 characters                                 and scan it left-to-right for the first capital
+                    of the output. Scan this region back-                                    A–D (case-insensitive). If none is found,
+                    wards and take the first occurrence of                                   inspect the final 10 whitespace-separated
+                    A–D (case-insensitive), then convert it                                  tokens of the whole response, scanning
+                    to uppercase.                                                            them right-to-left for A–D.
+Grading             The predicted letter is compared with the           Grading              Predicted letter (upper-cased) is com-
+                    gold key (case-insensitive). If no valid                                 pared with the gold key. Every question
+                    letter is found—or the output is blank—                                  is counted; if no valid letter is found or it
+                    the item scores 0; otherwise it scores 1                                 does not match the gold answer, the item
+                    when the letters match.                                                  scores 0.
+Table 22. Prompting and grading for DeepSeek 7B on MMLU.                  Table 24. Prompting and grading for Llama 8B on MMLU.
+
+
+                                                                        Llama 8B + RULER prompts
+
+                                                                        Aspect               Procedure
+                                                                        Prompt               Prompts are generated for the following
+                                                                                             RULER sub-tasks with a length of 4096–
+                                                                                             32768 tokens: fwe, niah multivalue,
+                                                                                             qa 1, and qa 2. Greedy decoding is used.
+Llama 8B + GSM8K                                                                             The model generates a maximum of 64
+                                                                                             new tokens.
+                                                                        Grading              fwe: partial credit = (# of gold words
+Aspect              Procedure                                                                present in the model output) / 3 (case-
+                                                                                             insensitive set match). niah multivalue:
+Prompt              Meta chat template. System: “You are
+                                                                                             take the first four unique integers from
+                    a precise mathematician. Explain your
+                                                                                             the model output; partial credit = (# of
+                    reasoning step by step, then output ONLY
+                                                                                             these that appear in the gold set) / 4. qa 1
+                    the final number on a new line.” User: the
+                                                                                             and qa 2: correct if the gold answer string
+                    GSM8K question.
+                                                                                             appears as a case-insensitive substring of
+Answer extraction   Inspect the model reply in order: (i)
+                                                                                             the model output.
+                    the last non-empty line of the response;
+                    (ii) if that fails, the final 25 whitespace-        Table 25. Prompting and grading for Llama 8B on RULER
+                    separated tokens. From the selected                 prompts.
+                    chunk, take the first integer-looking to-
+                    ken (commas allowed, optional leading
+                    minus).                                             Licenses.
+Grading             Numeric equality judged by the MIT-
+                    licensed PRM800K grader; every ques-                 • Models. deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
+                    tion is counted, and blank or unparsable               (MIT) and meta-llama/Meta-Llama-3.1-8B-Instruct
+                    answers score 0.                                       (Llama 3.1 license) on Hugging Face.
+ Table 23. Prompting and grading for Llama 8B on GSM8K.                  • Datasets. GSM8K openai/gsm8k (MIT) and MMLU
+                                                                           cais/mmlu (MIT) on Hugging Face. RULER prompts
+                                                                           (Apache).
+                                                                         • Grader. PRM800K numeric grader (MIT).
+
+                                                                        P. S 2 ANTA-Prop Pseudocode
+                                                                        Algorithm 2 provides a high-level overview of S 2 ANTA-
+                                                                        prop. Algorithms 3, 4, and 5 show breakdowns of the kernels
+Llama 8B + MMLU                                                         that perform score computation, sample budget allocation,
+
+                                                                   22
+
+===== PDF p.23 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+and the V gather, respectively.                                            Algorithm 4 S2 ANTA-prop, Kernel 2: proportional per-tile
+                                                                           budgets (largest remainder)
+Algorithm 2 S2 ANTA-prop (overview, decode/GQA): pro-                      Require: Tile stats mh,t , ℓh,t ; samples/head S; seed.
+portional tile budgets + systematic sparse-V
+                                                                                                                  P
+                                                                           Ensure: Integer budgets Sh,t with t Sh,t = S, plus invδh,t
+                                                                               and offsets a0,h,t .
+Require: Q ∈ RH×dk ; K, V ∈ Rnk ×Hkv ×dk (GQA); tile                        1: for each head h ∈ {0, . . . , H−1} in parallel do
+    length Btile ; samples/head S.                                          2: m⋆h ← maxt mh,t .
+Ensure: O ∈ RH×dk approximating softmax(QK T )V .                                                                            P −1
+ 1: T ← ⌈nk /Btile ⌉, G ← H/Hkv , k(h) ← ⌊h/G⌋, Tt =                        3: Wh,t ← exp(mh,t − m⋆h ) ℓh,t ; Zh ← Tt=0            Wh,t .
+    [tBtile , min((t+1)Btile , nk )).                                       4: qt ← S · Wh,t /Zh ; P     Sh,t ← ⌊qt ⌋ for all t.
+                                                                            5: Give remaining S − t Sh,t samples to tiles with largest
+    P 1: compute mh,t = maxn∈Tt sh,n and ℓh,t =
+ 2: Pass
+                                                                                 fractional part of qt (largest remainder).
+       n∈Tt exp(sh,n − mh,t );        optionally stash uh,n =
+                                                      √                     6: invδh,t ← (Sh,t > 0) ? Sh,t /ℓh,t : 0; a0,h,t ∼
+    exp(sh,n − mh,t ), where sh,n = Q⊤     h Kn,k(h) / dk .                      Unif(0, 1).
+ 3: Budgets: m⋆h = maxt mh,t ; W                            ⋆
+                                      Ph,t = exp(mh,t − mh ) ℓh,t ;         7: end for
+    allocatePintegers {Sh,t }t with t Sh,t = S and Sh,t ≈ S ·
+    Wh,t / t Wh,t (largest remainder); set invδh,t = Sh,t /ℓh,t
+    and a0,h,t ∼ U [0, 1).                                                 Algorithm 5 S2 ANTA-prop, Kernel 3: systematic resam-
+ 4: Pass 2: systematicPcounts ch,n from xh,n = invδh,t uh,n ,              pling and sparse-V accumulation (GQA grouped)
+    then Oh ← Oh + n ch,n Vn,k(h) .
+ 5: return O/S.                                                            Require: V ∈ Rnk ×Hkv ×dk ; uh,n ; invδh,t , a0,h,t ; tile length
+                                                                               Btile .
+                                                                           Ensure: Accumulator O ∈ RH×dk (fp32).
+                                                                            1: G ← H/Hkv ; O ← 0.
+Algorithm 3 S2 ANTA-prop, Kernel 1: pass-1 tile statistics                  2: for each KV head k ∈ {0, . . . , Hkv −1} and tile t ∈
+(and optional u-stash)                                                         {0, . . . , T −1} in parallel do
+                                                                            3: Tt ← [tBtile , min((t+1)Btile , nk )); heads Hk =
+Require: Q ∈ RH×dk ; K ∈ Rnk ×Hkv ×dk ; tile length Btile .
+                                                                                 {kG, . . . , (k+1)G−1}.
+Ensure: m ∈ RH×T , ℓ ∈ RH×T , and optional u ∈ RH×nk .
+                                                                            4:   for each head h ∈ Hk do
+ 1: T ← ⌈nk /Btile ⌉; G ← H/Hkv .
+                                                                            5:       p ← 0.
+ 2: for each KV head k ∈ {0, . . . , Hkv −1} and tile t ∈
+                                                                            6:       for each n ∈ Tt (increasing) do
+    {0, . . . , T −1} in parallel do
+                                                                            7:            x ← invδh,t uh,n .
+ 3:   Tt ← [tBtile , min((t+1)Btile , nk )).
+                                                                            8:            ch,n ← ⌊a0,h,t + p + x⌋ − ⌊a0,h,t + p⌋; p ← p + x.
+ 4:   for each grouped head g ∈ {0, . . . , G−1}
+                                              √ do                          9:       end for
+ 5:       h ← kG + g; sh,n ← Q⊤      h K    /
+                                        n,k P  dk for all n ∈ Tt .         10:    end for
+ 6:       mh,t ← maxn∈Tt sh,n ; ℓh,t ←          n∈Tt exp(sh,n −            11:    (Optional) compact emitted rows Et = {n ∈ Tt : ∃h ∈
+          mh,t ).                                                                Hk , ch,n > 0}.
+ 7:       (Optional) uh,n ← exp(sh,n − mh,t ) for all n ∈ Tt .             12:    for each n ∈ Et and each h ∈ Hk do
+ 8:   end for                                                              13:       Oh ← Oh + ch,n Vn,k .
+ 9: end for                                                                14:    end for
+                                                                           15: end for
+                                                                           16: return O (apply final scaling by 1/S outside or in a final
+                                                                               cast/scale kernel).
+
+
+                                                                           Q. S 2 ANTA-Flash Pseudocode
+                                                                           Algorithm 6 provides a high-level overview of S 2 ANTA-
+                                                                           flash. Algorithms 7 and 8 describe the 2 kernels that consti-
+                                                                           tute S 2 ANTA-flash in detail.
+
+
+
+
+                                                                      23
+
+===== PDF p.24 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+
+
+
+Algorithm 6 S2 ANTA-flash (overview, decode/GQA): uni-
+form per-tile sampling + FlashDecoding-style merge
+Require: Q ∈ RH×dk ; K, V ∈ Rnk ×Hkv ×dk (GQA); tile
+    length Btile ; samples/head S; seed.
+Ensure: O ∈ RH×dk approximating softmax(QK T )V .
+ 1: T ← ⌈nk /Btile ⌉; G ← H/Hkv ; k(h) ← ⌊h/G⌋; uniform
+    per-tile budget Stile ≈ S/T (rounded).
+ 2: Kernel 1 (tile partials): for each tile (k, t), compute
+                       eh,t = P
+    (mh,t , ℓh,t ) and O         n∈Tt ch,n Vn,k via systematic sam-
+    pling with budget Stile .
+                                                  ⋆
+ 3: Kernel 2 (merge): for each head h, set   Pmh = maxt mh,t ,
+                              ⋆
+    Wh,t = exp(m     h,t − m   )ℓ
+                              h h,t , Z h =    t W h,t , and Oh =
+      1
+        P
+           t Wh,t Oh,t /Stile .
+                      e
+     Zh
+ 4: return O.
+
+
+
+
+Algorithm 7 S2 ANTA-flash, Kernel 1: fused per-tile par-
+tials (stats + systematic sampling)
+Require: Q ∈ RH×dk ; K, V ∈ Rnk ×Hkv ×dk ; tile length Btile ;
+    samples/head S; seed.
+                                        eh,t ) for all heads and tiles.
+Ensure: Per-tile outputs (mh,t , ℓh,t , O
+ 1: T ← ⌈nk /Btile ⌉; G ← H/Hkv ; Stile ≈ S/T (rounded).
+ 2: for each KV head k ∈ {0, . . . , Hkv −1} and tile t ∈
+    {0, . . . , T −1} in parallel do
+ 3:   Tt ← [tBtile , min((t+1)Btile , nk )); heads Hk =
+      {kG, . . . , (k+1)G−1}.
+ 4:   for each head h ∈ Hk√do
+ 5:       sh,n ← Q⊤   h Kn,k / dk for n ∈ Tt .
+ 6:       mh,t ←Pmaxn∈Tt sh,n ; uh,n ← exp(sh,n − mh,t );
+          ℓh,t ← n∈Tt uh,n .
+ 7:       invδh,t ← (Stile /ℓh,t ) (or 0 if ℓh,t is tiny); a0,h,t ∼
+          U [0, 1).
+ 8:       Use systematic counts ch,n from xh,n = invδh,t uh,n
+          and accumulate O  eh,t ← P
+                                       n∈Tt ch,n Vn,k .
+ 9:   end for
+10: end for
+
+
+
+
+Algorithm 8 S2 ANTA-flash, Kernel 2: FlashAttention-style
+merge across tiles
+Require: Per-tile (mh,t , ℓh,t , Oeh,t ) from Alg. 7; Stile .
+                      H×dk
+Ensure: Final O ∈ R         .
+ 1: for each head h ∈ {0, . . . , H−1} in parallel do
+ 2:   m⋆h ← maxt mh,t .
+                                                   P −1
+ 3:   Wh,t ← exp(mh,t − m⋆h ) ℓh,t ; Zh← Tt=0              Wh,t .
+                    T −1
+      Oh ← 1
+                 P
+ 4:            Zh     t=0Wh,t O    eh,t /Stile .
+ 5: end for
+ 6: return O.
+
+
+
+
+                                                                          24
+
+===== PDF p.25 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+R. Decode-Step Kernel Microbenchmark                                   • Query tensor with shape [H, dk ].
+   Details                                                             • Key/value cache tensors stored in a sequence-major lay-
+This appendix describes the microbenchmark used to mea-                  out with shape [nk +1, Hkv , dk ]. (The extra +1 slot
+sure decode-step attention latency for FlashAttention2 de-               corresponds to the current token.)
+coding (“FlashDecoding”), FlashInfer decoding, and our
+custom S 2 ANTA CUDA kernels. The intent is to be ex-                                            √ same causal setting and the
+                                                                      All backends are run with the
+plicit about tensor shapes, software/hardware environment,            standard softmax scaling 1/ dk , with dropout disabled.
+cache state, and what is (and is not) included in the reported
+runtimes, in order to support a fair comparison.                      Input distribution and dtype. All inputs are i.i.d. Gaus-
+                                                                      sian (torch.randn) generated directly on the GPU. Un-
+What is being measured. We measure GPU kernel time                    less otherwise stated, the query, keys, and values are pro-
+for a single decoding step (one new token) as a function of           vided in bfloat16 (the harness also supports fp16). A fixed
+the KV-cache length nk . Timing is performed with CUDA                RNG seed is used so that, for a given nk , each backend sees
+events, recorded on the active CUDA stream and synchro-               the same input tensors.
+nized on the end event each iteration. The reported millisec-
+onds therefore reflect elapsed time on the GPU timeline for           Cold-cache protocol (L2 thrashing). To reduce sensitiv-
+the CUDA work launched by a single backend call (which                ity to favorable cache residency effects: before each timed
+may internally launch multiple kernels). All Python/CPU               iteration, we touch a large GPU buffer by performing an
+overhead and input construction are excluded by allocat-              in-place update on a 512 MB float32 tensor. This operation
+ing and populating tensors outside the timed region and               is intended to thrash GPU caches (including L2) via a large
+recording events immediately around the backend call.                 read+write stream. The cache-thrash operation is executed
+                                                                      outside the timed region (before the start event is recorded),
+Hardware and driver. All measurements were run on                     and therefore is not included in the reported kernel time.
+a single NVIDIA RTX 6000 Ada Generation GPU
+(48 GB). The installed driver reported by nvidia-smi                  Timing protocol and trial structure. For each cache
+was 580.82.07 (CUDA compatibility reported as 13.0).                  length nk and each backend, we run a fixed number of
+                                                                      warmup and timed iterations:
+Software environment (versions). The benchmark envi-
+ronment used:                                                          • Warmup: 10 untimed iterations to amortize one-time
+                                                                         effects (e.g., kernel selection/caching inside libraries).
+ • PyTorch 2.6.0+cu124
+                                                                       • Timing: 40 timed iterations. Each iteration performs an
+ • flash-attn 2.7.1 (FlashAttention2)                                    optional cache-thrash (not timed), then records a start
+                                                                         CUDA event, launches the backend once, records an end
+ • flashinfer-python 0.5.3                                               CUDA event, synchronizes on the end event, and reads
+                                                                         elapsed milliseconds from the event pair.
+Our S 2 ANTA kernels are invoked through a PyTorch CUDA
+extension (custom CUDA code callable from PyTorch); the                • Aggregation: we report the mean latency over the 40
+timed region includes all CUDA kernels launched by this                  timed iterations.
+extension entrypoint.
+                                                                      All tensor allocations and concatenations/appends used to
+Decode geometry and tensor shapes. We benchmark a                     construct inputs are performed outside the timed region.
+single-batch decode step with head geometry matching a
+Llama-style GQA configuration:                                        Note on KV-cache appends in FlashDecoding. FlashAt-
+                                                                      tention2 decoding performs a fused KV-cache append/up-
+ H = 32,     Hkv = 8,      dk = 128,     G = H/Hkv = 4,               date as part of its decode call, whereas FlashInfer decoding
+                                                                      and our S 2 ANTA decode kernels do not perform an internal
+where H is the number of query heads, Hkv is the number               append in this benchmark. To isolate the attention-like de-
+of KV heads, and dk is the head dimension. The query                  code computation for FlashInfer and S 2 ANTA, we provide
+length is one token (decode), batch size is one, and attention        a cache tensor that already includes the current token in the
+is causal.                                                            preallocated [nk +1, Hkv , dk ] storage.
+For each cache length nk , the following tensors are con-             This asymmetry is not material in the long-context regime:
+structed once and reused across timing iterations:                    the fused append cost is O(Hkv dk ) per step and does not
+
+                                                                 25
+
+===== PDF p.26 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+scale with nk , so its fractional contribution decreases as nk                     Protocol. We evaluate the standard HumanEval pass@1
+grows. Our speedup comparisons focus on large KV-cache                             setting with greedy decoding and compare model-generated
+lengths (e.g., 8k–32k tokens), where the attention computa-                        completions against the unit tests for each problem. We
+tion dominates. Including the fused append inside FlashDe-                         report pass@1 with 95% bootstrap confidence intervals and
+coding therefore does not change qualitative conclusions                           the average number of generated/evaluated tokens. Since
+in this regime (and makes the FlashDecoding measurement                            HumanEval examples are short-context code-generation
+slightly more conservative relative to an “attention-only”                         tasks, they do not exercise the memory-bound 30k–32k-
+timing).                                                                           token decode regime emphasized in Section 3.4. Accord-
+                                                                                   ingly, we use HumanEval only to verify that the approxi-
+S. Additional S 2 ANTA Kernel Results                                              mation does not catastrophically degrade code-generation
+                                                                                   accuracy at moderate budgets.
+Table 26. Accuracy of Llama 8B on 4 long-context tasks with
+an 8k-token prompt. Tasks: frequent word extraction (FWE),                         U. Same-State Fidelity and Tile-Sensitivity
+needle-in-a-haystack (NIAH), single-hop QA (QA1 ), multi-hop
+QA (QA2 ). S: sample budget. Accuracy shows 95% bootstrap                             Analyses
+confidence intervals.
+                                                                                   This appendix reports additional analyses to characterize
+Kernel               S        FWE         NIAH           QA1          QA2          when the S 2 ANTA kernels are most faithful to dense at-
+                                                                                   tention. We focus on 32k-token frequent-word extraction
+S 2 ANTA-prop      64 96.60±0.52 93.23±0.69 70.73±2.43 67.33±2.46
+S 2 ANTA-prop     128 98.04±0.40 93.78±0.60 70.33±2.40 66.87±2.43                  (FWE) and multi-hop QA (QA2 ) prompts, since these are
+S 2 ANTA-prop     256 98.07±0.40 94.05±0.62 70.67±2.33 66.40±2.30                  representative long-context tasks used in the main kernel-
+S 2 ANTA-flash      64   66.47±1.12   83.57±1.05   65.67±2.44    62.27±2.40        accuracy evaluation. Unless otherwise stated, we select
+S 2 ANTA-flash     128   86.11±0.91   91.70±0.73   69.47±2.30    66.27±2.50        40 long prompts per task and examine 32 decoding steps
+S 2 ANTA-flash     256   94.80±0.62   92.77±0.63   70.67±2.20    66.80±2.50
+                                                                                   per prompt. At each step, using the dense model’s current
+S 2 ANTA-flash    1024   98.11±0.40   94.22±0.58   70.73±2.30    66.33±2.40
+                                                                                   prefix as the reference context, we apply the S 2 ANTA ap-
+SDPA (baseline)      — 98.53±0.60 94.55±1.00 71.80±3.90 68.60±4.20
+                                                                                   proximation only in the final decoding layer and compare
+                                                                                   the resulting attention output AV against the corresponding
+                                                                                   dense-attention output at the same decode state. Relative
+T. HumanEval Code-Generation Results                                               L2 error and cosine similarity are averaged over attention
+                                                                                   heads and evaluated decoding steps. Same-state top-1 agree-
+Table 27 reports HumanEval (Chen et al., 2021) pass@1 ac-                          ment is measured by running a full one-token forward pass
+curacy for Llama-3.1-8B-Instruct using the S 2 ANTA-prop                           and checking whether the approximate model preserves the
+and S 2 ANTA-flash kernels. We include HumanEval as an                             dense model’s top-1 next-token prediction.
+additional benchmark-diversity check. Because HumanEval
+prompts are short relative to the long-context decode regime                       U.1. Numerical Approximation Error
+targeted by SANTA, these results are intended to charac-
+terize accuracy rather than demonstrate kernel speedups.                           Table 28 reports same-state fidelity for S 2 ANTA-flash and
+At S = 256, both S 2 ANTA-flash and S 2 ANTA-prop re-                              S 2 ANTA-prop. Approximation quality improves with the
+main within the bootstrap confidence interval of the SDPA                          sample budget S. The low same-state top-1 agreement for
+baseline.                                                                          S 2 ANTA-flash at S = 256 is consistent with its downstream
+                                                                                   accuracy drop in Table 1. By contrast, the main operating
+Table 27. HumanEval pass@1 accuracy for Llama 8B. S: sample                        points used in Section 3.4, namely S = 2048 for S 2 ANTA-
+budget. Pass@1 shows 95% bootstrap confidence intervals.                           flash and S = 128 for S 2 ANTA-prop, recover high cosine
+                                                                                   similarity and high top-1 next-token agreement.
+            Method              S      Pass@1 (%)    Avg. tok.
+
+            S 2 ANTA-flash      16    12.805±4.370      521.6
+                                                                                   U.2. Sensitivity of S 2 ANTA-Flash to Attention Support
+            S 2 ANTA-flash      32    44.106±6.707      296.5
+            S 2 ANTA-flash      64    59.350±6.504      267.7                           Across Tiles
+            S 2 ANTA-flash     128    60.569±6.809      263.0
+            S 2 ANTA-flash     256    63.008±6.911      260.1                      Table 29 studies how S 2 ANTA-flash fidelity changes as at-
+            S 2 ANTA-prop       16    46.545±6.301      274.6
+                                                                                   tention mass spreads across more tiles. We fix the S 2 ANTA-
+            S 2 ANTA-prop       32    61.789±6.504      267.1                      flash sample budget to S = 2048, matching the main 32k-
+            S 2 ANTA-prop       64    60.366±7.012      262.5                      token operating point in Section 3.4, and use tile size 256.
+            S 2 ANTA-prop      128    62.398±6.911      262.5
+                                                                                   At each decode position, we compute the dense attention
+            S 2 ANTA-prop      256    63.211±7.012      261.1
+                                                                                   distribution and count how many tiles are needed to capture
+            SDPA (baseline)     —     65.244±7.317      261.4
+                                                                                   90% of total attention mass. We then bucket observations
+
+
+                                                                              26
+
+===== PDF p.27 =====
+Stochastic Sparse Attention for Memory-Bound Inference
+
+Table 28. Same-state numerical fidelity of S 2 ANTA-flash and                    Table 30. Sensitivity of S 2 ANTA-flash to tile size at 32k-token
+S 2 ANTA-prop on 32k-token FWE and QA2 prompts. Relative L2                      contexts. Sample budget is fixed to S = 2048. Smaller tiles imply
+error and cosine similarity compare final-layer sparse and dense                 more total tiles and more opportunity for sample waste under
+attention outputs AV at matched decode states. Top-1 agreement                   uniform per-tile sampling.
+reports whether a full one-token approximate forward pass pre-
+serves the dense model’s top-1 next-token prediction.                                                           Mean relative   Mean cosine
+                                                                                             Task   Tile size    L2 error        similarity
+                               Mean relative Mean cosine Same-state top-1                    FWE          32           0.145          0.985
+    Task   Backend       S      L2 error      similarity   agreement                         FWE          64           0.119          0.989
+    FWE    flash       256            0.244        0.963              91%                    FWE         256           0.055          0.997
+    FWE    flash      1024            0.091        0.993              97%                    QA2          32           0.390          0.918
+    FWE    flash      2048            0.055        0.997              97%                    QA2          64           0.269          0.958
+    FWE    prop        128            0.131        0.986              96%                    QA2         256           0.144          0.986
+    FWE    prop        256            0.085        0.994              97%
+    FWE    prop       1024            0.035        0.999              98%
+
+    QA2    flash       256            0.572        0.851              91%
+    QA2    flash      1024            0.233        0.968              97%
+                                                                                 Together, Tables 28–30 show that fidelity improves with
+    QA2    flash      2048            0.144        0.986              99%        sample budget, that the main S 2 ANTA operating points re-
+    QA2    prop        128            0.208        0.967              99%        cover high same-state agreement, and that S 2 ANTA-flash
+    QA2    prop        256            0.141        0.983              97%
+    QA2    prop       1024            0.063        0.996              99%
+                                                                                 is most faithful when attention mass is concentrated in
+                                                                                 relatively few tiles. These observations suggest that dy-
+                                                                                 namic tile-aware sample allocation could further improve
+by this tile-support statistic.                                                  the accuracy–latency trade-off beyond the static budgets
+                                                                                 studied in this work.
+S 2 ANTA-flash is most accurate when most attention mass
+is concentrated in a small number of tiles. Fidelity degrades
+as attention mass becomes more diffuse, especially on QA2 ,
+where relevant evidence may be spread across the context.
+This behavior is consistent with the “sample waste” expla-
+nation in Section 3.4: uniform per-tile sampling spends
+samples on low-mass tiles before deferred renormalization.
+
+Table 29. Sensitivity of S 2 ANTA-flash to attention support spread
+across tiles. Tile size is fixed to 256 and sample budget is fixed to
+S = 2048. “Tiles to reach 90% attention mass” is computed from
+the dense attention distribution at each evaluated decode state.
+
+                   Tiles to reach 90%   Mean relative   Mean cosine
+           Task      attention mass      L2 error        similarity
+
+           FWE     1 tile                       0.035         0.998
+           FWE     2 tiles                      0.047         0.998
+           FWE     3–4 tiles                    0.068         0.997
+           FWE     5–8 tiles                    0.084         0.995
+           FWE     9+ tiles                     0.073         0.996
+
+           QA2     1 tile                       0.055         0.997
+           QA2     2 tiles                      0.117         0.991
+           QA2     3–4 tiles                    0.170         0.982
+           QA2     5–8 tiles                    0.175         0.981
+           QA2     9+ tiles                     0.190         0.978
+
+
+
+
+U.3. Sensitivity of S 2 ANTA-Flash to Tile Size
+Table 30 reports a tile-size sweep using the same same-
+state fidelity protocol. We fix the sequence length to 32k
+tokens and the S 2 ANTA-flash sample budget to S = 2048.
+Smaller tile sizes create more total tiles and therefore in-
+crease the amount of uniform per-tile sampling spent on
+low-mass regions of the attention distribution. Larger tiles
+are substantially more faithful under this fixed-budget set-
+ting, especially on QA2 .
+
+                                                                            27

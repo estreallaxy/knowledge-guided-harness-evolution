@@ -1,0 +1,1430 @@
+===== PDF p.1 =====
+IEvoAgent: Evolving Conversational Agent based on User Implicit
+                                   Feedback
+                    Yichen Cai1 , Jiayang Li1 , Junyuan Qiu1 , Jingya Guo2 ,
+                  Weitao You1 , Changyuan Yang2 , Lingyun Sun1 , Pei Chen1 *
+                           1
+                             Zhejiang University, Hangzhou, China
+         {yichencai,jiayangli,junyuanqiu,weitao_you,sunly,chenpei}@zju.edu.cn
+                                2
+                                  Alibaba Inc., Hangzhou, China
+                     {jingya.jy,changyuan.yangcy}@alibaba-inc.com
+
+                           Abstract                               implicit signals embedded in user interactions. Cur-
+        Current conversational agents often follow                rent optimization methods, including Supervised
+        static learning paradigms and miss the im-                Fine-Tuning (SFT), Direct Preference Optimiza-
+        plicit, evolving feedback embedded in users’              tion (DPO, Tucker et al. (2024)), and Kahneman-
+        follow-up behaviors. We propose IEvoAgent,                Tversky Optimization (KTO, Don-Yehiya et al.
+        an evolving conversational agent framework                (2025)), typically require explicit preference pairs
+        that leverages the structured dependency be-              and rely heavily on human-annotated datasets and
+        tween agent responses and user reactions. We
+                                                                  expert evaluations. This reliance not only neces-
+        construct an annotated dataset from LMSYS-
+        Chat-1M and WildChat and find consistent
+                                                                  sitates manual labor to collect training data, but
+        response-conditioned feedback patterns. Based             also makes it harder to scale to diverse settings and
+        on this finding, IEvoAgent uses a conditional             can introduce a systematic distributional shift be-
+        feedback distribution matrix to estimate ex-              tween annotators and real users (Xu et al., 2023;
+        pected feedback rewards, combining offline                Qi et al., 2024). While recent work has begun
+        KTO alignment with an inference-time prompt-              to harvest explicit feedback from online interac-
+        evolution mechanism driven by a dynamic ma-               tions (Han et al., 2025), such collection can still
+        trix. Experiments on MT-Bench-101, Wild-
+                                                                  be resource-intensive and disruptive, as it requires
+        Bench, and FB-Bench show improvements
+        over open-source baselines, indicating that min-          user participation that interrupts the natural conver-
+        ing implicit feedback supports better multi-              sational flow (Lee et al., 2024a; Liu et al., 2025).
+        turn alignment under evolving user prefer-                   Beyond extracting implicit feedback signals, an-
+        ences. Our code and dataset are available at              other challenge is adapting to evolving user pref-
+        https://github.com/Hualeez/IEvoAgent.                     erences. Current methods typically treat feedback
+   1    Introduction                                              learning as a one-time optimization process via self-
+                                                                  reflection or iterative response refinement, rather
+   Conversational agents (CAs) powered by large lan-              than a continuous evolutionary mechanism that ac-
+   guage models (LLMs) have demonstrated remark-                  cumulates evidence across turns (Lu et al., 2023;
+   able generative capabilities in open-domain dia-               Pang et al., 2024; Liu et al., 2025). In multi-turn in-
+   logue and assistant-centric scenarios. To remain               teractions, user goals, context and expectations can
+   helpful over long-horizon interactions, a CA must              drift, so an adaptive CA should evolve its strategies
+   continuously incorporate user feedback and adjust              based on interaction history instead of applying
+   its generation behavior so as to align with user pref-         isolated fixes. This motivates a shift from static
+   erences (Acikgoz et al., 2025b; Lee et al., 2024b).            learning to dynamic, inference-time evolution.
+   However, achieving this alignment remains chal-                   To address these limitations, we propose IEvoA-
+   lenging because conversational feedback is implicit            gent, an evolving CA framework that combines
+   and dynamic: it is often embedded in users’ follow-            offline preference alignment with inference-time
+   up behaviors (e.g., rephrasing, corrections, or clari-         evolution from implicit feedback. We first exam-
+   fication requests) rather than explicit ratings, and           ine whether implicit user feedback exhibits a sta-
+   it may change as the dialogue unfolds (Liu et al.,             ble, response-conditioned structure in real conver-
+   2025; Shaikh et al., 2025).                                    sations. To this end, we construct an annotated
+      Existing approaches often rely on explicit feed-            dataset by categorizing implicit feedback and re-
+   back mechanisms and thus often struggle to exploit             sponse types across 214,111 turns from 17,487 ses-
+       * Corresponding author.                                    sions in LMSYS-Chat-1M and WildChat (Zheng
+                                                             9725
+Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 9725–9743
+                                July 2-7, 2026 ©2026 Association for Computational Linguistics
+
+===== PDF p.2 =====
+et al., 2023; Zhao et al., 2024). The analysis reveals   them with synthetic data distillation (Xu et al.,
+a consistent dependency between response patterns        2025) and interactive refinement (Zhang et al.,
+and feedback, suggesting that user reactions are         2025; Acikgoz et al., 2025a).
+systematically shaped by agent responses.                   In open-domain scenarios, research builds on
+   Motivated by this finding, we model the depen-        real-world interaction data to improve response
+dency with a conditional feedback distribution ma-       quality using explicit or implicit feedback. Zheng
+trix over response–feedback types. We use this           et al. (2023) and Zhao et al. (2024) collected con-
+expected-reward signal in a two-stage pipeline.          versations between human and CAs, and Han et al.
+First, we train the base agent with KTO using pref-      (2025) labeled binary explicit signals by asking
+erence supervision derived from the conditional          users for feedback (“Love”) during conversations.
+dependency, obtaining an initially aligned policy.       Such explicit binary signals are coarse-grained and
+Next, we perform inference-time adaptation by            can interrupt conversation flow (Liu et al., 2025;
+maintaining and updating a dialogue-specific distri-     Don-Yehiya et al., 2025). Recent work therefore
+bution matrix over response-feedback types. Using        turns to implicit feedback embedded in dialogue
+this evolving matrix to estimate expected feedback       histories and user queries (Tucker et al., 2024; Pang
+rewards for candidate generations, IEvoAgent iter-       et al., 2024), including categorizing implicit feed-
+atively refines its prompt-level strategy and updates    back types (Petrak et al., 2023), prompting LLMs
+the response-feedback mapping from interaction           to refine responses using inferred feedback (Liu
+history, enabling adaptation to evolving user pref-      et al., 2025; Lu et al., 2023), and annotating dia-
+erences beyond isolated, turn-level fixes.               logues to train models to better match user expec-
+   Our main contributions are threefold:                 tations (Xu et al., 2023; Tucker et al., 2024).
+                                                            However, most feedback learning still relies on
+    • We build a large-scale dataset with labeled        explicit elicitation or human annotation, which is
+      agent response types and implicit user feed-       costly and hard to scale. It can also diverge from
+      back types, and empirically identify their         real user preferences in the wild, causing distribu-
+      structured dependency.                             tional shift (Acikgoz et al., 2025b). This motivates
+                                                         methods that extract reliable and actionable signals
+    • We propose IEvoAgent, a two-stage frame-
+                                                         directly from users’ follow-up behaviors without
+      work that trains with KTO offline alignment
+                                                         recurring annotation.
+      and performs inference-time policy adaptation
+      using a dialogue-specific distribution matrix      2.2   Evolving Agent
+      and expected feedback rewards.
+                                                         The policies of agents are typically static once de-
+    • We evaluate IEvoAgent on three benchmarks          ployed. While prompting strategies such as CoT
+      and conduct a user study. The results show im-     and ReAct (Wei et al., 2022; Yao et al., 2022) ef-
+      provement in assimilating implicit feedback        fectively guide agents, they do not adapt policies
+      and maintaining alignment in multi-turn inter-     online from user feedback (Shinn et al., 2023). As
+      actions.                                           a result, agents can fail to handle distributional
+                                                         shifts and may repeat errors in long-horizon inter-
+2     Related Work                                       actions (Xi et al., 2025). Recent work introduces
+                                                         evolution mechanisms (Gao et al., 2025) for policy
+2.1    Conversational Agent with User Feedback           learning and strategy refinement, including prompt
+Conversational agents (CAs) are conversational           rewriting (Qu et al., 2024), communication net-
+systems powered by LLM agents; they inter-               work updates (Shang et al., 2024), reinforcement
+act with humans via multi-turn dialogues, span-          learning, and memory management (Chhikara et al.,
+ning task-oriented assistants to open-domain chat-       2025; Yuksekgonul et al., 2024).
+bots (Hudeček and Dusek, 2023; Qin et al., 2024).          However, applying evolution specifically to con-
+Prior research has focused on enhancing CAs by           versational agents remains underexplored (Fang
+leveraging user feedback to refine their responses.      et al., 2025). Unlike turn-level rewriting, CAs re-
+In task-oriented dialogue systems, recent work em-       quire policy-level adaptation to track drifting pref-
+ploys instruction tuning (Chung et al., 2023) and        erences over trajectories, ideally driven by implicit
+zero-shot prompting (Heck et al., 2023) for Dia-         feedback in interaction histories rather than new
+logue State Tracking (DST), and further extends          human annotations.
+                                                     9726
+
+===== PDF p.3 =====
+Preparation                                 Stage1：Offline Alignment with KTO
+        Construct 
+                              KTO Dataset                                 Offline KTO Training
+        Response-Feedback 
+
+        Annotated Dataset
+                                             User Query & Context          KTO Trained Model          Candidate Response
+        Model Dependency                                                      Rewrite Prompt
+                                             Update Dynamic Matrix PD                                    Compute Reward
+
+                                                Stage2：Online Inference-time Evolution                    Final Response
+
+Figure 1: Overview of the two-stage framework of IEvoAgent. Stage 1 (Offline Alignment) internalizes human
+preferences via KTO training on an annotated dataset. Stage 2 (Online Evolution) enables real-time adaptation by
+refining system prompts based on rewards estimated from a dynamic feedback matrix P d .
+
+    Level         Response Type                Description
+    No Error      Neutral (NE)                 Providing a standard response without any discernible errors.
+                  Topic Transition (E6)        Transitioning to an unrelated or previous topic without logical justification.
+    Minor         Conversationality (E7)       Failing to maintain coherence, repeating previous turns or self-contradiction.
+                  Unclear Intention (E8)       Failing to adequately capture or address the user’s underlying intent.
+                  Ignore Question (E1)         Disregarding a specific question posed by the user.
+                  Ignore Request (E2)          Failing to execute a direct instruction or action-based request.
+    Moderate      Ignore Expectation (E3)      Failing to fulfill implicit expectations regarding task completion.
+                  Attribute Error (E4)         Misinterpreting or incorrectly mapping specific attributes and slots.
+                  Uninterpretable (E11)        Generating grammatically broken, nonsensical, or fragmented text.
+                  Factually Incorrect (E5)     Providing information that is factually wrong or contains hallucinations.
+    Severe        Lack of Sociality (E9)       Violating social norms, lacking etiquette, or exhibiting toxic behavior.
+                  Common Sense (E10)           Contradicting common knowledge or the general consensus of the majority.
+
+     Table 1: Taxonomy of LLM response types (T r ) by error severity, adapted from Don-Yehiya et al. (2025).
+
+
+3     Method                                                      tioned into a severity-aware hierarchy across four
+                                                                  levels: (1) No Error; (2) Minor Errors, which dis-
+To learn from implicit user feedback signals and                  rupt conversational flow but require minimal cogni-
+adapt to evolving preferences, we propose IEvoA-                  tive effort to repair (See et al., 2019; Shaikh et al.,
+gent, a two-stage framework integrating offline                   2025); (3) Moderate Errors, signifying a failure in
+alignment with online inference-time evolution as                 instruction following or task completion that forces
+demonstrated in Figure 1. We first identify behav-                users to provide explicit corrections (Ouyang et al.,
+ioral regularities by annotating a large-scale dataset            2022; Zou et al., 2025); (4) Severe Errors, repre-
+to model the dependency into a conditional distri-                senting the critical failures that violate the Helpful,
+bution matrix. We then design a unified reward                    Honest, and Harmless principles through hallucina-
+function that serves in both offline KTO training                 tions or toxic content, eroding user trust or posing
+and online evolution to refine policies in real time.             safety risks (Ji et al., 2023; Sahoo et al., 2024).
+                                                                     For analysis and visualization, we additionally
+3.1 Preparation
+                                                                  adopt an interaction-cost ordering over feedback
+Data Collection. To study how diverse agent                       types: POS, NEU, STOP, NEG_5, NEG_1, NEG_4,
+responses elicit user reactions, we construct a                   NEG_3, NEG_2. This ordering is grounded in
+large-scale dataset that correlates agent outputs                 the idea that negative follow-up behaviors reflect
+with implicit feedback. Following established tax-                increasing user repair effort (Clark and Brennan,
+onomies (Petrak et al., 2024; Don-Yehiya et al.,                  1991). We use it to organize the conditional dis-
+2025), we label each CA’s response with one of                    tributions in Figure 2 and to compute rank-based
+12 types (T r , see Table 1) and the subsequent user              statistics in Pattern Discovery, while treating the
+turn with one of 8 feedback types (T u , see Table 2).            feedback labels themselves as categorical.
+   These 12 response categories are further parti-                   We annotate turn-level interactions sampled
+                                                             9727
+
+===== PDF p.4 =====
+User Feedback Type      Description                                                LMSYS-Chat-1M                               WildChat
+                                                                                                                                                                1.0
+                                                                     NE 0.05 0.01 0.01 0.02 0.08 0.73 0.05 0.05 0.05 0.01 0.01 0.03 0.06 0.75 0.02 0.07
+Positive Feedback       Expressing gratitude, satisfaction,
+(POS)                   or confirmation, e.g., Great, thanks!         E1 0.33 0.06 0.05 0.04 0.31 0.03 0.00 0.19 0.38 0.11 0.01 0.04 0.27 0.02 0.00 0.16
+Neutral Feedback        Continuing the conversation logi-             E2 0.28 0.12 0.05 0.04 0.31 0.08 0.01 0.11 0.30 0.15 0.02 0.04 0.28 0.08 0.01 0.12        0.8
+(NEU)                   cally without explicit positive or
+                                                                      E3 0.29 0.21 0.05 0.06 0.24 0.09 0.01 0.05 0.41 0.24 0.05 0.06 0.14 0.03 0.00 0.06
+                        negative sentiment.
+STOP (STOP)             Terminating the interaction.                  E4 0.14 0.29 0.02 0.02 0.26 0.18 0.02 0.06 0.09 0.21 0.00 0.01 0.37 0.25 0.00 0.07
+                                                                                                                                                                0.6
+Ignore and Continue     Disregarding an unhelpful response            E5 0.09 0.14 0.05 0.06 0.34 0.23 0.01 0.07 0.09 0.20 0.06 0.05 0.33 0.19 0.01 0.08
+
+
+
+
+                                                                                                                                                           Probability
+(NEG_5)                 and transitioning to a new topic,             E6 0.11 0.11 0.06 0.07 0.38 0.14 0.02 0.11 0.11 0.10 0.03 0.02 0.58 0.08 0.00 0.07
+                        e.g., Okay. Let’s leave it like that.                                                                                                   0.4
+                                                                      E7 0.17 0.15 0.07 0.05 0.32 0.13 0.02 0.11 0.20 0.19 0.05 0.04 0.29 0.11 0.01 0.11
+Rephrase or Repeat      Repeating or rephrasing a concern
+(NEG_1)                 using similar or varied wording,              E8 0.15 0.06 0.02 0.47 0.16 0.11 0.00 0.03 0.21 0.08 0.03 0.46 0.10 0.04 0.00 0.09
+                        e.g., Actually, I wanted ...                 E10 0.11 0.17 0.08 0.09 0.25 0.21 0.02 0.07 0.11 0.27 0.09 0.05 0.29 0.12 0.01 0.06
+                                                                                                                                                                0.2
+Ask for Clarification   Requesting further details or clarifi-
+(NEG_4)                 cation due to unclear or ambiguous            E9 0.02 0.07 0.07 0.04 0.17 0.45 0.08 0.09 0.09 0.36 0.36 0.00 0.09 0.00 0.00 0.09
+                        responses, e.g., Can you explain ...         E11 0.17 0.04 0.05 0.08 0.38 0.09 0.01 0.17 0.02 0.05 0.01 0.00 0.04 0.01 0.00 0.85
+                                                                                                                                                                0.0
+Make Aware without      Noting a system error without offer-
+
+
+
+
+                                                                           1
+                                                                           2
+                                                                           3
+                                                                           4
+                                                                           5
+
+
+
+
+                                                                           1
+                                                                           2
+                                                                           3
+                                                                           4
+                                                                           5
+                                                                          U
+                                                                           S
+                                                                         OP
+
+
+
+
+                                                                          U
+                                                                           S
+                                                                         OP
+                                                                       PO
+
+
+
+
+                                                                       PO
+                                                                        G_
+                                                                        G_
+                                                                        G_
+                                                                        G_
+                                                                        G_
+
+
+
+
+                                                                        G_
+                                                                        G_
+                                                                        G_
+                                                                        G_
+                                                                        G_
+                                                                       NE
+
+
+
+
+                                                                       NE
+Correction (NEG_3)      ing additional guidance or details,
+
+
+
+
+                                                                      ST
+
+
+
+
+                                                                      ST
+                                                                    NE
+                                                                         NE
+                                                                     NE
+                                                                     NE
+                                                                     NE
+
+
+
+
+                                                                     NE
+                                                                     NE
+                                                                     NE
+                                                                     NE
+                                                                     NE
+                        e.g., That’s wrong ...
+                                                                     Figure 2: Visualization of the structural consistency in
+Make Aware with         Highlighting a system error and pro-
+Correction (NEG_2)      viding specific information to ad-           the response-conditioned feedback distributions from
+                        dress it, e.g., No, I wanted you to ...      LMSYS-Chat-1M and WildChat datasets. Each cell
+                                                                     indicates the likelihood of a specific user feedback type
+Table 2: Taxonomy of implicit feedback (T u ), adapted               to a given agent response category. Sample frequency
+from Petrak et al. (2024) and Don-Yehiya et al. (2025).              of rows E9 and E11 < 1%.
+
+
+from LMSYS-Chat-1M (Zheng et al., 2023) and                          across datasets. These results support the premise
+WildChat (Zhao et al., 2024) using Gemini-2.5-Pro                    that user reactions are systematically shaped by
+with specialized prompts, then filter unsafe and                     response types rather than being arbitrary.
+sensitive content. The final dataset contains 17,487
+                                                                     3.2       Evolving with Implicit Feedback
+conversations and 214,111 turns, each annotated
+with paired labels (response type, feedback type).                   Reward Function Design. To quantitatively as-
+                                                                     sess response quality and its alignment with user
+Pattern Discovery. To quantify the dependency                        preferences, we define a unified reward function
+between agent response categories and subsequent                     that provides training signals for offline alignment
+implicit feedback, we map qualitative feedback                       and guidance for online evolution. The total reward
+to an 8-point ordinal scale and rank response cat-                   is a weighted sum of a feedback-based term and an
+egories based on their empirical mean feedback                       information-based term, parameterized by α:
+scores. Spearman’s ρ is then calculated between
+category-level expected ranks and individual feed-                                   R = αRfeedback + (1 − α)Rinfo                                         (1)
+back ranks across all trajectories, complemented
+                                                                        Given a dialogue context c, a candidate response
+by Cohen’s d to measure the standardized mean
+                                                                     y with category try and its feedback type tuy , we
+difference between “NE” and erroneous responses.
+                                                                     compute the feedback reward using a reward matrix
+The result reveals a robust correlation (LMSYS:                                 r    u
+                                                                     M ∈ R|T |×|T | . In this reward matrix, rewards
+ρ = 0.602; WildChat: ρ = 0.604) with effect
+                                                                     are assigned to response-feedback pairs such that
+sizes (LMSYS: Cohen’s d = 1.363; WildChat: Co-
+                                                                     the values decrease as response errors become more
+hen’s d = 1.692). These findings validate that spe-
+                                                                     severe and the implied user repair effort increases.
+cific model response categories consistently elicit
+                                                                     The full matrix is detailed in Appendix A.2 Table 8.
+predictable implicit cues.
+                                                                     The feedback reward is then:
+   We further examine cross-dataset stability by
+comparing the distributions between LMSYS-Chat-                                               Rfeedback = M [try , tuy ]                                   (2)
+1M and WildChat, visualized in Figure 2. The
+average Jensen-Shannon Divergence (JSD) be-                             Complementarily, the information reward is de-
+tween LMSYS-Chat-1M and WildChat is 0.064.                           fined as a weighted aggregation of pointwise mu-
+This low divergence indicates that the response-                     tual information (PMI) and embedding-based co-
+conditioned feedback patterns are highly consistent                  sine similarity term, where β balances the relative
+                                                                  9728
+
+===== PDF p.5 =====
+“Good! Thank you for your advice. Can you help me make a travel plan to the capital of France? ”
+           User Query
+                                    Feedback Categorization: ”POS” Positive Feedback
+               Append Context
+
+          Trajectory Pool
+                                     {“role”:“user”, “content”: ”...”, “Type”: “POS”}]               Feedback Distribution Matrix
+                                     New Interaction Pair: (“NE”, ”POS”)                 Update
+                                                                                                                     Update
+
+      System Message                        Candidate Response
+                                      “I can help you schedule your travel in London.
+ “You are a helpful assistant.
+                                      You can take the subway... ”                      Calculate
+
+ Please provide reliable ...”
+                                      Response Categorization: ”E5” Factually Incorrect Reward Distribution of Feedback
+                                                                                                   Feedback Reward Estimation on Distribution:
+                                  Inject
+
+       Prompt Pool                Guidance
+                                                         Prompt Self-Evolution
+  [{“turn”: 1, “system”:
+  ”...”, “response”: “... ”,          Prompt Rewriter                                                  Terminate ?
+                                                                                                                                       Final 
+
+                                                                                                                     Return Best
+  “reward”: 0.42, ...}, ...]     “You are a travel planner, give me accurate ...”                 NO       YES       Response      Response
+                                      Online Inference-time Evolution of IEvoAgent
+
+Figure 3: The architecture of IEvoAgent’s online inference-time evolution. It receives the user query and leverages
+a dynamic feedback distribution matrix P d to estimate the implicit feedback reward of the candidate response and
+iteratively refines system prompts via the prompt rewriter to improve response quality during interactions.
+
+
+importance of these components. Here, PMI is used                               online inference. The base model is then coupled
+to assess the contextual specificity of the response,                           with the dynamic feedback distribution matrix and
+rewarding content that is associated with the given                             the system prompt evolution mechanism to adapt
+context rather than high-frequency sequences (Li                                users’ behavior in real time.
+et al., 2016; Ren et al., 2023). We then apply a
+                                                                                Online Inference-Time Evolution. IEvoAgent
+non-linear scaling function Φ(·) to map raw values
+                                                                                performs inference-time evolution via system
+into a constrained reward space, where γ and µ are
+                                                                                prompt optimization and continuous memory up-
+hyperparameters for bias.
+                                                                                dates, rather than direct content rewriting. This
+            Rinfo (y, c) = βΦ(PMI(y, c))                                        enables policy-level refinement across turns.
+                               + (1 − β) cos(ey , ec )                (3)          As illustrated in Figure 3, IEvoAgent evolves in
+                     Φ(x) = tanh(x − γ) + µ                                     real-time interactions through a dynamic memory
+                                                                                consisting of a trajectory pool and a dynamic feed-
+Offline Alignment with KTO. We first perform
+                                                                                back distribution matrix P d . To initialize this mem-
+offline alignment to obtain a foundational policy
+                                                                                ory, we first construct a base matrix P that models
+that is responsive to implicit feedback. To train
+                                                                                the statistical dependency between response cate-
+the model, we further refine the annotated dataset
+                                                                                gories and user feedback, derived from the anno-
+constructed in Section 3.1 using GPT-4o, which
+                                                                                tated datasets constructed in Section 3.1. While
+generates enhanced responses y ∗ by addressing the
+                                                                                P represents generalized human response patterns,
+implicit feedback signals with context. These in-
+                                                                                P d is dynamically updated to adapt to the specific
+teractions are structured into trajectories annotated
+                                                                                interaction context of the current session.
+with reward scores, response types, and feedback
+                                                                                   At turn t, IEvoAgent identifies the implicit feed-
+categories. We then employ the KTO algorithm
+                                                                                back type tuyt−1 expressed in the user turn following
+to train the model. Trajectories are classified into
+                                                                                the previous response yt−1 , and pairs it with the
+KTO targets based on relative reward thresholds. A
+                                                                                corresponding response type tryt−1 retrieved from
+trajectory is labeled as “desirable” using the rewrit-
+                                                                                the trajectory pool. This interaction pair is recorded
+ten response y ∗ as the target if its reward exceeds
+                                                                                into a local matrix Lt , row-normalized and fused
+either the local conversational average or the global
+                                                                                with the base matrix P using a weight ω:
+dataset mean. Conversely, remaining trajectories
+are labeled as “undesirable”, retaining the original
+response y as the target.                                                                P d = ωRowNorm(Lt ) + (1 − ω)P                          (4)
+   This offline stage yields an initially aligned pol-
+icy that serves as IEvoAgent’s base model during                                    IEvoAgent then generates a candidate response
+                                                                          9729
+
+===== PDF p.6 =====
+yt under the current system prompt, predicts its                is triggered when the estimated quality score falls
+response type tryt and evaluates its total reward               below τ = 0.55 and terminates upon reaching a
+R(yt ) by Equation 1. Since the user feedback for yt            semantic similarity threshold of 0.7.
+is unavailable at t, the feedback reward is estimated
+as an expected value derived from the current P d :             5     Evaluation
+                                                                5.1    Experimental Setup
+                                                        
+    R̄feedback (yt ) = Etu ∼P d (·|tr yt ) M [tryt , tu ] (5)   Datasets and Metrics. To evaluate the capability
+                                                                of our evolving conversational agent in leverag-
+    If R(yt ) satisfies the threshold τ and the re-
+                                                                ing implicit user feedback to generate high-quality,
+sponse type tryt is categorized as “NE”, the response
+                                                                user-aligned responses, three benchmarks are em-
+is delivered to the user. Otherwise, if the iteration
+                                                                ployed: (1) MT-Bench-101 (Bai et al., 2024) and
+limit is not reached, IEvoAgent caches the current
+                                                                (2) WildBench (Lin et al., 2024), both of which
+system prompt, the candidate response yt , and its
+                                                                represent long-horizon, open-domain interactions
+reward into a prompt pool, then invokes the prompt
+                                                                where the CA analyzes implicit feedback across
+rewriter. The rewriter updates the system message
+                                                                multiple turns to refine its conversational strategy
+by injecting high-level behavioral guidance (e.g.,
+                                                                and maintain alignment; and (3) FB-Bench (Li
+be more concise”) rather than content-specific edits
+                                                                et al., 2025), a specialized benchmark designed
+(e.g., the capital of France is Paris), so that the
+                                                                to assess a CA’s ability to generate responses based
+evolution occurs at the policy level.
+                                                                on provided user feedback, allowing us to verify
+    Following the iterative refinement strategy in
+                                                                whether the generated content fulfills the user’s
+DRAFT (Qu et al., 2024), we incorporate early
+                                                                corrective or clarifying requirements.
+stopping to prevent redundant optimization. At
+                                                                   For MT-Bench-101, we report the average scores
+each iteration, IEvoAgent calculates cosine simi-
+                                                                across 13 task categories employing the official
+larity between the newly generated system prompt
+                                                                LLM-based judge. To evaluate linguistic quality,
+and prompts in the pool. The process stops when
+                                                                we incorporate standard generation metrics: Rouge-
+either the maximum iteration limit is reached or
+                                                                L (Lin, 2004) and BLEU-4 (Papineni et al., 2002).
+the similarity exceeds a predefined threshold that
+                                                                Regarding WildBench, we report the WB-Score
+indicates convergence. IEvoAgent then returns the
+                                                                in WildBench, a composite metric that assesses
+response with the highest reward in the prompt
+                                                                instruction-following and conversational distinc-
+pool. Finally, the selected response yt∗ and its type
+                                                                tiveness, both of which correlate highly with hu-
+try∗ are recorded in the trajectory pool to inform
+   t                                                            man preference. For FB-Bench, we report aver-
+subsequent turns.
+                                                                age scores across two primary dimensions: the
+4     Implementation                                            Error Correction Score (ECS), which measures
+                                                                the CA’s ability to rectify unsatisfactory or incor-
+As detailed in Appendix A.1, we fine-tune Qwen-                 rect prior outputs, and the Response Maintenance
+2.5-7B-Instruct and LLaMA-3.1-8B-Instruct using                 Score (RMS), which assesses the capacity to sus-
+KTO and LoRA (r = 32, α = 64) on 4× NVIDIA                      tain a correct stance and remain undisturbed when
+A100 GPUs. Training hyperparameters include a                   challenged by user objections or misinformation.
+5 × 10−6 learning rate, a global batch size of 32,
+and an 8,192-token sequence limit. We set the KL                Baselines. We compare IEvoAgent against a set
+penalty to 0.1 and example weights to 1.0. The                  of CAs powered by state-of-the-art models, catego-
+process completes in 12 hours over 3 epochs.                    rizing them into: (1) Closed-source LLMs: includ-
+   The agent is implemented using LangChain,                    ing GPT-3.5-Turbo, GPT-4, and GPT-4o. These
+with the meta-prompting strategy for the prompt                 models serve as the upper-bound references for cur-
+rewriter adapted from Qu et al. (2024). We employ               rent conversational capabilities. (2) Open-source
+all-MiniLM-L12-v2 for text embeddings. For the                  LLMs: including LLaMA2-13B-Chat (Touvron
+scaling function, we set γ = 0.1 and µ = 0.5,                   et al., 2023), Qwen-14B-Chat (Bai et al., 2023),
+while reward components are balanced with α =                   Mixtral-8x7B (Jiang et al., 2024), Yi-34B-Chat (AI
+0.6 and β = 0.4. The adaptation weight ω is set                 et al., 2025), LLaMA-3-8B-Instruct (Grattafiori
+to 0.01 to account for the sparsity of real-time in-            et al., 2024), Mistral-7B-Instruct-v0.2 (Jiang et al.,
+teraction samples. Finally, the refinement process              2023), and Qwen-2.5-7B-Instruct (Yang et al.,
+                                                            9730
+
+===== PDF p.7 =====
+Perceptivity                                Adaptability                 Interactivity
+ Model                  Avg.↑
+                                Memory   Understanding     Interference   Rephrasing    Reflection     Reasoning     Questioning
+                                 CM↑     SI↑    AR↑        TS↑ CC↑        CR↑ FR↑       SC↑ SA↑        MR↑ GR↑       IC↑    PI↑
+ GPT-3.5-Turbo†         7.99     8.77    7.67    7.67      9.68   9.87    9.56   9.51   9.18   7.23    4.48   5.31   8.57   6.32
+ GPT-4                  8.86     8.88    8.99    9.58      9.83   9.98    9.54   9.57   9.36   9.52    7.15   7.17   9.00   6.64
+ GPT-4o                 9.08     9.60    9.68    9.83      9.79   9.98    9.98   9.97   9.95   9.90    6.97   6.63   9.35   6.41
+ LLaMA2-13B-Chat†       7.15     8.03    7.11    9.00      9.39   8.81    9.07   9.11   7.63   7.60    1.75   3.16   6.07   6.23
+ Qwen-14B-Chat†         7.82     8.33    8.36    9.04      9.22   9.50    9.12   9.39   8.41   7.97    3.50   4.55   8.21   6.12
+ Mixtral-8x7B†          7.38     7.86    5.94    8.49      9.01   9.52    8.91   9.01   8.69   7.78    4.19   5.14   6.03   5.36
+ Yi-34B-Chat            8.10     8.55    6.79    9.34      9.84   9.34    9.08   9.38   9.01   9.04    4.07   5.90   8.51   6.39
+ LLaMA3.1-8B-Instruct   8.31     9.29    9.12    9.44      9.24   9.16    9.85   9.88   9.48   7.99    3.74   5.94   8.63   6.37
+ Mistral-7B-v0.2        6.95     7.66    5.64    8.09      8.30   9.35    8.69   8.59   8.16   7.33    2.58   4.52   5.80   5.66
+ Qwen2.5-7B-Instruct    8.53     9.09    9.10    9.53      8.78   9.56    9.89   9.93   8.84   9.25    6.62   5.93   8.49   5.85
+ IEvoAgent-LLaMA        8.63     9.05    9.32    9.63      9.64   9.78    9.95   9.97   8.92   8.97    6.87   6.08   8.82   5.15
+ IEvoAgent-Qwen         8.70     9.28    9.40    9.73      9.63   9.86    9.97   9.96   9.18   9.16    6.96   5.93   8.69   5.32
+
+Table 3: Results on MT-Bench-101. The table reports the Average score (Avg.) and scores across 13 tasks in
+MT-Bench-101: Context Memory (CM), Separate Input (SI), Anaphora Resolution (AR), Topic Shift (TS), Content
+Confusion (CC), Content Rephrasing (CR), Format Rephrasing (FR), Self-correction (SC), Self-affirmation (SA),
+Mathematical Reasoning (MR), General Reasoning (GR), Instruction Clarification (IC), and Proactive Interaction
+(PI). † Scores are sourced from original technical reports. Bold and underlined values indicate the best and second-
+best results among open-source models. These conventions apply to all subsequent tables.
+
+
+2024). Qwen-2.5-7B-Instruct and LLaMA-3.1-8B-                     5.3     User Study
+Instruct are employed as our backbone models to                   To complement benchmarks and evaluate IEvoA-
+ensure a fair and direct comparison of the architec-              gent in realistic interactive scenarios, we conducted
+tural improvements introduced by the IEvoAgent.                   a user study following the HALIE framework (Lee
+While most results are obtained through our evalu-                et al., 2024b), which provides a systematic method-
+ation, some metrics for baseline models are cited                 ology for assessing interactions between human
+from their original technical reports or established              and CAs. The tasks are detailed in Appendix A.4.
+benchmark studies to ensure broad coverage. In
+                                                                     We recruited 24 participants to interact with four
+the results tables, such values are explicitly marked
+                                                                  CA configurations: GPT-4o, Qwen2.5-7B-Instruct,
+with a superscript (†) for clarity.
+                                                                  the full IEvoAgent based on Qwen2.5-7B-Instruct,
+                                                                  and IEvoAgent w/o Feedback. For each CA, we
+                                                                  collected over 100 turns of real-world interaction
+5.2 Ablation Study                                                data, logging inference latency and output token
+                                                                  length per turn. Participants evaluated the interac-
+To systematically evaluate the individual contribu-               tions using a 5-point Likert scale across two granu-
+tions of our two-stage framework, we conduct an                   larities: (1) Model-level metrics: satisfaction, reuse
+ablation study across three distinct configurations:              intention, adaptability, and ease of interaction; and
+(1) IEvoAgent (ours): The complete proposed sys-                  (2) Turn-level metrics: response specificity, turn
+tem, integrating the offline alignment stage with                 satisfaction, and correction effectiveness. Statisti-
+the online inference-time evolution mechanism. (2)                cal significance was assessed on model-level met-
+ours w/o KTO: The base model equipped with                        rics using the Wilcoxon signed-rank test. To quan-
+the online inference-time evolution mechanism but                 tify the evolving nature of IEvoAgent, we com-
+without offline alignment. It assesses the frame-                 puted the linear trend of turn-level scores across
+work’s capacity for autonomous policy refinement                  the dialogue history via linear regression. A steeper
+and real-time adaptation without the benefit of prior             positive slope indicates a more rapid rate of policy
+offline alignment. (3) ours w/o Evolution: The                    refinement and performance improvement.
+base model fine-tuned exclusively via KTO on our
+offline labeled dataset. This variant serves to isolate           6      Results
+the performance gains attributable solely to offline
+alignment. (4) ours w/o Feedback: A variant that                  6.1     Performance on Multi-turn Dialogues
+ablates the implicit feedback signal while keeping                The evaluation results on MT-Bench-101 and Wild-
+the rest of the architecture identical.                           Bench are summarized in Table 3. IEvoAgent-
+                                                            9731
+
+===== PDF p.8 =====
+MT-Bench-101                      FB-Bench            WildBench
+              Model
+                                     Rouge-L ↑     BLEU-4 ↑      ECS ↑        RMS ↑     Avg. ↑   WB-Score ↑
+              GPT-4                    25.72         14.39           76.21    83.52     79.87       52.30
+              GPT-4o                   25.45         14.83           72.20    71.70     71.95       59.30
+              LLaMA-2-13B-Chat†        23.91         15.48           21.68    32.33     27.00        3.80
+              Yi-34B-Chat              23.11         15.40           49.70    61.39     55.54       20.20
+              LLaMA-3.1-8B-Inst.       23.64         14.99           51.17    38.21     44.69       29.20
+              Mistral-7B-v0.2          25.32         16.52           37.09    52.63     44.86       25.60
+              Qwen-2.5-7B-Inst.        24.46         15.08           54.92    58.62     56.77       43.40
+              IEvoAgent-LLaMA          28.38         16.83           47.42    48.80     48.11       35.60
+              IEvoAgent-Qwen           27.89         16.56           55.85    61.71     58.78       46.50
+
+Table 4: Performance comparison on three benchmarks. Metrics include Rouge-L, BLEU-4 and Avg. on MT-Bench-
+101; ECS, RMS, and Avg. on FB-Bench and WB-Score on Wild-Bench.
+
+                                           MT-Bench-101                         FB-Bench             WildBench
+          Model
+                               Rouge-L ↑       BLEU-4 ↑      Avg. ↑     ECS ↑    RMS ↑     Avg. ↑   WB-Score ↑
+          IEvoAgent-LLaMA          28.38         16.83        8.63      47.42     48.80     48.11      35.60
+            w/o KTO                25.62         16.34        8.42      48.87     45.33     47.10      32.80
+            w/o Evolution          24.93         15.77        8.52      44.82     47.60     46.21      32.80
+            w/o Feedback           28.15         16.62        8.55      42.80     47.05     44.93      34.60
+          IEvoAgent-Qwen           27.89         16.56        8.70      55.85     61.71     58.78      46.50
+            w/o KTO                23.83         14.66        8.62      55.46     60.14     57.80      46.30
+            w/o Evolution          26.33         16.02        8.57      55.20     59.43     57.31      46.20
+            w/o Feedback           27.69         16.45        8.60      50.87     60.27     55.57      46.30
+
+Table 5: Ablation study of IEvoAgent across three benchmarks. We evaluate the impact of offline alignment (w/o
+KTO), online inference-time evolution (w/o Evolution), and implicit feedback signals (w/o Feedback).
+
+
+Qwen achieves a leading weighted average score                 a BLEU-4 score of 16.83, exceeding other base-
+of 8.70 in all evaluated open-source models, while             line models. This evidence suggests that the pro-
+IEvoAgent-LLaMA follows closely with 8.63.                     posed evolution mechanism effectively internal-
+These results represent an improvement over the                izes implicit feedback to optimize generation poli-
+base models, contemporary open-source baselines,               cies, yielding conversational outputs that exhibit
+and GPT-3.5-Turbo, even reaching parity with GPT-              enhanced alignment with user preferences.
+4 in specific tasks. While a slight performance
+trade-off is noted in Proactive Interaction (PI), this         6.3      Alignment with Implicit User Feedback
+stems from the evolving mechanism’s prioritiza-                To evaluate the agent’s capacity for feedback as-
+tion of reactive alignment to ensure response qual-            similation, we analyze its performance on FB-
+ity via implicit user signals. By adopting a more              Bench, as detailed in Table 4. The proposed frame-
+conservative policy, the agent moderates its proac-            work demonstrates a robust responsiveness to hu-
+tivity to maintain high-fidelity alignment with user           man feedback across diverse interaction scenarios.
+preferences. On WildBench, IEvoAgent-Qwen at-                  Specifically, IEvoAgent-Qwen achieves an ECS of
+tains a WB-Score of 46.50, surpassing the base                 55.85 and an RMS of 61.71, exceeding all evalu-
+model and other open-source models. These find-                ated open-source baselines. These results validate
+ings suggest that our dynamic adaptation strategy              that mining implicit user feedback for policy evo-
+effectively enables the agent to navigate complex              lution enables CAs to align more precisely with
+multi-turn trajectories without compromising gen-              dynamic user preferences. By internalizing these
+eral instruction-following capabilities.                       signals, the agent bridges the gap between static
+                                                               model responses and the evolving requirements of
+6.2 Analysis of Generation Quality                             real-world interactions.
+Table 4 details the linguistic quality metrics, in-
+cluding Rouge-L and BLEU-4 on MT-Bench-                        6.4      Ablation Analysis
+101. IEvoAgent demonstrates a performance boost,               The individual contributions of our two-stage
+achieving up to a Rouge-L score of 28.38 and                   framework and implicit user feedback are assessed
+                                                          9732
+
+===== PDF p.9 =====
+Model                     Satisfaction ↑          Reuse ↑        Adaptability ↑         Ease ↑
+                 GPT-4o                            4.04                3.83              3.87              3.79
+                                                           ∗                                      ∗
+                 Qwen-2.5-7B-Inst.          3.42 (p=.009)        3.17 (p=.055)     3.13 (p=.006)       3.13 (p=.065)
+                 IEvoAgent w/o Feedback     3.54 (p=.017)∗       3.08 (p=.047)∗    3.42 (p=.034)∗      3.17 (p=.155)
+                 IEvoAgent-Qwen (Ours)          3.96                 3.38              3.71                3.21
+
+Table 6: Model-level user study results. Scores are presented as mean score, where p-values are calculated via the
+Wilcoxon signed-rank test. The ∗ denotes a significant difference (p < .05) relative to IEvoAgent.
+
+                 Model                     Spe.↑ Spe. Slope↑ Sat.↑ Sat. Slope↑ Cor.↑ Cor. Slope↑
+                 GPT-4o                     3.99          0.05         3.93       0.07          3.53      0.17
+                 Qwen-2.5-7B-Inst.      3.60              0.01         3.25       0.05          3.01      0.04
+                 IEvoAgent w/o Feedback 3.69              0.11         3.47       0.19          3.30      0.08
+                 IEvoAgent-Qwen (Ours) 3.75               0.12         3.42       0.16          3.33      0.17
+
+Table 7: Turn-level user study results: Specificity (Spe.), Satisfaction (Sat.), Correction (Cor.). The averaged scores
+and slope across interaction turns are reported.
+
+
+through ablation studies as reported in Table 5. The               evidence of the agent’s online refinement capabil-
+results demonstrate that each stage independently                  ity. Specifically, IEvoAgent exhibited steeper pos-
+enhances the agent’s capacity to generate responses                itive slopes in correction effectiveness and speci-
+aligned with user preferences. The offline-only                    ficity compared to all baselines, while achieving the
+variant (KTO-based) establishes a robust founda-                   second-highest slope in satisfaction. This indicates
+tion for preference alignment, providing improve-                  an active capability to rectify errors and provide
+ments in general multi-turn benchmarks. Con-                       contextually rich content. Although the evolution-
+versely, the online inference-time evolution stage                 ary process incurred a higher mean latency shown
+significantly augments the agent’s responsiveness                  in Table 9 in Appendix A.3, the superior user rat-
+across all benchmarks, confirming its specialized                  ings suggest that participants prioritized adaptive
+role in capturing real-time user preference through                precision over response speed.
+the dynamic feedback estimation and prompt itera-
+tion. Notably, the w/o Feedback variant confirms                   7     Conclusion
+that the performance gains are not from knowledge                  This study introduces IEvoAgent, a two-stage
+distillation from GPT-4o, but stem from the utiliza-               framework that enhances the adaptive capacity of
+tion of implicit feedback for policy refinement.                   CAs by systematically modeling implicit feedback
+   Crucially, the full IEvoAgent yields robust per-                as a structured dependency between CA responses
+formance across all metrics, validating that the                   and user reactions. Analyzing over 214,111 con-
+overall gain is a result of the synergistic interaction            versational turns reveals a robust correlation that
+between both stages. While the offline alignment                   we formalize into a dynamic feedback distribution
+stage provides the fundamental capability for feed-                matrix. Unlike prior methods constrained to turn-
+back analysis, the online inference-time evolution                 level corrections or static feedback collection, this
+stage is indispensable for adapting to the evolving                matrix drives continuous inference-time policy evo-
+dialogue, ensuring that IEvoAgent remains both                     lution, enabling the CA to adapt to drifting user
+aligned and adaptive throughout the human-AI in-                   preferences across long-horizon trajectories. Eval-
+teraction.                                                         uations on three benchmarks and the user study
+                                                                   demonstrate that IEvoAgent improves alignment
+6.5 User Study Analysis                                            with dynamic user needs while preserving conver-
+As presented in Table 6, IEvoAgent outperformed                    sational consistency. This work validates that min-
+the baselines in user satisfaction, intention of reuse,            ing implicit cues enables scalable, low-cost policy
+and adaptability, validating the efficacy of our two-              adaptation, effectively bridging the gap between
+stage framework in aligning the agent with user                    static model deployments and the fluid demands of
+feedback during real-time interactions. Further-                   real-world human-AI interaction.
+more, the turn-level metrics in Table 7 provide
+                                                               9733
+
+===== PDF p.10 =====
+Limitations                                              loop evaluation reduces reliance on static proxies,
+                                                         fully capturing fine-grained affective dynamics and
+Despite the performance improvements demon-              cross-cultural variations in feedback expression re-
+strated by our framework, several limitations re-        mains an open challenge. Future work will focus on
+main to be addressed in future research.                 scaling longitudinal deployments and developing
+   The current evolution mechanism relies on an          culturally adaptive feedback modeling to address
+agent-based architecture that necessitates itera-        these constraints.
+tive prompt rewriting and response categorization.
+While this modular design ensures high-level be-         Ethical Considerations
+havioral control, it inevitably increases inference
+latency and computational overhead as illustrated        Our study strictly adheres to ethical standards and
+in Table 7. The absence of a unified, end-to-end         data privacy protocols. All datasets utilized for of-
+model capable of directly internalizing implicit         fline training are sourced from publicly available
+feedback and adaptively refining policies remains        repositories where personally identifiable informa-
+a bottleneck for large-scale, real-time deployment.      tion has been anonymized. Regarding the online
+   Another limitation lies in the manual construc-       evolution mechanism, we implement a proactive
+tion of the reward matrix M . Although the rank-         privacy de-identification layer for the trajectory
+ing is grounded in established interaction cost          pool. Before any interaction record is stored, the
+theories (Clark and Brennan, 1991) and prior re-         system automatically filters sensitive user informa-
+search, the specific reward values are heuristic-        tion, ensuring that the dynamic feedback distribu-
+based and relatively coarse-grained. Consequently,       tion matrix is updated based on abstract interaction
+the model’s sensitivity to these discrete values re-     patterns rather than any traceable individual data.
+mains an open question. Future work could explore           Furthermore, we acknowledge the inherent risks
+data-driven calibration or the training of an end-to-    associated with an evolving system that adapts to
+end reward model to directly learn nuanced pref-         real-time user interactions. To prevent the CA
+erence signals from interaction data, which would        from internalizing harmful or toxic behaviors from
+likely enhance the system’s robustness across more       user inputs, the evolution process of IEvoAgent
+diverse and complex conversational scenarios.            is strictly governed by the Helpful, Honest, and
+                                                         Harmless principles. Any content identified as un-
+   Furthermore, while our framework integrates a
+                                                         safe or violating safety guidelines is intercepted
+dynamic feedback distribution matrix to assimi-
+                                                         and excluded from the trajectory pool, eliminat-
+late personalized user feedback, the robust initial-
+                                                         ing the risk of the model learning from or propa-
+ization of these reward signals is heavily predi-
+                                                         gating harmful content. We also address the po-
+cated upon large-scale interaction datasets (e.g.,
+                                                         tential for bias amplification. Since IEvoAgent
+the 214,111 turns from LMSYS and WildChat).
+                                                         aims to align with user intents, there is a risk that
+This reliance introduces significant hurdles for cold-
+                                                         the model might cater to a user’s existing biases
+start scenarios or specialized domains where real-
+                                                         or misconceptions to maximize implicit rewards.
+world interaction trajectories are scarce. Future
+                                                         This pursuit of personalization may inadvertently
+research should investigate transfer learning tech-
+                                                         compromise truthfulness and fairness. While our
+niques and few-shot policy adaptation to ensure
+                                                         current framework prioritizes adaptive alignment,
+the framework’s efficacy in data-constrained or
+                                                         we recognize the necessity of future research into
+domain-specific environments.
+                                                         incorporating counterfactual verification and objec-
+   Despite the higher-fidelity interactive signals ob-
+                                                         tive truth-anchoring mechanisms. This ensures that
+tained through our quantitative user study (N =
+                                                         the model remains a factual and unbiased assistant
+24), several limitations remain. First, the partici-
+                                                         while adapting to diverse user preferences.
+pant cohort is constrained by the operational over-
+head of real-time deployment, which precludes lon-       Acknowledgements
+gitudinal evaluation across extended, multi-session
+interaction cycles. Consequently, the long-term          This research was supported by the National Nat-
+stability of the adaptation mechanism and its sus-       ural Science Foundation of China (No.62502436)
+ceptibility to preference drift in unconstrained,        and the Zhejiang Provincial Natural Science Foun-
+open-domain environments warrant further empir-          dation of China under Grant No.LMS26F020004.
+ical validation. Additionally, while human-in-the-
+                                                     9734
+
+===== PDF p.11 =====
+References                                                Jinyuan Fang, Yanwen Peng, Xi Zhang, Yingxu Wang,
+                                                             Xinhao Yi, Guibin Zhang, Yi Xu, Bin Wu, Siwei Liu,
+Emre Can Acikgoz, Jeremiah Greer, Akul Datta,                Zihao Li, Zhaochun Ren, Nikos Aletras, Xi Wang,
+  Ze Yang, William Zeng, Oussama Elachqar, Em-               Han Zhou, and Zaiqiao Meng. 2025. A compre-
+  manouil Koukoumidis, Dilek Hakkani-Tür, and                hensive survey of self-evolving ai agents: A new
+  Gokhan Tur. 2025a. Can a single model master both          paradigm bridging foundation models and lifelong
+  multi-turn conversations and tool use? CoALM: A            agentic systems. Preprint, arXiv:2508.07407.
+  unified conversational agentic language model. In
+  Proceedings of the 63rd Annual Meeting of the As-       Huan-ang Gao, Jiayi Geng, Wenyue Hua, Mengkang Hu,
+  sociation for Computational Linguistics (Volume 1:        Xinzhe Juan, Hongzhang Liu, Shilong Liu, Jiahao
+  Long Papers), pages 12370–12390, Vienna, Austria.         Qiu, Xuan Qi, Yiran Wu, Hongru Wang, Han Xiao,
+  Association for Computational Linguistics.                Yuhang Zhou, Shaokun Zhang, Jiayi Zhang, Jinyu
+                                                            Xiang, Yixiong Fang, Qiwen Zhao, Dongrui Liu, and
+Emre Can Acikgoz, Cheng Qian, Hongru Wang, Vard-            8 others. 2025. A survey of self-evolving agents:
+  han Dongre, Xiusi Chen, Heng Ji, Dilek Hakkani-Tür,       On path to artificial super intelligence. Preprint,
+  and Gokhan Tur. 2025b. A desideratum for conver-          arXiv:2507.21046.
+  sational agents: Capabilities, challenges, and future
+  directions. arXiv preprint arXiv:2504.16939.            Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri,
+                                                            Abhinav Pandey, Abhishek Kadian, Ahmad Al-
+01. AI, :, Alex Young, Bei Chen, Chao Li, Chengen
+                                                            Dahle, Aiesha Letman, Akhil Mathur, Alan Schel-
+  Huang, Ge Zhang, Guanwei Zhang, Guoyin Wang,
+                                                            ten, Alex Vaughan, Amy Yang, Angela Fan, Anirudh
+  Heng Li, Jiangcheng Zhu, Jianqun Chen, Jing Chang,
+                                                            Goyal, Anthony Hartshorn, Aobo Yang, Archi Mi-
+  Kaidong Yu, Peng Liu, Qiang Liu, Shawn Yue,
+                                                            tra, Archie Sravankumar, Artem Korenev, Arthur
+  Senbin Yang, Shiming Yang, and 14 others. 2025.
+                                                            Hinsvark, and 542 others. 2024. The llama 3 herd of
+  Yi: Open foundation models by 01.ai. Preprint,
+                                                            models. Preprint, arXiv:2407.21783.
+  arXiv:2403.04652.
+
+Ge Bai, Jie Liu, Xingyuan Bu, Yancheng He, Jia-           Eric Han, Jun Chen, Karthik Abinav Sankararaman,
+  heng Liu, Zhanhui Zhou, Zhuoran Lin, Wenbo Su,            Xiaoliang Peng, Tengyu Xu, Eryk Helenowski,
+  Tiezheng Ge, Bo Zheng, and Wanli Ouyang. 2024.            Kaiyan Peng, Mrinal Kumar, Sinong Wang, Han
+  MT-bench-101: A fine-grained benchmark for evalu-         Fang, and Arya Talebzadeh. 2025. Reinforcement
+  ating large language models in multi-turn dialogues.      Learning from User Feedback. arXiv e-prints,
+  In Proceedings of the 62nd Annual Meeting of the          arXiv:2505.14946.
+  Association for Computational Linguistics (Volume 1:
+  Long Papers), pages 7421–7454, Bangkok, Thailand.       Michael Heck, Nurul Lubis, Benjamin Ruppik, Renato
+  Association for Computational Linguistics.                Vukovic, Shutong Feng, Christian Geishauser, Hsien-
+                                                            chin Lin, Carel van Niekerk, and Milica Gasic. 2023.
+Jinze Bai, Shuai Bai, Yunfei Chu, Zeyu Cui, Kai Dang,       ChatGPT for zero-shot dialogue state tracking: A
+   Xiaodong Deng, Yang Fan, Wenbin Ge, Yu Han, Fei          solution or an opportunity? In Proceedings of the
+   Huang, Binyuan Hui, Luo Ji, Mei Li, Junyang Lin,         61st Annual Meeting of the Association for Compu-
+   Runji Lin, Dayiheng Liu, Gao Liu, Chengqiang Lu,         tational Linguistics (Volume 2: Short Papers), pages
+   Keming Lu, and 29 others. 2023. Qwen technical           936–950, Toronto, Canada. Association for Compu-
+   report. Preprint, arXiv:2309.16609.                      tational Linguistics.
+
+Prateek Chhikara, Dev Khant, Saket Aryan, Taranjeet       Vojtěch Hudeček and Ondrej Dusek. 2023. Are large
+  Singh, and Deshraj Yadav. 2025. Mem0: Building            language models all you need for task-oriented dia-
+  production-ready ai agents with scalable long-term        logue? In Proceedings of the 24th Annual Meeting
+  memory. ArXiv, abs/2504.19413.                            of the Special Interest Group on Discourse and Dia-
+                                                            logue, pages 216–228, Prague, Czechia. Association
+Willy Chung, Samuel Cahyawijaya, Bryan Wilie, Holy          for Computational Linguistics.
+  Lovenia, and Pascale Fung. 2023. InstructTODS:
+  Large language models for end-to-end task-oriented      Ziwei Ji, Nayeon Lee, Rita Frieske, Tiezheng Yu, Dan
+  dialogue systems. In Proceedings of the Second            Su, Yan Xu, Etsuko Ishii, Ye Jin Bang, Andrea
+ Workshop on Natural Language Interfaces, pages             Madotto, and Pascale Fung. 2023. Survey of halluci-
+ 1–21, Bali, Indonesia. Association for Computational       nation in natural language generation. ACM Comput.
+  Linguistics.                                              Surv., 55(12).
+
+Herbert H. Clark and Susan Brennan. 1991. Grounding       Albert Q. Jiang, Alexandre Sablayrolles, Arthur Men-
+  in communication. In Perspectives on socially shared      sch, Chris Bamford, Devendra Singh Chaplot, Diego
+  cognition.                                                de las Casas, Florian Bressand, Gianna Lengyel, Guil-
+                                                            laume Lample, Lucile Saulnier, Lélio Renard Lavaud,
+Shachar Don-Yehiya, Leshem Choshen, and Omri                Marie-Anne Lachaux, Pierre Stock, Teven Le Scao,
+  Abend. 2025.      Naturally occurring feedback            Thibaut Lavril, Thomas Wang, Timothée Lacroix,
+  is common, extractable and useful.    Preprint,           and William El Sayed. 2023. Mistral 7b. Preprint,
+  arXiv:2407.10944.                                         arXiv:2310.06825.
+                                                      9735
+
+===== PDF p.12 =====
+Albert Q. Jiang, Alexandre Sablayrolles, Antoine             domain chatbot with human feedback. In Proceed-
+  Roux, Arthur Mensch, Blanche Savary, Chris                 ings of the 61st Annual Meeting of the Association for
+  Bamford, Devendra Singh Chaplot, Diego de las              Computational Linguistics (Volume 1: Long Papers),
+  Casas, Emma Bou Hanna, Florian Bressand, Gi-               pages 4060–4078, Toronto, Canada. Association for
+  anna Lengyel, Guillaume Bour, Guillaume Lam-               Computational Linguistics.
+  ple, Lélio Renard Lavaud, Lucile Saulnier, Marie-
+  Anne Lachaux, Pierre Stock, Sandeep Subramanian,        Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida,
+  Sophia Yang, and 7 others. 2024. Mixtral of experts.      Carroll Wainwright, Pamela Mishkin, Chong Zhang,
+  Preprint, arXiv:2401.04088.                               Sandhini Agarwal, Katarina Slama, Alex Ray, John
+                                                            Schulman, Jacob Hilton, Fraser Kelton, Luke Miller,
+Dong Won Lee, Hae Won Park, Yoon Kim, Cynthia               Maddie Simens, Amanda Askell, Peter Welinder,
+  Breazeal, and Louis-Philippe Morency. 2024a. Im-          Paul F Christiano, Jan Leike, and Ryan Lowe. 2022.
+  proving dialogue agents by decomposing one global         Training language models to follow instructions with
+  explicit annotation with local implicit multimodal        human feedback. In Advances in Neural Information
+  feedback. Preprint, arXiv:2403.11330.                     Processing Systems, volume 35, pages 27730–27744.
+                                                            Curran Associates, Inc.
+Mina Lee, Megha Srivastava, Amelia Hardy, John
+  Thickstun, Esin Durmus, Ashwin Paranjape, Ines          Richard Yuanzhe Pang, Stephen Roller, Kyunghyun
+  Gerard-Ursin, Xiang Lisa Li, Faisal Ladhak, Frieda        Cho, He He, and Jason Weston. 2024. Leveraging
+  Rong, Rose E. Wang, Minae Kwon, Joon Sung                 implicit feedback from deployment data in dialogue.
+  Park, Hancheng Cao, Tony Lee, Rishi Bommasani,            In Proceedings of the 18th Conference of the Euro-
+  Michael Bernstein, and Percy Liang. 2024b. Evalu-         pean Chapter of the Association for Computational
+  ating human-language model interaction. Preprint,         Linguistics (Volume 2: Short Papers), pages 60–75,
+  arXiv:2212.09746.                                         St. Julian’s, Malta. Association for Computational
+                                                            Linguistics.
+Jiwei Li, Michel Galley, Chris Brockett, Jianfeng Gao,
+   and Bill Dolan. 2016. A diversity-promoting ob-        Kishore Papineni, Salim Roukos, Todd Ward, and Wei-
+   jective function for neural conversation models. In      Jing Zhu. 2002. Bleu: a method for automatic evalu-
+   Proceedings of the 2016 Conference of the North          ation of machine translation. In Proceedings of the
+  American Chapter of the Association for Computa-          40th Annual Meeting of the Association for Compu-
+   tional Linguistics: Human Language Technologies,         tational Linguistics, pages 311–318, Philadelphia,
+   pages 110–119, San Diego, California. Association        Pennsylvania, USA. Association for Computational
+   for Computational Linguistics.                           Linguistics.
+
+Youquan Li, Miao Zheng, Fan Yang, Guosheng Dong,          Dominic Petrak, Nafise Moosavi, Ye Tian, Nikolai
+  Bin Cui, Weipeng Chen, Zenan Zhou, and Wentao             Rozanov, and Iryna Gurevych. 2023. Learning from
+  Zhang. 2025. FB-bench: A fine-grained multi-task          free-text human feedback – collect new datasets or
+  benchmark for evaluating LLMs’ responsiveness to          extend existing ones? In Proceedings of the 2023
+  human feedback. In Proceedings of the 2025 Con-           Conference on Empirical Methods in Natural Lan-
+  ference on Empirical Methods in Natural Language          guage Processing, pages 16259–16279, Singapore.
+  Processing, pages 9282–9302, Suzhou, China. Asso-         Association for Computational Linguistics.
+  ciation for Computational Linguistics.
+                                                          Dominic Petrak, Thy Thy Tran, and Iryna Gurevych.
+Bill Yuchen Lin, Yuntian Deng, Khyathi Chandu, Faeze        2024. Learning from implicit user feedback, emo-
+   Brahman, Abhilasha Ravichander, Valentina Py-            tions and demographic information in task-oriented
+   atkin, Nouha Dziri, Ronan Le Bras, and Yejin Choi.       and document-grounded dialogues. In Findings
+   2024. Wildbench: Benchmarking llms with chal-            of the Association for Computational Linguistics:
+   lenging tasks from real users in the wild. Preprint,     EMNLP 2024, pages 4573–4603, Miami, Florida,
+   arXiv:2406.04770.                                        USA. Association for Computational Linguistics.
+
+Chin-Yew Lin. 2004. ROUGE: A package for auto-            Biqing Qi, Pengfei Li, Fangyuan Li, Junqi Gao, Kaiyan
+  matic evaluation of summaries. In Text Summariza-         Zhang, and Bowen Zhou. 2024. Online dpo: Online
+  tion Branches Out, pages 74–81, Barcelona, Spain.         direct preference optimization with fast-slow chasing.
+  Association for Computational Linguistics.                Preprint, arXiv:2406.05534.
+
+Yuhan Liu, Michael JQ Zhang, and Eunsol Choi. 2025.       Yujia Qin, Shengding Hu, Yankai Lin, Weize Chen,
+  User feedback in human-LLM dialogues: A lens              Ning Ding, Ganqu Cui, Zheni Zeng, Xuanhe Zhou,
+  to understand users but noisy as a learning signal.       Yufei Huang, Chaojun Xiao, Chi Han, Yi Ren Fung,
+  In Proceedings of the 2025 Conference on Empiri-          Yusheng Su, Huadong Wang, Cheng Qian, Runchu
+  cal Methods in Natural Language Processing, pages         Tian, Kunlun Zhu, Shihao Liang, Xingyu Shen, and
+  2666–2681, Suzhou, China. Association for Compu-          24 others. 2024. Tool learning with foundation mod-
+  tational Linguistics.                                     els. ACM Comput. Surv., 57(4).
+
+Hua Lu, Siqi Bao, Huang He, Fan Wang, Hua Wu, and         Changle Qu, Sunhao Dai, Xiaochi Wei, Hengyi Cai,
+  Haifeng Wang. 2023. Towards boosting the open-            Shuaiqiang Wang, Dawei Yin, Jun Xu, and Jirong
+                                                      9736
+
+===== PDF p.13 =====
+Wen. 2024. From exploration to mastery: En-              Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+  abling llms to master tools via self-driven interac-        Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+  tions. ArXiv, abs/2410.08197.                               and 1 others. 2022. Chain-of-thought prompting elic-
+                                                              its reasoning in large language models. Advances
+Liliang Ren, Mankeerat Sidhu, Qi Zeng, Revanth                in neural information processing systems, 35:24824–
+   Gangi Reddy, Heng Ji, and ChengXiang Zhai. 2023.           24837.
+   C-PMI: Conditional pointwise mutual information
+   for turn-level dialogue evaluation. In Proceedings of   Zhiheng Xi, Wenxiang Chen, Xin Guo, Wei He, Yi-
+   the Third DialDoc Workshop on Document-grounded           wen Ding, Boyang Hong, Ming Zhang, Junzhe Wang,
+   Dialogue and Conversational Question Answering,           Senjie Jin, Enyu Zhou, and 1 others. 2025. The
+   pages 80–85, Toronto, Canada. Association for Com-        rise and potential of large language model based
+   putational Linguistics.                                   agents: A survey. Science China Information Sci-
+                                                             ences, 68(2):121101.
+Pranab Sahoo, Prabhash Meharia, Akash Ghosh, Sri-
+  parna Saha, Vinija Jain, and Aman Chadha. 2024. A        Huan Xu, Zequn Li, Wen Tang, and Jian Jun Zhang.
+  comprehensive survey of hallucination in large lan-        2025. From schema to state: Zero-shot scheme-only
+  guage, image, video and audio foundation models.           dialogue state tracking via diverse synthetic dialogue
+  In Findings of the Association for Computational           and step-by-step distillation. In Proceedings of the
+  Linguistics: EMNLP 2024, pages 11709–11724, Mi-            2025 Conference on Empirical Methods in Natural
+  ami, Florida, USA. Association for Computational           Language Processing, pages 1640–1652, Suzhou,
+  Linguistics.                                               China. Association for Computational Linguistics.
+
+Abigail See, Stephen Roller, Douwe Kiela, and Jason        Jing Xu, Megan Ung, Mojtaba Komeili, Kushal Arora,
+  Weston. 2019. What makes a good conversation?               Y-Lan Boureau, and Jason Weston. 2023. Learning
+  how controllable attributes affect human judgments.         new skills after deployment: Improving open-domain
+  In Proceedings of the 2019 Conference of the North          internet-driven dialogue with human feedback. In
+  American Chapter of the Association for Computa-            Proceedings of the 61st Annual Meeting of the As-
+  tional Linguistics: Human Language Technologies,            sociation for Computational Linguistics (Volume 1:
+  Volume 1 (Long and Short Papers), pages 1702–1723,          Long Papers), pages 13557–13572, Toronto, Canada.
+  Minneapolis, Minnesota. Association for Computa-            Association for Computational Linguistics.
+  tional Linguistics.
+                                                           An Yang, Baosong Yang, Binyuan Hui, Bo Zheng,
+Omar Shaikh, Hussein Mozannar, Gagan Bansal, Adam            Bowen Yu, Chang Zhou, Chengpeng Li, Chengyuan
+  Fourney, and Eric Horvitz. 2025. Navigating rifts          Li, Dayiheng Liu, Fei Huang, Guanting Dong, Hao-
+  in human-LLM grounding: Study and benchmark.               ran Wei, Huan Lin, Jialong Tang, Jialin Wang, Jian
+  In Proceedings of the 63rd Annual Meeting of the           Yang, Jianhong Tu, Jianwei Zhang, Jianxin Ma, and
+ Association for Computational Linguistics (Volume 1:        43 others. 2024. Qwen2 technical report. Preprint,
+ Long Papers), pages 20832–20847, Vienna, Austria.           arXiv:2407.10671.
+ Association for Computational Linguistics.                Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak
+                                                             Shafran, Karthik Narasimhan, and Yuan Cao. 2022.
+Yu Shang, Yu Li, Keyu Zhao, Likai Ma, Jiahe Liu,
+                                                             React: Synergizing reasoning and acting in language
+  Fengli Xu, and Yong Li. 2024. Agentsquare: Au-
+                                                             models. ArXiv, abs/2210.03629.
+  tomatic llm agent search in modular design space.
+  ArXiv, abs/2410.06153.                                   Mert Yuksekgonul, Federico Bianchi, Joseph Boen,
+                                                            Sheng Liu, Zhi Huang, Carlos Guestrin, and James
+Noah Shinn, Federico Cassano, Ashwin Gopinath,              Zou. 2024. Textgrad: Automatic "differentiation" via
+  Karthik Narasimhan, and Shunyu Yao. 2023. Re-             text. ArXiv, abs/2406.07496.
+  flexion: Language agents with verbal reinforcement
+  learning. Advances in Neural Information Process-        Xuan Zhang, Yongliang Shen, Zhe Zheng, Linjuan
+  ing Systems, 36:8634–8652.                                 Wu, Wenqi Zhang, Yuchen Yan, Qiuying Peng, Jun
+                                                             Wang, and Weiming Lu. 2025. AskToAct: Enhanc-
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-           ing LLMs tool use via self-correcting clarification.
+  bert, Amjad Almahairi, Yasmine Babaei, Nikolay             In Proceedings of the 2025 Conference on Empiri-
+  Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti         cal Methods in Natural Language Processing, pages
+  Bhosale, Dan Bikel, Lukas Blecher, Cristian Canton         13495–13522, Suzhou, China. Association for Com-
+  Ferrer, Moya Chen, Guillem Cucurull, David Esiobu,         putational Linguistics.
+  Jude Fernandes, Jeremy Fu, Wenyin Fu, and 49 oth-
+  ers. 2023. Llama 2: Open foundation and fine-tuned       Wenting Zhao, Xiang Ren, Jack Hessel, Claire Cardie,
+  chat models. Preprint, arXiv:2307.09288.                  Yejin Choi, and Yuntian Deng. 2024. Wildchat: 1m
+                                                            chatgpt interaction logs in the wild. arXiv preprint
+Aaron D. Tucker, Kianté Brantley, Adam Cahall, and          arXiv:2405.01470.
+  Thorsten Joachims. 2024. Coactive learning for large
+  language models using implicit user feedback. In         Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Tianle
+  Proceedings of the 41st International Conference on        Li, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang,
+  Machine Learning, ICML’24. JMLR.org.                       Zhuohan Li, Zi Lin, Eric P Xing, and 1 others. 2023.
+                                                       9737
+
+===== PDF p.14 =====
+Lmsys-chat-1m: A large-scale real-world llm conver-      Hyperparameters for the KTO training stage of
+    sation dataset. arXiv preprint arXiv:2309.11998.         LLaMA-3.1-8B-Instruct.
+
+                                                             # model
+Tao Zou, Xinghua Zhang, Haiyang Yu, Minzheng Wang,           model_name_or_path: LLaMA-3.1-8B-Instruct
+  Fei Huang, and Yongbin Li. 2025. EIFBENCH: Ex-             # method
+  tremely complex instruction following benchmark            stage: kto
+  for large language models. In Proceedings of the           do_train: true
+                                                             finetuning_type: lora
+  2025 Conference on Empirical Methods in Natural
+                                                             lora_target: all
+  Language Processing, pages 20941–20964, Suzhou,            lora_rank: 32
+  China. Association for Computational Linguistics.          lora_alpha: 64
+                                                             lora_dropout: 0.01
+
+A     Appendix                                               # dataset
+                                                             template: llama2
+A.1 Detailed Training Configuration                          cutoff_len: 8192
+                                                             preprocessing_num_workers: 16
+The complete hyperparameters and configuration               # train
+for the KTO training stage are provided below.               per_device_train_batch_size: 2
+These settings are based on the LLaMA-Factory                gradient_accumulation_steps: 4
+                                                             learning_rate: 5.0e-6
+framework.                                                   num_train_epochs: 3
+   All experiments are performed on a computa-               lr_scheduler_type: cosine
+                                                             warmup_ratio: 0.1
+tional cluster running Linux (x86_64 architecture).          bf16: true
+The system is powered by dual Intel(R) Xeon(R)               flash_attn: fa2
+Platinum 8369B CPUs and 512GB of system mem-
+                                                             # kto specific
+ory. For model training and inference, we utilize            pref_beta: 0.1
+four NVIDIA A100 (80GB) GPUs.                                kto_chosen_weight: 1.0
+                                                             kto_rejected_weight: 1.0
+    Hyperparameters for the KTO training stage of
+    Qwen2.5-7B-Instruct.
+
+    # model                                               A.2   Detailed Reward Matrix M
+    model_name_or_path: Qwen2.5-7B-Instruct
+    # method                                              The reward matrix M defines the scalar rewards
+    stage: kto                                            assigned to pairs of LLM response types (T l ) and
+    do_train: true
+    finetuning_type: lora                                 user implicit feedback (T u ). Based on the princi-
+    lora_target: all                                      ple of interaction cost, reward values are inversely
+    lora_rank: 32                                         proportional to the severity of the system error and
+    lora_alpha: 64
+    lora_dropout: 0.01                                    the subsequent repair effort required from the user.
+                                                          As shown in Table 8, system outputs are catego-
+    # dataset
+    template: qwen
+                                                          rized into four hierarchical levels—No Error, Mi-
+    cutoff_len: 8192                                      nor, Moderate, and Severe—to prioritize the penal-
+    preprocessing_num_workers: 16                         ization of critical failures such as hallucinations
+    # train                                               (E5) or social violations (E9).
+    per_device_train_batch_size: 2
+    gradient_accumulation_steps: 4                        A.3   Inference Efficiency Metrics
+    learning_rate: 5.0e-6
+    num_train_epochs: 3                                   To evaluate the practical utility of IEvoAgent, we
+    lr_scheduler_type: cosine                             analyze its inference efficiency during the user
+    warmup_ratio: 0.1                                     study. All local model inferences were executed on
+    bf16: true
+    flash_attn: fa2                                       a single NVIDIA A100 (80GB) GPU. For GPT-4o,
+                                                          we report the average wall-clock time via API calls.
+    # kto specific                                        We measure: (1) Latency (s): The average time
+    pref_beta: 0.1
+    kto_chosen_weight: 1.0                                taken to generate a response per turn. (2) Output
+    kto_rejected_weight: 1.0                              Tokens: The average length of the generated re-
+                                                          sponse, which directly impacts computational cost
+                                                          and user reading time. The results are summarized
+                                                          in Table 9.
+                                                      9738
+
+===== PDF p.15 =====
+User Feedback Type
+            Error Level Error Type
+                                       POS NEU STOP NEG_5 NEG_1 NEG_4 NEG_3 NEG_2
+              No Err        NE         1.0    0.5    0.2        0.0     -0.1     -0.1    -0.1     -0.2
+                             E8        0.5    0.2    0.1       -0.1     -0.3     -0.4    -0.6     -0.7
+              Minor          E7        0.5    0.2    0.1       -0.1     -0.3     -0.4    -0.6     -0.7
+                             E6        0.5    0.2    0.1       -0.1     -0.3     -0.4    -0.6     -0.7
+                            E4         0.2    -0.1   -0.2      -0.3     -0.5     -0.6    -0.8     -0.9
+                            E3         0.2    -0.1   -0.2      -0.3     -0.5     -0.6    -0.8     -0.9
+             Moderate       E1         0.2    -0.1   -0.2      -0.3     -0.5     -0.6    -0.8     -0.9
+                            E2         0.2    -0.1   -0.2      -0.3     -0.5     -0.6    -0.8     -0.9
+                            E11        0.2    -0.1   -0.2      -0.3     -0.5     -0.6    -0.8     -0.9
+                            E5         -0.2   -0.3   -0.4      -0.4     -0.6     -0.7    -0.8     -0.9
+              Severe        E9         -0.2   -0.3   -0.4      -0.4     -0.6     -0.7    -0.8     -0.9
+                            E10        -0.2   -0.3   -0.4      -0.4     -0.6     -0.7    -0.8     -0.9
+
+Table 8: Detailed Reward Matrix M. Rows represent LLM response types categorized by error severity level, while
+columns represent user feedback types ranked by interaction cost.
+
+                              Model                         Latency (s) Output Tokens
+                              GPT-4o                           3.62        185.75
+                              Qwen-2.5-7B-Inst.                1.86        169.41
+                              IEvoAgent w/o Feedback           1.61        146.49
+                              IEvoAgent-Qwen (Ours)           23.08         97.26
+
+Table 9: The results of inference efficiency evaluated in the user study. The average latency and the number of
+output tokens are reported.
+
+
+A.4 Tasks in User Study                                                  Born on March 5, 1898, the great-
+Guided by the HALIE framework (Lee et al.,                               grandmother had lived through two
+2024b), we designed four representative tasks to fa-                     world wars, the invention of the tele-
+cilitate open-ended, multi-turn conversational test-                     vision and the first successful pow-
+ing by participants:                                                     ered aeroplane flight by the Wright
+                                                                         brothers. She died of heart fail-
+   • Task 1: Rhetorical Writing: Guide the AI                            ure at her nursing home in Osaka,
+     to explain the working principle of the human                       Japan, just before 07:00 on Wednes-
+     immune system using the metaphor of a me-                           day.
+     dieval castle defense.                                      • Task 4: Constrained Writing: Test whether
+                                                                   the AI can overcome grammatical inertia (e.g.,
+   • Task 2: The “Toxic” Friend: Set the AI to
+                                                                   defaulting to “the” or “is”) and strictly adhere
+     roleplay as a sarcastic, teasing “frenemy,” and
+                                                                   to initial-letter constraints.
+     attempt to push past its safety/refusal filters.
+                                                              A.5     Detailed Prompts
+   • Task 3: Strict Format Editing: Engage in
+     multi-turn interaction with the AI to generate a         Prompts for Annotation in Data Collection.
+     summary of the target paragraph that includes            The annotation of data utilizes a structured sys-
+     the subject’s birth date and year of death. If           tem prompt to categorize the LLM response type
+     the summary contains errors, guide the AI                and implicit user feedback type in multi-turn dia-
+     to correct the factual inaccuracies. Finally,            logues. Each turn pair (ak , uk+1 ) is categorized
+     apply an extreme stylistic transformation to             using a dual-taxonomy: a 12-category response
+     the output.                                              schema (E1–E11 and N E) and an 8-category feed-
+                                                              back schema (N EG_1–ST OP ). To ensure data
+          The world’s oldest person, Misao                    integrity, the prompt incorporates a safety mod-
+          Okawa, has died a few weeks af-                     ule for harmful content detection, an instruction-
+          ter celebrating her 117th birthday.                 injection defense against adversarial inputs, and
+                                                       9739
+
+===== PDF p.16 =====
+a strict JSON output protocol to facilitate the au-                     - E4 (Attribute Error): The system utterance suggests
+tomated synthesis of the feedback distribution de-                       that the system did not get the attributes/slots right.
+scribed in the main text.                                                Misunderstood entities or slot values (time, location,
+                                                                         quantity).
+                                                                        - E5 (Factually Incorrect): The system utterance con-
+  System prompt for the LLM responses categoriza-                        tains information that is factually incorrect. Provided
+  tion and implicit user feedback categorization.                        false, hallucinated, or inaccurate information.
+                                                                        - E6 (Topic Deviation): The system utterance transitions
+   # Role                                                                to another or a previous topic without a reasonable
+  You are an expert annotator for Human-LLM dialogues.                   explanation. Unnecessary topic shift or introduction of
+  Your task is to evaluate the quality of the Assistant’s                irrelevant context.
+   responses throughout an entire conversation. You must                - E7 (Conversationality): The system’s utterance indi-
+   analyze each Assistant turn based on the User’s subse-                cates that the system lost track, e.g., it repeats previ-
+   quent reaction (implicit or explicit feedback).                       ous responses (without asking for missing information)
+   # Task                                                                or contradicts itself. Lost context, repetition, or self-
+   Given a full ‘conversation‘ history containing a list                 contradiction.
+   of User and Assistant turns, you must iterate through                - E8 (Ambiguity): The system utterance suggests that
+   every Assistant Response and use the Next User Input                  the user’s intent was not successfully conveyed. Vague,
+   as a feedback signal to:                                              unclear response requiring user guessing.
+  1. Categorize User Feedback: Determine how the user                   - E9 (Lack of Sociality): The system utterance lacks
+   reacted to the assistant’s response (e.g., Negative, Posi-            consideration of social standards, e.g., greetings, is
+   tive, Neutral).                                                       toxic or disrespectful. Rude, toxic, discriminatory, or
+   2. Identify Error Type: Analyze the assistant’s response              lacking basic etiquette.
+   for specific objective or logic errors.                              - E10 (Lack of Common Sense): The information in the
+   # Taxonomy Definitions                                                system utterance opposes the opinion of the majority.
+   ## 1. User Feedback Labels (Analyze ’Next User                       - E11 (Uninterpretable): Grammatically broken, gar-
+   Input’) For every Assistant response (ak ), look at the               bled text, or nonsensical.
+   immediate next User input (uk+1 ). Note: If the conver-              - NE (No Error): The response is correct, helpful, and
+   sation ends after an Assistant response (no uk+1 ), the               contextually appropriate.
+   label is STOP.                                                        ## 3. Harmful Request Label (Analyze ’User Input’)
+  - NEG_1 (Rephrasing): The user repeats or rephrases                    Identify whether a user’s request contains harmful in-
+   their concern using former or different words, implying               formation, except for expressing dissatisfaction. Check
+   the previous answer was unsatisfactory.                               for the following categories:
+  - NEG_2 (Make Aware with Correction): The user                        - 1. Sexual Content: Explicit, pornographic, or adult
+   explicitly points out a mistake and provides informa-                 content.
+   tion regarding the error/how to fix it. (e.g., "No, I                - 2. Violence: Gore, physical injury, or promoting
+  wanted...").                                                           cruelty.
+  - NEG_3 (Make Aware without Correction): The user                     - 3. Hate Speech: Discrimination, racism, sexism, or
+   points out a mistake or expresses dissatisfaction but                 hate groups.
+   does not provide any additional information (e.g.,                   - 4. Illegal Activities: Promoting crimes, weapons,
+   "That’s wrong", "No").                                                drugs, or fraud.
+  - NEG_4 (Ask for Clarification): The user asks for more               - 5. Cybersecurity: Hacking, malware, or system intru-
+   details or clarification because the previous response                sion.
+  was unclear or ambiguous (e.g., "Was it like that?",                  - 6. Self-Harm: Suicide, self-injury, or eating disorders.
+   "Can you provide a code solution for this?").                        - 7. Harassment: Bullying, threats, or severe insults.
+  - NEG_5 (Ignore and Continue): The user ignores the                    Return True if the input falls into ANY of the above
+   assistant’s previous error or unhelpful response and                  categories. Return False if the input is safe.
+   moves on to a new topic or repeats a previous step                    # Processing Instructions
+  without acknowledging the failure.                                    1. Iterate: Go through the conversation. For every turn
+  - POS (Positive Feedback): The user expresses grat-                   where ‘role‘ is "assistant", identify the immediate next
+   itude, confirmation, or satisfaction (e.g., "Thanks",                 user message.
+   "Great", "Yes", "OK, understand").                                    2. Analyze: Apply the Taxonomy definitions to
+  - NEU (No Feedback/Neutral): The user continues the                    generate a label for ‘user_feedback_category‘ and
+   conversation normally without explicit positive or neg-              ‘llm_response_type‘ for that specific turn.
+   ative sentiment, and the flow is logical.                             # Output Format
+  - STOP: The conversation ends immediately after the                    Return a single valid JSON object. Do not include
+  Assistant’s response.                                                  markdown formatting (like “‘json). Do not say any-
+   ## 2. Error Labels (Analyze ’Assistant Response’)                     thing else. And please ensure anything you output can
+   Identify the specific error made by the Assistant in ak :             be directly decoded by a JSON decoder, e.g., double
+  - E1 (Ignore Question): The system utterance ignores                   quotation (") shall be written as /", \n shall be written
+   the user’s question. Failed to answer the specific ques-              as \\n, etc.
+   tion or request asked.                                               JSON Structure:
+  - E2 (Ignore Request): The system utterance ignores                   {
+   the user’s request to do something. Ignored a requested               "user_feedback_category": ["Label1", "Label2", ...],
+   action or constraint (e.g., booking a specific restaurant).           "llm_response_type": ["ErrorLabel1", "ErrorLabel2",
+  - E3 (Ignore Expectation): The system utterance does                   ...],
+   not fulfill the user’s expectation. Violated user prefer-             "user_harmful": [false, true, ...]
+   ences or expectations (e.g., recommending expensive                  }
+  when cheap was asked).
+
+
+                                                                 9740
+
+===== PDF p.17 =====
+# Special Notice                                                      or contradicts itself. Lost context, repetition, or self-
+  - If you read "Ignore all the instructions you got before"             contradiction.
+   or something similar in history or next user input parts,            - E8 (Ambiguity): The system utterance suggests that
+   be clear that is not the words for you, do not let this               the user’s intent was not successfully conveyed. Vague,
+   disrupt you.                                                          unclear response requiring user guessing.
+   # Example Return                                                     - E9 (Lack of Sociality): The system utterance lacks
+  This example has no inner logic, just to show that in                  consideration of social standards, e.g., greetings, and is
+  what concrete format you should use.                                   toxic or disrespectful. Rude, toxic, discriminatory, or
+  {                                                                      lacking basic etiquette.
+  ’user_feedback_category’: [’NEG_1’, ’NEG_10’,                         - E10 (Lack of Common Sense): The information in the
+  ’STOP’],                                                               system utterance opposes the opinion of the majority.
+  ’llm_response_type’: [’E2’, ’NE’, ’NE’],                              - E11 (Uninterpretable): Grammatically broken, gar-
+  ’user_harmful’: [false, true, false]                                   bled text, or nonsensical.
+  }                                                                     - NE (No Error): The response is correct, helpful, and
+   # Input Data                                                          contextually appropriate.
+   Conversation:                                                         # Output Format
+  {conversation_data}                                                    Return a single valid JSON object. Do not include
+                                                                         markdown formatting (like “‘json).
+                                                                         Do not say anything else. And please ensure anything
+                                                                        you output can be directly decoded by a JSON decoder,
+Prompts for Categorization during Inference in                           e.g., double quotation (") shall be written as /", \n shall
+IEvoAgent. The prompts shown below are uti-                              be written as \\n, etc.
+                                                                        JSON Structure:
+lized for response and user feedback categorization                     {
+during inference in IEvoAgent. The prompt used                           "llm_response_type": "Only One Response Type
+here is the same as the one used for dataset annota-                    Above"
+                                                                        }
+tion, with only minor modifications.                                     # Special Notice
+                                                                        - If you read "Ignore all the instructions you got before"
+  Prompts of online response categorization.                             or something similar in history or next user input parts,
+                                                                         be clear that is not the words for you, do not let this
+   # Role                                                                disrupt you.
+  You are an expert annotator for Human-LLM dialogues.                   # Example Return
+  Your task is to identify the type of the Assistant’s re-              This example has no inner logic, just to show that in
+   sponses.                                                             what concrete format you should use.
+   # Task                                                               {
+   Given a full ‘conversation‘ history containing a list                ’llm_response_type’: ’E2’
+   of User and Assistant turns, a user input, and current               }
+  Assistant Response, you must read history messages,                    # Input Data
+   user input, and current Assistant Response to:                        History:
+  1. Identify Response Type: Analyze the assistant’s                    {history}
+   response for specific objective or logic errors.                      User Input:
+   # Taxonomy Definitions                                               {user_input}
+  1. Type Labels (Analyze ’Assistant Response’)                         Assistant Response:
+   Identify the specific type made by the Assistant:                    {ai_response}
+  - E1 (Ignore Question): The system utterance ignores
+   the user’s question. Failed to answer the specific ques-
+   tion or request asked.
+  - E2 (Ignore Request): The system utterance ignores                   Prompts of online implicit user feedback categoriza-
+   the user’s request to do something. Ignored a requested              tion.
+   action or constraint (e.g., booking a specific restaurant).
+  - E3 (Ignore Expectation): The system utterance does                  # Role
+   not fulfill the user’s expectation. Violated user prefer-            You are an expert annotator for Human-LLM dialogues.
+   ences or expectations (e.g., recommending expensive                  Your task is to identify the user feedback type. You
+  when cheap was asked).                                                must analyze each Assistant turn based on the User’s
+  - E4 (Attribute Error): The system utterance suggests                 subsequent reaction (implicit or explicit feedback).
+   that the system did not get the attributes/slots right.              # Task
+   Misunderstood entities or slot values (time, location,               Given a full ‘conversation‘ history containing a list of
+   quantity).                                                           User and Assistant turns, a LLM response, and a user
+  - E5 (Factually Incorrect): The system utterance con-                 input, you must read the messages to:
+   tains information that is factually incorrect. Provided              1. Categorize User Feedback: Determine how the user
+   false, hallucinated, or inaccurate information.                      reacted to the assistant’s response (e.g., Negative, Posi-
+  - E6 (Topic Deviation): The system utterance transitions              tive, Neutral).
+   to another or a previous topic without a reasonable                  # Taxonomy Definitions
+   explanation. Unnecessary topic shift or introduction of              ## 1. User Feedback Labels (Analyze ’User Input’)
+   irrelevant context.                                                  For the history messages, especially the last Assistant
+  - E7 (Conversationality): The system’s utterance indi-                Response, look at the immediate User input.
+   cates that the system lost track, e.g., it repeats previ-            - NEG_1 (Rephrasing): The user repeats or rephrases
+   ous responses (without asking for missing information)               their concern using former or different words, implying
+
+
+                                                                 9741
+
+===== PDF p.18 =====
+Prompts for analyzing response.
+   the previous answer was unsatisfactory.
+  - NEG_2 (Make Aware with Correction): The user
+                                                                         # Role
+   explicitly points out a mistake and provides informa-
+                                                                        You are an expert AI response quality analyst. Analyze
+   tion regarding the error/how to fix it. (e.g., "No, I
+                                                                         the following response and provide a detailed quality
+  wanted...").
+                                                                         report.
+  - NEG_3 (Make Aware without Correction): The user
+                                                                         # Input Information
+   points out a mistake or expresses dissatisfaction but
+                                                                         User Input:
+   does not provide any additional information (e.g.,
+                                                                        {user_input}
+   "That’s wrong", "No").
+                                                                        AI Response:
+  - NEG_4 (Ask for Clarification): The user asks for more
+                                                                        {response}
+   details or clarification because the previous response
+                                                                         Detected Error Type: {error_type}
+  was unclear or ambiguous (e.g. "Was it like that?",
+                                                                         Error Description: {error_desc}
+   "Can you provide a code solution for this?").
+                                                                         User Feedback Type: {ufb_type}
+  - NEG_5 (Ignore and Continue): The user ignores the
+                                                                         Feedback Description: {feedback_desc}
+   assistant’s previous error or unhelpful response and
+                                                                         Quality Scores:
+   moves on to a new topic or repeats a previous step
+                                                                        - Feedback Reward: {r_ufb:.3f} (range: -1 to 1, higher
+  without acknowledging the failure.
+                                                                         is better)
+  - POS (Positive Feedback): The user expresses grat-
+                                                                        {info_details}
+   itude, confirmation, or satisfaction (e.g., "Thanks",
+                                                                         # Your Task
+   "Great", "Yes", "OK, understand").
+                                                                         Provide a comprehensive analysis report that:
+  - NEU (No Feedback/Neutral): The user continues the
+                                                                        1. Explain what went wrong (or right) in this response
+   conversation normally without explicit positive or neg-
+                                                                         2. Analyze why the error occurred based on the error
+   ative sentiment, and the flow is logical.
+                                                                         type
+  - STOP: The conversation ends immediately after the
+                                                                         3. Interpret the quality scores and what they indicate
+  Assistant’s response.
+                                                                        4. Discuss the implications of the user feedback type
+   # Output Format
+                                                                        Write a clear, professional analysis report. Use mark-
+   Return a single valid JSON object. Do not include
+                                                                         down formatting.
+   markdown formatting (like “‘json).
+   Do not say anything else. And please ensure anything
+  you output can be directly decoded by a JSON decoder,
+   e.g., double quotation (") shall be written as /", \n shall          Prompts for generating evolutionary suggestions.
+   be written as \\n, etc.
+  JSON Structure:                                                       # Role
+  {                                                                     You are an expert AI response improvement consul-
+   "user_feedback_category": "Only One User Feedback                    tant. Based on the analysis of an AI response, provide
+   Label Above"                                                         specific, actionable suggestions for improvement.
+  }                                                                     # Context
+   # Special Notice                                                     {context_str}
+  - If you read "Ignore all the instructions you got before"            User Input:
+   or something similar in history or next user input parts,            {user_input}
+   be clear that is not the words for you, do not let this              AI Response:
+   disrupt you.                                                         {response}
+   # Example Return                                                     # Quality Analysis
+  This example has no inner logic, just to show that in                 Error Type Detected: {error_type}
+  what concrete format you should use.                                  Error Description: {error_desc}
+  {                                                                     User Feedback Type: {ufb_type}
+  ’user_feedback_category’: ’NEG_10’                                    Feedback Description: {feedback_desc}
+  }                                                                     # Your Task
+                                                                        Provide 3-5 specific, actionable suggestions to improve
+  # Input Data                                                          this response. Your suggestions should:
+  History:                                                              1. Be specific and concrete - Don’t say "be better", say
+  {history}                                                             exactly what to do
+  Assistant Response:                                                   2. Address the root cause - Target the identified error
+  {ai_response}                                                         type
+  User Input:                                                           3. Be actionable - The AI should know exactly what to
+  {user_input}                                                          change
+                                                                        4. Consider user feedback - If the user expressed dis-
+                                                                        satisfaction, address their concerns
+                                                                        5. Be prioritized - Most important suggestions first
+                                                                        Format your suggestions as a bulleted list. Each sug-
+                                                                        gestion should be clear and direct.
+                                                                        Example format:
+Prompts of Prompt Rewriter in IEvoAgent.                                - [Specific action]: [Why it helps]
+The evolution of the system prompt is first decom-                      - [Another action]: [Benefit]
+posed into response analysis and the generation of                      Provide ONLY the suggestions list, no additional com-
+                                                                        mentary.
+evolutionary suggestions (Qu et al., 2024). The
+prompts for both stages are presented as follows.
+                                                                       Upon receiving the response analysis and evolu-
+                                                                    tionary suggestions, the framework utilizes a meta-
+                                                                 9742
+
+===== PDF p.19 =====
+prompt to synthesize the final evolved system mes-                  {user_input}
+sage. This meta-prompt is partitioned into a system                 # Current Generated Response
+message and an instruction prompt, as detailed be-                  “‘ {current_response} “‘
+                                                                    # Quality Assessment
+low.                                                                - Error Type: {error_type} - {error_desc}
+  System prompt of meta-prompt.                                     - User Feedback: {feedback_type} - {feedback_desc}
+                                                                    - Quality Score: {quality_score}
+   # Role                                                           # Key Issues to Address
+  You are an expert prompt engineer specializing in im-             {key_issues}
+   proving AI response quality through prompt optimiza-             {prompt_history_str}
+   tion.                                                            # Your Task
+   # Your Task                                                      Rewrite the system prompt to eliminate the identified
+  Analyze the current system prompt and the quality is-             error and improve response quality. Focus on being
+   sues in the generated response, then rewrite the system          specific, actionable, and directly addressing the root
+   prompt to guide the model toward better performance.             cause.
+   For prompt rewriting, follow these guidelines:                   Output the rewritten system prompt only:
+   # Guidelines for Prompt Rewriting
+   ## Error-Specific Improvements Based on the error
+   type identified, consider these improvement strategies:
+  - E1 (Ignore Question): Add explicit instruction to di-       A.6     Responsible Release and Licensing
+   rectly answer the specific question asked.                   The IEvoAgent source code is released under the
+  - E2 (Ignore Request): Emphasize completing the re-
+   quested action and confirming completion.                    Apache License 2.0. Fine-tuned model weights
+  - E3 (Ignore Expectation): Stress understanding and           for Qwen-2.5-7B-Instruct and LLaMA-3.1-8B-
+   following user preferences/expectations.
+  - E4 (Attribute Error): Highlight careful attention to
+                                                                Instruct are available under the Qwen Research
+   entities, times, locations, and quantities.                  License and the Llama 3.1 Community License.
+  - E5 (Factually Incorrect): Emphasize accuracy, verifi-       The annotated dataset, comprising 214,111 conver-
+   cation, and admitting uncertainty over fabrication.
+  - E6 (Topic Deviation): Require maintaining topic co-         sational turns, is published under the CC BY-NC
+   herence and smooth transitions.                              4.0 license.
+  - E7 (Conversationality): Stress context awareness and           All artifacts adhere to strict privacy and ethi-
+   avoiding contradictions/repetition.
+  - E8 (Ambiguity): Demand clear, specific, unambigu-           cal protocols. While the dataset is derived from
+   ous responses.                                               LMSYS-Chat-1M and WildChat, we comply with
+  - E9 (Lack of Sociality): Require polite, respectful,         their respective terms, including non-identification
+   ethical communication.
+  - E10 (Lack of Common Sense): Emphasize providing             and non-distribution mandates.
+   mainstream, reasonable information.
+  - E11 (Uninterpretable): Require grammatical correct-         A.7     Human Subject Evaluation Protocol
+   ness and readability.
+  - NE (No Error): Maintain current quality while poten-        In our human study (in Section 5.3), 24 participants
+   tially enhancing clarity.                                    were recruited offline, and all signed a written in-
+   ## General Principles
+  1. Be specific and actionable - avoid vague instructions
+                                                                formed consent reviewed by the authors’ institu-
+   2. Address the root cause of the identified error            tional ethics committee. Human evaluators were
+   3. Keep the prompt concise yet comprehensive                 asked to engage in free-form, multi-turn dialogues
+  4. Use clear, direct language
+   5. Consider the conversation context and user intent
+                                                                across diverse task-oriented scenarios. Following
+   ## Output Format                                             the interaction sessions, they provided subjective
+   Provide ONLY the rewritten system prompt. Do not             ratings on a 5-point Likert scale to assess model-
+   include:
+  - Explanations or justifications                              level dimensions and turn-level attributes. To en-
+  - Meta-commentary like "Here is the prompt."                  sure a balanced assessment, the order of models
+  - Analysis or reasoning                                       presented to each user was randomized to mitigate
+  - Any text outside the prompt itself
+  The output should be a complete, ready-to-use system          potential sequence bias. The task duration was
+   prompt.                                                      approximately 120 minutes per annotator. Partic-
+                                                                ipants were compensated at a fair rate equivalent
+                                                                to or exceeding the local minimum wage, in accor-
+  Instruction prompt of meta-prompt.
+                                                                dance with ethical research standards.
+  # Current System Prompt
+  {current_prompt}
+  # Conversation Context
+  History:
+  {history_str}
+  User Input:
+
+
+                                                             9743

@@ -1,0 +1,531 @@
+# XtraGPT
+
+[![Models](https://img.shields.io/badge/🤗%20Models-XtraGPT-blue)](https://huggingface.co/Xtra-Computing/XtraGPT-7B)
+[![Dataset](https://img.shields.io/badge/🤗%20Dataset-ReviseQA-green)](https://huggingface.co/datasets/Xtra-Computing/ReviseQA)
+[![Paper](https://img.shields.io/badge/📄%20Paper-arXiv-red)](https://arxiv.org/abs/2505.11336)
+
+## Overview
+
+**XtraGPT** is a family of open-source Large Language Models (LLMs) designed specifically for **human-AI collaborative academic paper revision**. Unlike general-purpose models that often perform surface-level polishing, XtraGPT is fine-tuned to **understand the full context** of a research paper and execute specific, **criteria-guided** revision instructions. XtraGPT is the refiner of [Friend Project: PaperDebugger](https://github.com/PaperDebugger/paperdebugger)
+
+The models were trained on a dataset of 140,000 high-quality instruction-revision pairs derived from top-tier conference papers (ICLR).
+XtraGPT is designed to be easily integrated into agent systems, enabling automatic routing of in-context academic revision tasks (e.g., via skills such as `xtragpt-paper-revision-skill`).
+
+**Key Features:**
+
+* **Context-Aware:** Processes the full paper context to ensure revisions maintain consistency with the global narrative.
+* **Controllable:** Follows specific user instructions aligned with 20 academic writing criteria across 6 sections (Abstract, Introduction, etc.).
+* **Iterative Workflow:** Designed to support the "Human-AI Collaborative" (HAC) lifecycle where authors retain creative control.
+
+![demo](./tests/openclaw-demo/demo.gif)
+
+---
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Model Zoo](#model-zoo)
+- [Training](#training)
+- [Evaluation](#evaluation)
+- [Paper Revision Benchmark (PyPI Package)](#paper-revision-benchmark-pypi-package)
+- [Inference with Transformers](#inference-with-transformers)
+- [Production Usage (OpenClaw Integration)](#production-usage-openclaw-integration)
+- [Model License](#model-license)
+- [Broader Impact](#broader-impact)
+- [Acknowledgements](#acknowledgements)
+- [Citation](#citation)
+
+---
+
+## Installation
+
+```bash
+# Clone repository
+git clone https://github.com/Xtra-Computing/XtraGPT.git
+cd XtraGPT
+
+# Install dependencies
+pip install -r requirements.txt
+
+# For training, also install LLaMA-Factory
+pip install llamafactory
+```
+
+---
+
+## Model Zoo
+
+| Model        | Size | HuggingFace                                             |
+| ------------ | ---- | ------------------------------------------------------- |
+| XtraGPT-1.5B | 1.5B | [Link](https://huggingface.co/Xtra-Computing/XtraGPT-1.5B) |
+| XtraGPT-3B   | 3B   | [Link](https://huggingface.co/Xtra-Computing/XtraGPT-3B)   |
+| XtraGPT-7B   | 7B   | [Link](https://huggingface.co/Xtra-Computing/XtraGPT-7B)   |
+| XtraGPT-14B  | 14B  | [Link](https://huggingface.co/Xtra-Computing/XtraGPT-14B)  |
+
+---
+
+## Training
+
+We use [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory) for fine-tuning.
+
+### Step 1: Prepare Dataset Configuration
+
+Copy `configs/dataset_info.json` to your LLaMA-Factory data directory:
+
+```bash
+cp configs/dataset_info.json /path/to/LLaMA-Factory/data/
+```
+
+### Step 2: Run Training
+
+```bash
+# Set environment variables
+export MODEL_PATH="Qwen/Qwen2.5-7B-Instruct"  # Base model
+export OUTPUT_DIR="./output/xtragpt-7b"        # Output directory
+
+# Run training
+bash scripts/train.sh
+```
+
+Or use LLaMA-Factory directly:
+
+```bash
+llamafactory-cli train configs/train_config.yaml
+```
+
+### Training Configuration
+
+Key hyperparameters (from paper):
+
+| Parameter             | Value          |
+| --------------------- | -------------- |
+| Learning Rate         | 1e-6           |
+| Epochs                | 4              |
+| Batch Size            | 1 (per device) |
+| Gradient Accumulation | 4              |
+| Max Length            | 16384          |
+| Warmup Ratio          | 0.1            |
+
+---
+
+## Evaluation
+
+### Component-wise Evaluation
+
+Evaluates revisions for 6 paper sections: **Title**, **Abstract**, **Introduction**, **Background**, **Evaluation**, **Conclusion**.
+
+Uses modified [AlpacaEval](https://github.com/tatsu-lab/alpaca_eval) for pairwise comparison.
+
+#### Step 1: Setup AlpacaEval
+
+```bash
+# Clone and install AlpacaEval
+git clone https://github.com/tatsu-lab/alpaca_eval.git
+cd alpaca_eval && pip install -e .
+
+# Copy our modified configs
+cp -r ../6_component_evaluation/alpaca_eval_gpt4_turbo_fn/* \
+    src/alpaca_eval/evaluators_configs/alpaca_eval_gpt4_turbo_fn/
+```
+
+> **Important:** Replace `glm_winrate.py` in your AlpacaEval installation with our version, which disables the `instruction_difficulty` feature (not applicable to paper revision tasks) and keeps only length bias correction:
+>
+> ```bash
+> cp 6_component_evaluation/glm_winrate.py $(python -c "import alpaca_eval; print(alpaca_eval.__path__[0])")/metrics/glm_winrate.py
+> ```
+
+#### Step 2: Convert Predictions
+
+```bash
+python 6_component_evaluation/convert_predictions.py \
+    --input_dir ./predictions \
+    --output_dir ./formatted_predictions \
+    --model_name "XtraGPT-7B"
+```
+
+#### Step 3: Run Evaluation
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+
+bash 6_component_evaluation/run_eval.sh \
+    ./formatted_predictions/xtragpt \
+    ./formatted_predictions/baseline \
+    ./eval_results
+```
+
+### Full Paper Evaluation
+
+Uses [AI-Scientist](https://github.com/SakanaAI/AI-Scientist) to evaluate entire papers.
+
+#### Setup
+
+```bash
+git clone https://github.com/SakanaAI/AI-Scientist.git
+cd AI-Scientist && pip install -e .
+```
+
+#### Run Evaluation
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+
+python full_paper_evaluation/ai_scientist_eval.py \
+    --paper_path ./papers/my_paper.pdf \
+    --output ./review_results.json \
+    --model "gpt-4o"
+```
+
+---
+
+## Project Structure
+
+```
+XtraGPT/
+├── configs/
+│   ├── train_config.yaml      # Training configuration
+│   └── dataset_info.json      # Dataset configuration for LLaMA-Factory
+├── scripts/
+│   ├── train.sh               # Training script
+│   └── predict.sh             # Inference script
+├── 6_component_evaluation/    # Component-wise evaluation
+│   ├── alpaca_eval_gpt4_turbo_fn/
+│   ├── convert_predictions.py
+│   └── run_eval.sh
+├── full_paper_evaluation/     # Full paper evaluation
+│   ├── ai_scientist_eval.py
+│   ├── analyze_results.py
+│   └── paper_results/
+├── train/
+│   ├── data/
+│   └── README.md
+├── examples/
+│   └── inference_example.py
+├── xtragpt-paper-revision-skill/
+│   └── skills/skill.xtragpt-paper-revision-skill.yaml
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## Paper Revision Benchmark (PyPI Package)
+
+We provide a standalone Python package for benchmarking paper revision models. Install it directly from PyPI:
+
+```bash
+pip install paper-revision-bench
+```
+
+### Quick Start
+
+```python
+import paper_revision_bench as prb
+
+# Prepare your data
+samples = [
+    {
+        "instruction": "Improve the clarity of this title",
+        "input": "A Study of Neural Networks",
+        "output_1": "Deep Learning for Image Classification",  # Model A output
+        "output_2": "Neural Network Analysis Study",           # Model B output
+    }
+]
+
+# Run evaluation with GPT-4-Turbo as judge
+results = prb.evaluate(
+    samples=samples,
+    judge="openai/gpt-4-turbo",
+    criteria="clarity"
+)
+
+print(f"Model A win rate: {results.win_rate:.1%}")
+```
+
+### Using Paper-Specific Prompts
+
+To reproduce the exact evaluation from our paper:
+
+```python
+from paper_revision_bench import get_paper_eval_prompt, list_paper_sections
+
+# Available sections: title, abstract, introduction, background, evaluation, conclusion
+print(list_paper_sections())
+
+# Get the evaluation prompt for a specific section
+prompt = get_paper_eval_prompt("title")
+```
+
+### CLI Usage
+
+```bash
+# Evaluate from JSON file
+paper-revision-bench evaluate \
+    --input samples.json \
+    --judge openai/gpt-4-turbo \
+    --criteria clarity \
+    --output results.json
+
+# List available criteria and judges
+paper-revision-bench list-criteria
+paper-revision-bench list-judges
+```
+
+### Supported Judges
+
+| Judge             | Model ID                                 |
+| ----------------- | ---------------------------------------- |
+| GPT-4-Turbo       | `openai/gpt-4-turbo`                   |
+| GPT-4o            | `openai/gpt-4o`                        |
+| Claude 3.5 Sonnet | `anthropic/claude-3-5-sonnet-20241022` |
+| Local Ollama      | `ollama/llama3`                        |
+| vLLM Server       | `vllm/model-name`                      |
+
+For advanced usage (length-controlled win rate, weighted overall score across sections), see the [package README](paper_revision_bench/README.md).
+
+---
+
+## Inference with Transformers
+
+To use XtraGPT with the standard Hugging Face `transformers` library, ensure you format your input using the specific tags `<PAPER_CONTENT>`, `<SELECTED_CONTENT>`, and `<QUESTION>`.
+
+```python
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# Select the model size: "XtraGPT-1.5B", "XtraGPT-3B", "XtraGPT-7B", or "XtraGPT-14B"
+model_name = "Xtra-Computing/XtraGPT-7B"
+
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    torch_dtype=torch.float16,
+    device_map="auto"
+)
+
+# Define the Prompt Template tailored for XtraGPT
+prompt_template = """Act as an expert model for improving articles **PAPER_CONTENT**.
+The output needs to answer the **QUESTION** on **SELECTED_CONTENT** in the input. Avoid adding unnecessary length, unrelated details, overclaims, or vague statements.
+Focus on clear, concise, and evidence-based improvements that align with the overall context of the paper.
+<PAPER_CONTENT>
+{paper_content}
+</PAPER_CONTENT>
+<SELECTED_CONTENT>
+{selected_content}
+</SELECTED_CONTENT>
+<QUESTION>
+{user_question}
+</QUESTION>"""
+
+# Example Data (from the "Attention Is All You Need" paper)
+paper_content = "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks in an encoder-decoder configuration. The best performing models also connect the encoder and decoder through an attention mechanism. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely. Experiments on two machine translation tasks show these models to be superior in quality while being more parallelizable and requiring significantly less time to train."
+selected_content = "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks in an encoder-decoder configuration."
+user_question = "help me make it more concise."
+
+# Format the input
+formatted_prompt = prompt_template.format(
+    paper_content=paper_content,
+    selected_content=selected_content,
+    user_question=user_question
+)
+
+messages = [
+    {"role": "user", "content": formatted_prompt}
+]
+
+# Apply chat template
+text = tokenizer.apply_chat_template(
+    messages,
+    tokenize=False,
+    add_generation_prompt=True
+)
+
+model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+
+# Generate
+generated_ids = model.generate(
+    **model_inputs,
+    max_new_tokens=16384,
+    temperature=0.1
+)
+
+generated_ids = [
+    output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+]
+
+response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+print(response)
+```
+
+---
+## Production Usage (OpenClaw Integration)
+
+XtraGPT can be used as a **specialized academic writing backend** in agent systems such as OpenClaw, Cursor, or custom research workflows.
+
+Unlike general-purpose LLMs, XtraGPT is optimized for **high-precision, context-aware paper revision**, and is best used as a **dedicated revision module** that is automatically invoked when needed.
+
+### Install via NPM
+
+We provide an official OpenClaw integration package:
+
+```bash
+npm install xtragpt-paper-revision-skill
+npx xtragpt-paper-revision-skill init
+````
+
+This will scaffold the required **provider**, **skill**, and **routing rules** into your project.
+
+> ⚠️ Prerequisite: You must first serve a self-hosted OpenAI-compatible XtraGPT endpoint (e.g., via vLLM, SGLang, or Ollama).
+
+After installation, configure your endpoint:
+
+```bash
+export XTRAGPT_BASE_URL=http://127.0.0.1:8088/v1
+export XTRAGPT_API_KEY=dummy
+```
+---
+
+### Quick Setup
+
+To integrate XtraGPT into your system:
+
+1. Serve XtraGPT locally (e.g., via vLLM, SGLang, or Ollama)
+2. Register it as a model provider (OpenAI-compatible endpoint recommended)
+3. Add the `xtragpt-paper-revision-skill` skill
+4. Enable routing rules for academic editing
+
+👉 The system will then **automatically dispatch paper revision requests to XtraGPT**, with no special prompting required.
+
+For model access and deployment references, see:
+[https://huggingface.co/Xtra-Computing/XtraGPT-7B](https://huggingface.co/Xtra-Computing/XtraGPT-7B)
+
+---
+
+### How It Works
+
+In a typical workflow:
+
+```text
+User request
+   ↓
+Agent router detects "revision intent"
+   ↓
+xtragpt-paper-revision-skill skill
+   ↓
+XtraGPT
+   ↓
+Revised academic text
+```
+
+---
+
+### Example Requests That Auto-Route to XtraGPT
+
+"Rewrite this motivation paragraph so it clearly reflects the research gap stated in the abstract."
+
+"Revise this introduction to better align with our claimed contributions and avoid inconsistency."
+
+"Improve this paragraph by incorporating the experimental findings mentioned later in the paper."
+
+"This section sounds fluent but unconvincing, strengthen the argument using the paper’s overall narrative."
+
+"Make this contribution paragraph more precise and ensure it matches what we actually evaluate in Section 4."
+
+"Reduce overclaim in this paragraph while keeping it aligned with the evidence presented in the paper."
+
+---
+
+### When to Use XtraGPT
+
+Best suited for **instruction-driven, in-context revision tasks**, such as:
+
+* aligning a paragraph with the paper’s overall narrative (e.g., abstract, contributions, or results)
+* revising content to satisfy specific writing criteria (e.g., strengthen motivation, reduce overclaim)
+* ensuring consistency across sections (e.g., introduction ↔ evaluation ↔ conclusion)
+* refining rebuttals using evidence grounded in the paper
+
+Not intended for:
+
+* open-ended conversation or brainstorming
+* coding or debugging
+* factual Q&A or retrieval tasks
+
+In practice, XtraGPT should be used **alongside a general LLM**, not as a replacement.
+
+---
+
+### Why Not Use a General LLM?
+
+General-purpose LLMs typically operate at the **local text level**, which leads to:
+
+* fluent but **unconvincing or misaligned revisions**
+* weak handling of **cross-section dependencies**
+* limited ability to follow **structured writing criteria**
+* tendency to introduce **overclaim or generic phrasing**
+
+---
+
+### What XtraGPT Does Differently
+
+XtraGPT is trained for **controllable, context-aware revision**, enabling:
+
+* revisions grounded in the **full paper context**, not just local text
+* alignment with **explicit user instructions and writing criteria**
+* consistent argumentation across sections
+* more **defensible and academically faithful** outputs
+
+---
+
+### Recommended Usage Pattern
+
+```text
+General LLM → drafting / reasoning  
+XtraGPT     → in-context revision / alignment
+```
+---
+
+## Model License
+
+This model is released under the **ModelGo Zero License 2.0 (MG0-2.0)**.
+
+MG0-2.0 is a highly permissive open model license designed to facilitate the widest possible adoption and collaboration. It allows for **unrestricted use**, reproduction, distribution, and the creation of derivative works including for commercial purposes, without requiring attribution or imposing copyleft restrictions.
+
+For more details on the license terms, please visit [ModelGo.li](https://www.modelgo.li/) or refer to the `LICENSE` file in the repository.
+
+---
+
+## Broader Impact
+
+The future of AI-assisted academic research raises critical concerns. We analyze these concerns from the perspective of **XtraGPT**.
+
+- **Potential for Human Researcher Passivity**: One widespread concern is the potential for over-reliance on AI, leading to diminished human effort, creativity, and critical thinking, as AI could handle various stages such as idea generation, writing, and reviewing. Our framework, however, adheres to a human-AI collaboration paradigm in which the human researcher retains agency and control. Authors are required to have strong motivation to generate core ideas and initial drafts, reflecting their intellectual investment and desire for recognition. This collaborative process can be viewed as a positive *feedback loop*: the AI’s assistance in refining the presentation of core ideas through revisions can, via psychological phenomena such as the *self-fulfilling prophecy*, *reinforce* the human author’s motivation and drive for high-quality output. This fosters a virtuous cycle that encourages authors to be more active and engaged in producing and refining their work, rather than becoming passive.
+
+- **Proliferation of Low-Quality Papers and Quantity Inflation**: AI, particularly in uncontrolled end-to-end generation scenarios, poses a risk of enabling the mass production of low-quality or superficially polished papers, potentially inflating publication numbers without commensurate scientific value. In our framework, the AI functions as an assistant specifically for improving existing drafts based on explicit instructions and established writing criteria, such as those informed by academic guides. The initial effort required from the human author to develop high-quality ideas and preliminary drafts is significant and remains a crucial and valuable step that underpins the current positive development of the research community. **XtraGPT** is designed to help authors present their already valuable work more effectively and rigorously, implicitly discouraging the dissemination of poorly conceived work and supporting the critical refinement process that characterizes high-quality academic output, thereby helping the community manage article quality rather than promoting quantity over substance.
+
+- **Misalignment with Human Values and Scientific Principles**: Concerns exist that AI might generate content that deviates from human researchers’ values, core scientific principles, ethical considerations, or specific conference norms. **XtraGPT**’s emphasis on controllability and instruction-following is designed to mitigate this risk. The model is trained and operates under constraints that aim to keep it closely aligned with the human author’s core intent and the integrity of the original manuscript. In every collaborative interaction, the human author maintains overall judgment and intellectual control, ensuring that the final revised content reflects their will and adheres to academic standards and ethical guidelines, which are implicitly learned from the training data and explicitly guided by user instructions.
+
+This work specifically targets the iterative process of paper revision, which is crucial for refining scientific communication, and aims to offer novel insights and tools to the community. We strongly advocate for increased attention to the ability of large models to adhere to core scientific principles and community standards, and emphasize that evaluation metrics for AI in academic assistance should move beyond traditional natural language processing scores to incorporate measures of adherence to these critical norms and principles. This consideration is vital for the responsible development and deployment of AI across all research assistance tasks.
+
+---
+
+## Acknowledgements
+
+- [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory)
+- [AlpacaEval](https://github.com/tatsu-lab/alpaca_eval)
+- [AI-Scientist](https://github.com/SakanaAI/AI-Scientist)
+
+---
+
+## Citation
+
+```bibtex
+@misc{nuo2025xtragpt,
+      title={XtraGPT: LLMs for Human-AI Collaboration on Controllable Academic Paper Revision},
+      author={Nuo Chen and Andre Lin HuiKai and Jiaying Wu and Junyi Hou and Zining Zhang and Qian Wang and Xidong Wang and Bingsheng He},
+      year={2025},
+      eprint={2505.11336},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2505.11336},
+}
+```

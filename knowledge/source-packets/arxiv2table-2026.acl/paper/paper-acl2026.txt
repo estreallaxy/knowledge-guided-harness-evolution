@@ -1,0 +1,1516 @@
+===== PDF p.1 =====
+AR X IV 2TABLE : Toward Realistic Benchmarking and Evaluation for
+                        LLM-Based Literature-Review Table Generation
+
+     Weiqi Wang♣♠ , Jiefu Ou♣ , Yangqiu Song♠ , Benjamin Van Durme♣ , Daniel Khashabi♣
+   ♣
+     Center for Speech and Language Processing, Johns Hopkins University, Baltimore, MD, USA
+       ♠
+         Department of Computer Science and Engineering, HKUST, Hong Kong SAR, China
+           {wwangbw, yqsong}@cse.ust.hk, {jou6, vandurme, danielk}@jhu.edu
+
+
+
+                          Abstract                                    User intent prompt
+                                                                         Generate a table that analyzes various image-guided fashion retrieval
+        Literature review tables are essential for sum-              methods, highlighting the evolution of network architectures, the datasets
+                                                                     they were evaluated on, the evaluation criteria used, and the specific loss
+        marizing and comparing collections of scien-                functions applied. The table should provide a detailed comparison of these
+        tific papers. In this paper, we study automatic              aspects to facilitate understanding of differences across the listed papers.
+
+        generation of such tables from a pool of papers                                            (T1) Candidate paper retrieval
+                                                                    IR
+        to satisfy a user’s information need. Building
+                                                                                                                                 inferred table
+        on recent work (Newman et al., 2024), we move
+        beyond oracle settings by (i) simulating well-
+                                                                                        (T2) Paper              (T3) Table Induction:
+        specified yet schema-agnostic user demands                                       Selection            Schema + Value Generation
+        that avoid leaking gold column names or val-
+        ues, (ii) explicitly modeling retrieval noise via         Figure 1: Overview of our proposed task: Given a user’s
+        semantically related but out-of-scope distrac-            demand, a simulated information retrieval (IR) engine
+        tor papers verified by human annotators, and              first retrieves semantically relevant papers. Then, a lan-
+        (iii) introducing a lightweight, annotation-free,         guage model further filters them and induces the table’s
+        utilization-oriented evaluation that decomposes           corresponding schema and values to satisfy the user’s
+        utility (schema coverage, unary cell fidelity,            demand. The grayed region indicates the scope cov-
+        pairwise relational consistency) and measures             ered by our method and benchmark (AR X IV 2TABLE).
+        paper selection via a two-way QA procedure
+        (gold→system and system→gold) with recall,
+        precision, and F1. To support reproducible                specific information extracted from each paper. A
+        evaluation, we introduce AR X IV 2TABLE, a
+                                                                  well-defined schema allows each work to be repre-
+        benchmark of 1,957 tables referencing 7,158
+        papers, with human-verified distractors and               sented as a row of values, enabling structured and
+        rewritten, schema-agnostic user demands. We               transparent comparisons across different studies.
+        also develop an iterative, batch-based gener-                With recent advancements in large language
+        ation method that co-refines paper filtering              models (LLMs; OpenAI, 2025c; DeepSeek-AI
+        and schema over multiple rounds. We vali-                 et al., 2025), several studies (Newman et al., 2024;
+        date the evaluation protocol with human audits
+                                                                  Dagdelen et al., 2024; Sun et al., 2024) have
+        and cross-evaluator checks. Extensive experi-
+        ments show that our method consistently im-
+                                                                  explored generating literature review tables by
+        proves over strong baselines, while absolute              prompting LLMs with a set of pre-selected papers
+        scores remain modest, underscoring the task’s             and the table’s caption. While these efforts rep-
+        difficulty. Our data and code is available at             resent meaningful progress, we argue that the ex-
+        https://github.com/JHU-CLSP/arXiv2Table.                  isting task definition and evaluation protocols are
+                                                                  somewhat unrealistic, thus hindering the practical
+   1    Introduction                                              applicability of generation methods.
+   Literature review tables play a crucial role in scien-            First, existing pipelines assume that all provided
+   tific research by organizing and summarizing large             papers are relevant and should be included in the
+   amounts of information from selected papers into               table. However, in real-world scenarios, distractor
+   a concise and comparable format (Russell et al.,               papers—those that are irrelevant or contain limited
+   1993). At the core of these tables are the schema              useful information—are common (OpenAI, 2025a).
+   and values that define their structure, where schema           Models should be able to identify and filter out such
+   refers to the categories or aspects used to summa-             papers before table construction. Additionally, cur-
+   rize different papers and values correspond to the             rent pipelines use the ground-truth table’s descrip-
+                                                             7602
+Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 7602–7624
+                                July 2-7, 2026 ©2026 Association for Computational Linguistics
+
+===== PDF p.2 =====
+tive caption as the objective for generation. These       our method significantly improves performance on
+captions often lack sufficient context, making it         both fronts. Expert validation further confirms the
+difficult for LLMs to infer an appropriate schema,        reliability of our QA-synthetic evaluations.
+or they may inadvertently reveal the schema and              In summary, our contributions are threefold: (1)
+values, leading to biased evaluations.                    We introduce an improved task definition for liter-
+   In this paper, we introduce our task, as illustrated   ature review tabular generation, benchmarking it
+in Figure 1, which improves upon previous task            in a more realistic scenario by incorporating dis-
+definitions through two key adaptations. First, our       tractor papers and replacing table captions with ab-
+pilot study shows that LLMs struggle to retrieve          stract user demands; (2) We propose an annotation-
+relevant papers from large corpora. To benchmark          free evaluation framework that leverages LLM-
+this, we introduce distractor papers by selecting         generated QA pairs to assess schema-level, single-
+them based on semantic similarity to papers in            cell, and pairwise-cell content overlap, addressing
+the ground-truth table. LLMs must first determine         the limitations of static semantic embeddings and
+which papers should be included before generat-           human evaluation; and (3) We develop a novel it-
+ing the table. Second, we simulate well-specified         erative batch-based table generation method that
+yet schema-agnostic user demands that describe            processes input papers in batches, refining schema
+the goal of curating the table without revealing          definition and paper selection iteratively.
+column labels or cell values. This formulation is            To the best of our knowledge, we are the first to
+more realistic than terse captions while avoiding         introduce a task that simulates real-world use cases
+schema/value leakage that would bias evaluation.          of scientific tabular generation by incorporating
+We build upon the A RXIV D IGES TABLES (New-              user demands and distractor papers, providing a
+man et al., 2024) dataset and construct a sibling         more robust assessment of LLMs in this domain.
+benchmark through human annotation to verify
+the selected distractors, comprising 1,957 tables         2   Related Works
+and 7,158 papers. Meanwhile, current evaluation
+methods rely on static semantic embeddings to             Scientific literature tabular generation Prior
+estimate schema overlap between generated and             works primarily attempt to generate scientific ta-
+ground-truth tables and require human annotations         bles through two stages: schema induction and
+to assess the quality of unseen schemas and val-          value extraction. For schema induction, early meth-
+ues. However, semantic embeddings struggle to             ods like entity-based table generation (Zhang and
+capture nuanced, context-specific variations due to       Balog, 2018) focused on structured input, while re-
+their reliance on pre-trained representations, while      cent work has explored schema induction from user
+human annotation is costly and time-consuming.            queries (Wang et al., 2024b) and comparative as-
+Moreover, the most effective table generation ap-         pect extraction (Hashimoto et al., 2017). For value
+proaches define schemas primarily based on paper          extraction, various approaches such as document-
+abstracts. This method risks missing important            grounded question-answering (Kwiatkowski et al.,
+aspects present in the full text, leading to loosely      2019; Dasigi et al., 2021; Lee et al., 2023), aspect-
+defined schemas with inconsistent granularity.            based summarization (Ahuja et al., 2022), and doc-
+   To address these issues, we propose an                 ument summarization (DeYoung et al., 2021; Lu
+annotation-free evaluation framework that instructs       et al., 2020) have been proposed to extract relevant
+an LLM to synthesize QA pairs based on the                information.
+ground-truth table and assess the generated table            Beyond these methods, several datasets have
+by answering these questions. These QA pairs eval-        been introduced to support scientific table-related
+uate table content overlap across three dimensions:       tasks, such as TableBank (Li et al., 2020), Sci-
+schema-level, single-cell, and pairwise-cell com-         Gen (Moosavi et al., 2021), and SciTabQA (Lu
+parisons. Additionally, we introduce a novel table        et al., 2023). Ramu et al. (2024) propose an
+generation method that batches input papers, iter-        entailment-oriented evaluation complementary to
+atively refining paper selection and schema def-          our QA-based protocol. Recently, Newman et al.
+inition by revisiting each paper multiple times.          (2024) proposed streamlining schema and value
+Extensive experiments using five LLMs demon-              generation with LLMs sequentially and curated a
+strate that they struggle with both selecting relevant    large-scale benchmark for evaluation. However, all
+papers and generating high-quality tables, while          these methods assume a clean and fully relevant
+                                                      7603
+
+===== PDF p.3 =====
+set of papers and rely on predefined captions or           the N × m cells as the values of the table. The
+abstract-based schemas In contrast, we argue for           value of each cell is derived from its respective
+an evaluation approach where candidate papers in-          document according to the aspect defined by the
+clude tangentially relevant or distracting papers,         corresponding column.
+aligning more closely with real-world literature re-
+view workflows (Padmakumar et al., 2025).                  4     AR X IV 2TABLE Construction
+
+Table induction for general domains Other                  We then construct AR X IV 2TABLE based on
+than the scientific domain, table induction is also        the A RXIV D IGES TABLES dataset which consists
+widely studied as text-to-table generation. Prior          of literature tables (extracted from computer sci-
+works attempt this as a sequence-to-sequence               ence papers) and their corresponding captions. We
+task (Li et al., 2023; Wu et al., 2022) or as a            filter out tables that are structurally incomplete or
+question-answering problem (Sundar et al., 2024;           lack full text for all referenced papers. As a re-
+Tang et al., 2023). Similar to these works, our            sult, we are left with 1,957 tables (with captions)
+framework is capable of better handling both struc-        which have rows referring to 7,158 papers. Our
+tured and distractive input for real-world literature      construction involves three pillars: user demand
+review and knowledge synthesis.                            inference (§4.1), a simulated paper retrieval (§4.2)
+                                                           and evaluation through utilization (§4.3).
+3   Task Definition
+                                                           4.1    Constructing User Demand Prompts
+We first define a pipeline consisting of three sub-
+tasks that extend prior definitions and better capture     We simulate well-specified yet schema-agnostic
+the real-world usage of literature review tabular          user demands p by rewriting original survey-table
+generation. For all the following tasks, we are            captions into user-demand-style prompts that better
+given a user demand prompt p, which specifies the          reflect how a researcher would request a compar-
+intended purpose of creating the table.                    ison table. Each rewritten prompt is required to
+   (T1) Candidate Paper Retrieval: We begin                be (i) self-contained, meaning it is understandable
+with a given universe of papers (e.g., the content of      without seeing the table, (ii) goal-oriented, mean-
+Google Scholar or arXiv) from which relevant pa-           ing it clearly states the purpose of the table, and
+pers need to be identified. Given a large collection,      (iii) schema/value non-leaking, meaning it does not
+the goal is to use a search engine (IR) to retrieve        include gold column names, specific cell values, or
+a subset of candidate papers C := {di }M                   direct paraphrases of them.
+                                             i=1 of size
+M , which may include distractor papers—i.e., pa-          Table captions are not appropriate prompts
+pers that resemble the user demand prompt but do           While the input dataset contains one caption per ta-
+not fully satisfy the requirement.                         ble, collected from arXiv papers, these captions are
+   (T2) Paper Selection: Given C, the second               meant to complement tables rather than fully de-
+subtask is to select the relevant subset of size m         scribe them. As a result, they are generally concise.
+(m < M ): R := {di }m    i=1 ⊆ C, which best aligns        For example, a table caption might read: “Perfor-
+with the user demand p. T2 differs from T1 in              mance comparison of different approaches,” which
+scale. Due to the large scale of T1, IR engines            is too vague to understand without seeing the ta-
+must optimize for recall, ensuring that as many rel-       ble. Consequently, using table captions as prompts
+evant papers as possible are retrieved. However,           may not yield a well-defined task. A more contex-
+T2 operates at a smaller scale, where precision is         tually self-contained rewritten user demand might
+the priority, as it focuses on filtering out distractors   instead be: “Draft a table that compares differ-
+and selecting only the most relevant papers.               ent knowledge editing methods, focusing on their
+   (T3) Table Induction: Given the selected pa-            performance on QA datasets.” Operationally, a
+pers R, the objective is to generate a table with m        caption is deemed “under-specified” when it can-
+rows and N columns, where N ≥ 2 (i.e., no single-          not unambiguously determine a comparison goal
+column tables). Each row ri ∈ {r1 , r2 , . . . , rm }      without seeing either the gold schema or table body.
+corresponds to a unique input document di ∈ R,
+and each column cj ∈ {c1 , c2 , . . . , cN } represents    Our prompt construction To address this is-
+a unique aspect of the documents. We refer to              sue, we rewrite the captions of literature review
+these N columns as the schema of the table and             tables into abstract yet descriptive user intentions
+                                                       7604
+
+===== PDF p.4 =====
+Prompt           Content      #Table ↓     #Tokens ↓                                                                   & D S W L R Q  / H Q J W K            8 V H U  ' H P D Q G  / H Q J W K
+
+
+
+
+                                                              ) U H T X H Q F \  R I  7 D E O H V
+ Caption
+                  Schema 101 (5.2%)             1.2                                                        
+                  Value   46 (2.4%)             1.3
+                  Schema      14 (0.7%)         1.0                                                        
+ User Demand
+                  Value       8 (0.4%)          1.0
+                                                                                                           
+Table 1: Overlap statistics between prompts (the origi-
+nal caption or our constructed user demand) and table                                                                                                                              
+content (schema or values). #Table: Number (and %)                                                                                      1 X P E H U  R I  7 R N H Q V
+of tables with at least one token from table content over-
+lapping with the prompt. #Tokens: Average count of                   Figure 2: Distribution of the number of tokens between
+overlapping tokens between table content and prompt.                 original captions and our modified user demands.
+
+
+using GPT-4o. We guide the model with a prompt                       4.2                                         Paper Retrieval Simulation
+(see §B) that explains the rewriting task and spec-
+ifies that the resulting user demand should be suf-                  The unreliability of paper retrieval Next, we
+ficiently contextualized to clearly state the table’s                approach the first subtask, candidate paper retrieval,
+purpose while avoiding the inclusion or direct de-                   by conducting a pilot study to assess whether LMs
+scription of column names or specific values. Here,                  can reliably retrieve relevant papers from a large
+the LLM is used solely for rewriting existing table                  corpus. For each table, we employ a Sentence-
+captions into user demand prompts and for gen-                       BERT (Reimers and Gurevych, 2019) encoder as
+erating QA pairs grounded in ground-truth tables.                    a retrieval engine, selecting papers from the en-
+These reformulations are strictly tied to observed                   tire corpus based on the highest similarity between
+data and do not require external factual knowl-                      the table’s user demand and each paper’s title and
+edge, minimizing risks of contamination or model-                    abstract. We vary the number of retrieved papers
+specific bias.                                                       between 2 and 100 and plot the precision and recall
+   To enforce our constraints, we apply an auto-                     of retrieval against the ground-truth papers in the
+matic leak check immediately after rewriting (Ap-                    original table (Figure 3).
+pendix B) and discard or rewrite any demand that                        We observe consistently low precision and re-
+reveals schema or value information. We also per-                    call across different retrieval sizes, highlighting the
+form manual spot checks during construction to                       challenge of retrieving relevant papers from a noisy
+remove under-specified requests or prompts that                      corpus. This demonstrates that the first subtask is
+implicitly reveal gold schema/value tokens. For                      non-trivial and may introduce noise into subtask
+simplicity, we collect only one user demand per                      T2. However, various information retrieval engines,
+table. More examples are provided in Appendix D.                     such as Google Scholar and Semantic Scholar, can
+                                                                     replace LMs in this subtask. Thus, we decide to
+Table captions vs. constructed user demand                           simulate T1 by adding human-verified distractor
+prompts To verify that our collected user de-                        papers into the candidate pool C, yielding a noisy
+mands align with our objective, we visualize: (1)                    input for T2 (paper selection on C to produce R).
+the distribution of the number of tokens in the orig-                This allows us to focus on evaluating LLMs’ capa-
+inal and modified user demands, and (2) the ratio                    bilities in the T2 and T3 subtasks.
+of captions and user demands of different lengths
+                                                                5 H W U L H Y D O  3 U H F L V L R Q
+
+
+
+
+that have token overlap with the schema or values.
+                                                                                                                                                                                             5 H W U L H Y D O  5 H F D O O
+
+
+
+
+                                                                                                                                                                                        
+From Figure 2, we observe that our modified user
+demands are generally longer than the original cap-                                                                                                                                     
+tions, providing a more detailed description of the
+table’s goal. Furthermore, as shown in Table 1,                                                                                                
+user demands exhibit a significantly lower overlap                                                                      1 X P E H U  R I  5 H W U L H Y H G  3 D S H U V
+ratio with the schema and table values, resulting
+in fewer overlapping tokens. Quantitative statistics                 Figure 3: Precision and recall curves for different num-
+on lexical leakage and overlap are reported in the                   bers of retrieved papers.
+main paper.
+                                                         7605
+
+===== PDF p.5 =====
+Similarity-based paper retrieval Moving for-
+
+
+
+
+                                                                     Ground-truth Table
+                                                                                          CBFIR Networks         Datasets            Metrics        Loss
+ward, we associate distractor paper candidates with                                       GAN                    DARN                Recall@1       TL, AL
+
+each table to simulate a potentially noisy document                                       CN-LexNet              Shopping100K        Recall@20      CL, TL
+                                                                                          ResNet-v2              DeepFashion         Recall@1,10    BCE Loss
+pool before constructing the table. Ideally, distrac-
+tor candidates should be semantically related to the
+table but exhibit key differences that fail to meet the                                   table schema: unary (cell) values: pairwise comparisons:
+
+
+
+
+                                                                    Questions
+                                                                                             Is Dataset    Is CL, TL the loss Is ResNet using more
+user demand. To select such candidates, we adopt                                           included in the function for paper  evaluation metrics
+a retrieve-then-annotate approach. First, we use a                                         table schema?      CN-LexNet?           than GAN?
+SentenceBERT encoder F to obtain embeddings
+for (1) the user demand F (p) and (2) all papers in                                        The ratio of “correct” indicates the recall.
+the corpus {F (di ) | di ∈ U }. Each paper’s embed-                                                Correct!              Correct!                  Incorrect!
+ding is computed by encoding the concatenation
+of its title and abstract. We then rank all papers
+
+
+
+
+                                                                    Generated Table
+                                                                                          Backbone Model Losses            Attributes    Datasets
+di ∈/ R based on the average of two cosine sim-                                           GAN                 TL+AL        Shape         DARN Color
+
+ilarities: (1) the similarity between the candidate                                       CNLexNet            CL+TL        Various       Consumer-to-Shop
+                                                                                          ResNet              Landmark     Various       DeepFashion
+and the user demand, and (2) the average similarity                                                                                                             18
+
+between the candidate and each referenced paper:                        Figure 4: Overview of our proposed LLM-based QA-
+                                                                        synthesis evaluation protocol, where LLMs synthesize
+                                  1 X
+                                      m                                 QA pairs based on the ground-truth table and utilize the
+ s(di ) = cos(F (di ), F (p)) +         cos(F (di ), F (duj )).         generated table to answer them. The ratio of success-
+                                  m j=1
+                                                                        fully answered QA pairs indicate the ratio of informa-
+                                                                        tion preserved.
+   Higher values of s(di ) indicate stronger seman-
+tic relevance, and we select the top 10 ranked pa-
+pers for each table as its distractor candidates.                       4.3                     Evaluation via LLM-based Utilization
+Candidates verification via human annotation                           After constructing the benchmark, we propose eval-
+After selecting these candidates, we conduct hu-                       uating the quality of generated tables from a utiliza-
+man annotations to verify whether they should in-                      tion perspective to address the challenge of aligning
+deed be excluded from the table. Given that an-                        schemas and values despite potential differences
+notating these tables requires expert knowledge in                     in phrasing. This is achieved by synthesizing QA
+computer science, we recruit a trained team of an-                     pairs based on the ground-truth table and using the
+notators with research experience in the field as                      generated table to answer them, or vice versa. The
+annotators. To ensure they are well-prepared for                       flexibility of this QA synthesis allows us to evalu-
+the task, the annotators undergo rigorous training,                    ate multiple dimensions of the table while ensuring
+including pilot annotation exams. Their task is to                     a structured and scalable assessment. An overview
+make a binary decision on whether a given distrac-                     with running examples is shown in Figure 4.
+tor paper—based on its title, abstract, user demand,                   Dimensions of evaluating a table with QAs We
+the ground-truth table, and the titles and abstracts                   introduce three key aspects for evaluating a table in
+of all referenced papers—should be included in the                     terms of its usability: (1) Schema: whether a spe-
+table.                                                                 cific column is included in the generated schema,
+   Each table contains annotations for 10 papers,                      (2) Unary Value: whether a particular cell from the
+with each distractor paper initially assigned to two                   ground-truth table appears in the generated table,
+randomly selected annotators. If both annotators                       (3) Pairwise Value: whether relationships between
+agree on the label, it is finalized. Otherwise, two ad-                two cells remain consistent in the generated table.
+ditional annotators review the paper until a consen-
+sus is reached. In the first round, the inter-annotator                 Recall evaluation We guide GPT-4o in generat-
+agreement (IAA) is 94% based on pairwise agree-                         ing binary QA pairs based on the ground-truth table.
+ment, and the Fleiss’ Kappa (Fleiss, 1971) score                        For the first two aspects, we generate QA pairs for
+is 0.73, indicating a substantial level of agreement.                   all columns and cells, whereas for the third, we
+Finally, for each table, we randomly select a num-                      randomly sample 10 cell pairs per table and synthe-
+ber of distractor papers between [m, 10] and merge                      size them into QA pairs. We then prompt GPT-4o
+them with R to form C.                                                  to answer these questions based on the generated
+                                                                  7606
+
+===== PDF p.6 =====
+table, providing yes/no responses. If the answer         all documents, the final table is created by merg-
+cannot be found, the model is instructed to respond      ing the schemas of all individual tables using exact
+with “no”, and vice versa for “yes”. The ratio of        string matching and copying the corresponding val-
+“yes” answers indicates how well the generated ta-       ues. While this approach reduces the input prompt
+ble preserves the schema, individual values, and         length, it results in highly sparse tables due to in-
+pairwise relationships. This represents the recall       consistent schema across papers and the potential
+of the ground-truth table, measuring how much            omission of relevant information when individual
+original information is retained in generations.         papers lack sufficient context to define comprehen-
+                                                         sive table aspects.
+Precision evaluation To additionally evaluate
+                                                            To overcome both issues, Newman et al. (2024)
+precision, we reverse the process: instead of gener-
+                                                         introduce a two-stage process. In the first stage, the
+ating QA pairs from the ground-truth table, we gen-
+                                                         model selects papers relevant to the user demand
+erate them from the generated table and ask another
+                                                         based on their titles and abstracts, then generates
+LLM (by default, we use the same backbone for
+                                                         a corresponding schema. In the second stage, the
+consistency; cross-model swaps are reported in Ap-
+                                                         model loops through the selected papers and fills
+pendix A.3) to answer them using the ground-truth
+                                                         in the respective rows based on the full text of
+table. The precision score reflects how much of the
+                                                         each document. A minor drawback of this method
+generated table’s content is actually supported by
+                                                         is that the schema is generated solely from titles
+the original data. By computing the ratio of “yes”
+                                                         and abstracts, which may overlook details present
+answers, precision quantifies how much of the gen-
+                                                         only in the full text. Note that this method is the
+erated table is supported by the ground-truth table;
+                                                         strongest recent baseline for scientific tabular gen-
+novel content beyond gold is not credited under
+                                                         eration while other text-to-table methods (Deng
+this automatic protocol. To assess evaluator depen-
+                                                         et al., 2024b) are not directly applicable due to
+dence, we swap QA synthesizer/answerer model
+                                                         different assumptions.
+families and observe stable method rankings; re-
+                                                            To probe whether explicit reasoning mitigates
+sults are in Appendix A.3.
+                                                         multi-step synthesis errors, we also evaluate COT-
+5   Tabular Generation Methodologies                     augmented variants that add lightweight chain-of-
+                                                         thought style scaffolding to the strongest baseline
+We explore a range of methods to evaluate on our         and to our method.
+proposed task, starting from several baselines in-
+spired by prior work (§5.1) and then our proposed        5.2 Iterative Batch-based Tabular Generation
+approach (§5.2).                                         Then, we introduce our proposed method for gen-
+5.1 Baseline Methods                                     erating literature review tables. Our approach con-
+                                                         sists of three steps: (A) key information extraction,
+We first introduce three methods for generating lit-     (B) paper batching, and (C) paper selection and
+erature review tables to evaluate their performance      schema refinement, where the latter two steps can
+on our task and use them as baselines for our pro-       be iterated multiple times.
+posed method. For easy reference, these methods
+are termed numerically.                                  (A) Key Information Extraction Processing
+   First, Baseline 1 generates the table in a one-step   multiple papers simultaneously using their full text
+process. It takes all available papers R and the user    often results in excessively long prompts that ex-
+demand p as input, and the model is asked to select      ceed the LLMs’ context window. To address this,
+all relevant papers and output a table with a well-      we first shorten each paper by instructing the LLM
+defined schema and filled values in a single round       to extract key information from the full text that is
+of conversation. However, this method struggles          relevant to the user’s requirements. Notably, we do
+with extremely long prompts that exceed the LLMs’        not rely solely on the abstract, as important details
+context window when generating large tables.             often appear in the full text but are omitted from the
+   To address this issue, Baseline 2 processes pa-       abstract. For each paper, we provide the LLM with
+pers individually. For each document, the model          its title, abstract, and full text, along with the user’s
+decides whether it should be included based on           request, and ask it to generate a concise paragraph
+the user demand. If included, the model gener-           that preserves all potentially relevant details. These
+ates a table for that document. After processing         summary paragraphs serve as condensed represen-
+                                                     7607
+
+===== PDF p.7 =====
+Paper (T2)                 Schema               Unary Value       Pairwise Value
+Backbone Model         Method                                                                                                           Avg
+                                              R       P        F1      P       R      F1      P       R     F1      P      R     F1
+                       Baseline 1            52.8    50.0   51.4      31.3    37.7    34.2   29.6    40.4   34.2   28.4   31.8   30.0   32.8
+                       Baseline 2            65.4    63.0   64.2      26.7    69.3    38.5   17.0    56.8   26.2   11.2   22.5   15.0   26.6
+LLaMa-3.3 (70B)
+                       Newman et al.         61.9    60.0   60.9      36.4    40.5    38.3   32.8    44.5   37.8   29.5   30.2   29.8   35.3
+                       Ours                  69.3    66.5   67.9      41.9    55.4    47.7   43.1    62.6   51.1   36.4   46.9   41.0   46.6
+                       Baseline 1            54.7    51.5   53.0      33.1    34.5    33.8   31.6    30.4   31.0   15.5   24.7   19.0   27.9
+                       Baseline 2            66.8    64.0   65.4      27.4    65.0    38.5   22.7    47.4   30.7   17.8   30.7   22.6   30.6
+Mistral-Large (123B)
+                       Newman et al.         67.9    65.5   66.7      39.9    41.6    40.7   34.7    46.3   39.7   29.9   35.1   32.3   37.6
+                       Ours                  71.3    68.0   69.6      45.4    56.7    50.4   43.3    61.5   50.8   42.0   49.2   45.3   48.8
+                       Baseline 1            57.5    55.0   56.2      38.7    41.7    40.1   32.5    43.8   37.3   28.7   31.8   30.1   35.8
+                       Baseline 2            69.8    67.0   68.4      34.9    69.0    46.4   27.1    55.5   36.4   25.7   32.7   28.8   37.2
+DeepSeek-V3 (685B)
+                       Newman et al.         70.9    68.5   69.7      39.4    44.2    41.7   36.6    49.2   42.0   33.3   36.5   34.8   39.5
+                       Ours                  74.3    71.0   72.6      39.6    56.9    46.7   47.7    65.2   55.1   40.4   49.8   44.6   48.8
+                       Baseline 1            55.9    53.0   54.4      32.0    35.7    33.7   28.9    39.3   33.3   25.0   31.0   27.7   31.6
+                       Baseline 2            68.2    65.0   66.6      31.5    67.7    43.0   27.7    50.8   35.9   21.6   28.3   24.5   34.5
+GPT-4o-mini
+                       Newman et al.         69.3    66.0   67.6      40.3    45.9    42.9   38.3    47.5   42.4   35.0   37.8   36.3   40.5
+                       Ours                  72.6    69.0   70.8      46.5    59.7    52.3   49.0    66.7   56.5   43.5   51.9   47.3   52.0
+                       Baseline 1            58.5    56.0   57.2      35.8    43.2    39.2   36.9    41.8   39.2   29.0   34.7   31.6   36.7
+                       Baseline 2            70.2    67.0   68.6      34.2    68.0    45.5   27.9    56.0   37.2   19.4   33.6   24.6   35.8
+                       Newman et al.         71.3    68.5   69.9      45.0    47.9    46.4   38.7    49.8   43.6   36.9   40.0   38.4   42.8
+GPT-4o
+                       Newman et al. + COT   72.5     –      –        47.0    49.0    48.0   40.0    51.0   45.0   39.0   42.0   40.5   44.5
+                       Ours                  74.6    71.5   73.0      51.5    59.4    55.2   46.1    66.7   54.5   45.9   55.7   50.3   53.3
+                       Ours + COT            75.8     –      –        53.0    60.5    56.5   48.0    68.0   56.3   47.0   57.0   51.5   55.0
+GPT-o3                 Ours                  77.2     –        –      55.0    62.0    58.3   50.0    70.0   58.3   49.0   59.0   53.5   56.7
+
+
+Table 2: Tabular evaluation results (%) on AR X IV 2TABLE. All tasks use P/R/F1 as evaluation metrics. The best
+within each backbone is underlined and the best overall is bold.
+
+tations of the papers for subsequent processing.                       iterations allow the schema and table contents to
+                                                                       progressively improve, ensuring better alignment
+(B) Paper Batching Next, we divide all key in-
+                                                                       with user demands. In each iteration, the batches
+formation paragraphs into smaller batches. Process-
+                                                                       are newly randomized so that each paper is com-
+ing too many papers at once negatively affects the
+                                                                       pared with different subsets, enabling more robust
+model’s performance (as demonstrated by the com-
+                                                                       decision-making and reducing bias from specific
+parison of Baseline 1 in Table 2), whereas batching
+                                                                       batch compositions. This iterative refinement also
+facilitates more efficient comparisons within each
+                                                                       mitigates errors from earlier batches by revisiting
+                            l a mbatch size of 4 and
+batch. For simplicity, we set
+                                                                       and adjusting prior decisions based on newly pro-
+randomly partition R into |R| 4    batches.                            cessed information. After the final iteration, we
+(C) Paper Selection and Schema Refinement                              re-verify each populated cell directly against the
+We initialize an empty schema and table, then se-                      source text; unsupported values are set to N/A.
+quentially process each batch with the LLM by
+providing it with the user’s request and summaries                      6     Experiments and Analyses
+of batched papers. The LLM is instructed to (1)
+                                                                        6.1     Experiment Setup
+decide whether each paper should be included or
+removed based on its key information and (2) refine                    To demonstrate the generalizability of our method
+the schema based on the current batch of papers.                       and evaluations, we conduct experiments us-
+Schema refinement involves adding or removing                          ing three proprietary and three open-source
+specific columns or modifying existing values to                       LLMs as backbone model representatives: GPT-
+align with different formats. For new papers that                      4o (OpenAI, 2024b), GPT-4o-mini (OpenAI,
+are deemed suitable for inclusion yet are not in the                   2024a), GPT-o3 (OpenAI, 2025b), DeepSeek-V3
+current table, we prompt the LLM to insert a new                       (685B; DeepSeek-AI et al., 2024), LLaMa-3.3
+row with the extracted fields. This ensures that the                   (70B; Dubey et al., 2024), and Mistral-Large
+table remains dynamically structured, continuously                     (123B; Mistral-AI, 2024). We apply all baseline
+adapting to new information while maintaining con-                     methods and our proposed method to each model
+sistency across batches.                                               and use our evaluation framework to assess the
+   Afterward, we iterate steps B and C for k itera-                    quality of the generated tables based on our bench-
+tions. Here k is a hyper-parameter and we set k = 5                    mark, focusing on four aspects: paper selection
+in our experiments. The rationale is that multiple                     (Paper), schema content overlap (Schema), single-
+                                                                    7608
+
+===== PDF p.8 =====
+LLAMA-3.3 (70B)                     Mistral-Large (123B)                    DeepSeek-V3 (685B)                          GPT-4o
+                                                     50                                       50
+                                                                                                                                  50
+            40                                       40                                       40
+                                                                                                                                  40
+Avg Score
+
+            30                                       30                                       30                                  30
+            20                                       20                                       20                                  20
+            10                                       10                                       10                                  10
+             0                                        0                                        0                                   0
+                                              . s                                      . s                                 l. s                                l. s
+                      line 1 seline 2 an et al Our             line 1 seline 2 an et al Our                1       2
+                                                                                                       line aseline an et a Our
+                                                                                                                                               1       2
+                                                                                                                                           line aseline an et a Our
+                 Base      Ba        w m                  Base      Ba        w m                  Base    B         w m               Base    B         w m
+                                  Ne                                       Ne                                     Ne                                  Ne
+
+ Figure 5: Average performance scores of four backbone LLMs across four different methods. The comparison
+ highlights the consistent improvement of our proposed method over existing baselines and prior work.
+
+ cell value overlap (Unary Value), and comparisons                                            trend holds across models: systems often identify
+ across cells (Pairwise Value)1 . For paper selection                                         individual entries correctly but fail to capture re-
+ (T2) and all T3 dimensions, we report precision                                              lations between them, highlighting the difficulty
+ (P), recall (R), and F1. For the COT and GPT-o3                                              of preserving complex relational comparisons in
+ variants, T2 P/F1 are omitted on this slice due to                                           generated tables.
+ compute limits. Due to cost, GPT-o3 is evaluated                                             (4) Our proposed method improves perfor-
+ on a fixed subset.                                                                           mance across all aspects and models. Across
+                                                                                              backbone models and evaluation criteria, our
+ 6.2 Main Evaluation Results                                                                  method consistently outperforms the baselines. It
+ We report the main results in Table 2 and summa-                                             achieves the strongest overall results and the high-
+ rize key findings below; a model-wise comparison                                             est unary/pairwise F1, demonstrating robustness in
+ across methods is shown in Figure 5.                                                         both distractor handling and precise table genera-
+ (1) All methods and models struggle to distin-                                               tion.
+ guish relevant papers from distractors. Even at                                              (5) Larger models lead to better performance.
+ their best settings, LLaMa-3.3 and GPT-4o reach                                              For open-source LLMs, increasing model size con-
+ only 65.4–74.6% recall and 60.0–71.5% precision                                              sistently improves results under the same method.
+ in T2 (Table 2), indicating substantial distractor                                           For GPT-4o, adding CoT yields consistent T3 gains
+ inclusion or missed relevant papers depending on                                             with similar or slightly higher token budgets, while
+ the operating point. We also find that processing                                            GPT-o3 attains the highest T3 scores overall, sug-
+ papers individually, or using only abstracts for in-                                         gesting that stronger backbones better exploit itera-
+ clusion decisions, performs better than concatenat-                                          tive batching.
+ ing full texts, suggesting that overly long prompts
+ can weaken per-paper inclusion decisions.                                                    6.3 Validation of Utilization-Based Evaluation
+ (2) Aligning generated schemas with the ground-                                              To verify the reliability of synthesizing QA pairs
+ truth table remains challenging. Among the base-                                             using LLMs for evaluating tabular data, we con-
+ lines, the second method tends to achieve higher                                             duct two complementary expert assessments. First,
+ recall (e.g., 69.3% with LLaMa-3.3), largely be-                                             we invited the authors (as domain experts) to
+ cause it produces more columns and thus overlaps                                             manually inspect a random sample of 200 QA
+ more often with the ground-truth schema. Other                                               pairs—spanning schema-level, unary value, and
+ methods have notably lower recall, indicating that                                           pairwise value comparisons. Annotators were
+ generating meaningful columns that match the gold                                            asked to assess (1) whether each QA pair is firmly
+ structure remains difficult.                                                                 grounded in the source table, and (2) whether the
+ (3) While unary values are well preserved, pair-                                             LLM’s answer is correct based on the generated
+ wise comparisons suffer substantial losses. Most                                             target table. As shown in Table 3, the expert accep-
+ methods, especially ours, achieve relatively strong                                          tance rates exceed 98% in all categories, confirm-
+ unary F1 scores, whereas extracting and preserving                                           ing the quality of the synthesized QA pairs. Note
+ pairwise relationships remains challenging. This                                             that Table 4 measures evaluator–human agreement
+     1
+                                                                                              (reliability), not end-to-end table quality, so inter-
+       For paper selection, recall is emphasized instead of preci-
+ sion since missing relevant papers is more critical than includ-                             method gaps are expected to be smaller than in
+ ing slightly noisy ones in literature review tasks.                                          Table 2.
+                                                                                         7609
+
+===== PDF p.9 =====
+Table     Schema    Unary Value         Pairwise Value                                                            6 F K H P D                              3 D L U Z L V H  9 D O X H
+                                                                                                                    8 Q D U \  9 D O X H                    $ Y H U D J H
+  Source    99.5%         100%               98.5%                                                   
+  Target    98.5%         99.5%              97.0%
+
+
+
+
+                                                                   3 H U I R U P D Q F H    
+
+===== PDF p.10 =====
+  
+Table 3: Expert acceptance rate for the synthesized QA
+pairs sampled from our evaluations.
+                                                                                                     
+Method          LLM Rate     Human Rate        Agreement
+                                                                                                     
+Baseline 1        39.1%           39.6%          97.3%                                                                                                                                  
+Baseline 2        57.1%           57.3%          98.2%                                                                                , W H U D W L R Q V
+Newman et al.     42.9%           43.0%          98.6%
+Ours              57.3%           57.5%          98.0%        Figure 6: Ablation study on the number of iterations for
+                                                              our iterative batch-based table generation method.
+Table 4: Comparison between GPT-4o and human an-
+notators on 300 QA pairs. We report the proportion of         macro-F1 is achieved at b=4, k=4 (53.1), while
+“yes” answers by each and their overall agreement.
+                                                              k=5 yields almost no further improvement. Across
+                                                              seeds, variability is modest (≤ 0.5 points).
+   Second, we conducted an additional human
+study to assess whether our LLM-based evaluation                                                    k      Macro-F1 by batch size                           Std. dev. (avg)
+aligns with human judgment across different gener-                                                         b=2 b=4         b=6                                over seeds
+ation methods. For each method, we sampled 300                                                      2      50.1   50.7                50.5                               0.5
+QA pairs, answered them using both LLMs and                                                         3      51.8   52.2                52.0                               0.4
+                                                                                                    4      52.6   53.1                52.9                               0.4
+human annotators, and measured the agreement                                                        5      52.7   53.0                52.9                               0.4
+rate. As shown in Table 4, LLM and human “yes”
+response rates are highly consistent, with over 97%           Table 5: Macro-F1 across iterations k and batch sizes b.
+agreement across all methods. These results rein-             Gains saturate by k ≈ 4–5, with b=4 slightly ahead.
+force the robustness of our evaluation framework,
+demonstrating that LLM-synthesized QA pairs pro-                 Figure 6 shows the same trend across iterations.
+vide a scalable and trustworthy proxy for human               Most gains occur before iteration 4, after which
+judgment in assessing semantically diverse tabular            performance plateaus. Later rounds may also intro-
+outputs. Specifically, these results indicate that the        duce unsupported values that slightly reduce pre-
+high agreement is not driven by an inherent bias of           cision. We further observe that pairwise F1 bene-
+LLMs toward their own generated QA pairs.                     fits the most, suggesting that repeated cross-batch
+                                                              comparisons mainly improve relational consistency.
+6.4 Batch Size and Iteration Sensitivity                      Overall, these results support k=4 or k=5 as a
+We analyze the effect of batch size b and itera-              practical default.
+tion count k in our iterative pipeline, which repeat-
+                                                              7                      Conclusions
+edly performs paper selection and schema/table
+refinement over multiple batches. Using GPT-4o                In this work, we introduce an improved literature
+as the backbone, we evaluate 60 tables sampled                review table generation task that incorporates dis-
+to cover a range of sizes and schema complex-                 tractor papers and replaces table captions with ab-
+ity. We vary b ∈ {2, 4, 6} and k ∈ {2, . . . , 5},            stract user demands to better align with real-world
+and report T3 macro-F1, the average of Schema,                scenarios, and curated an associated benchmark.
+Unary, and Pairwise F1. Each configuration is run             Additionally, we propose an annotation-free evalu-
+with two seeds and averaged, with standard devia-             ation framework using LLM-synthesized QA pairs
+tion shown where relevant. Token budgets follow               and a novel method to enhance table generation.
+the main-experiment prompt templates, and per-                Our experiments show that current LLMs and ex-
+iteration context lengths remain below 128K.                  isting methods struggle with our task, while our
+   Table 5 shows that performance improves                    approach significantly improves performance. We
+steadily over the first few iterations, confirming            envision that our work paves the way for more au-
+the benefit of iterative refinement across different          tomated and scalable literature review table genera-
+paper subsets. Gains saturate around k ≈ 4–5, with            tion, ultimately facilitating the efficient synthesis
+b=4 performing slightly better overall. The best              of scientific knowledge in large-scale applications.
+                                                           7610
+
+===== PDF p.11 =====
+Limitations                                               Face Hub (Wolf et al., 2020) and proprietary GPT
+                                                          models through their official API2 . The number of
+A minor limitation is that our work uses A RX -
+                                                          these models, if available, is marked in Table 2. All
+IV D IGES TABLES as the source of literature review
+                                                          associated licenses for these models permit user
+tables for subsequent data reconstruction. How-
+                                                          access for research purposes, and we commit to
+ever, Newman et al. (2024) have included their
+                                                          following all terms of use.
+pipeline for scalably extracting literature review ta-
+                                                             When prompting GPT-4o to generate user de-
+bles from scientific papers, thus resolving the data
+                                                          mands and synthetic QA questions, we explicitly
+reliance gap (Ou et al., 2025; Gao et al., 2025).
+                                                          state in the prompt that the LLM should not gen-
+Beyond the computer science domain, our formu-
+                                                          erate any content that contains personal privacy vi-
+lation and methodology are readily applicable to
+                                                          olations, promotes violence, racial discrimination,
+other scientific fields such as medicine, physics,
+                                                          hate speech, sexual, or self-harm contents. We also
+and social sciences, where structured comparisons
+                                                          manually inspect a random sample of 100 data en-
+across publications are equally valuable. Moreover,
+                                                          tries generated by GPT-4o for offensive content,
+the core task—generating structured tables from
+                                                          and none are detected. Therefore, we believe that
+noisy, unstructured input with under-specified in-
+                                                          our dataset is safe and will not yield any negative
+tent—extends naturally to real-world applications
+                                                          or harmful impact.
+like news fact aggregation, personalized knowledge
+                                                             Our human annotations are conducted by trained
+card generation, and structured database population
+                                                          graduate-level annotators (n=19), compensated
+from web or legal documents.
+                                                          above local minimum wage. They have sufficient
+   Another limitation of our work is its reliance         experience in data collection for training large lan-
+on GPT-4o, a proprietary LLM, for benchmark               guage models and are proficient in English, primar-
+curation and subsequent evaluation, which may             ily from Asia. They receive thorough training on
+introduce several issues. First, it raises concerns       the task and are reminded to have a clear under-
+about data contamination (Deng et al., 2024a; Dong        standing of the task instructions before proceeding
+et al., 2024), as the model may generate user de-         to annotation. The high level of inter-agreement
+mands (during benchmark curation) and synthesis           also confirms the quality of our annotation. The
+evaluation questions (when evaluating a generated         expert annotators have agreed to participate as their
+table against the ground truth) that are similar to       contribution to the paper without receiving any
+its training data, potentially leading to inflated per-   compensation.
+formance in table generation. A data provenance
+check (Longpre et al., 2024) can be further imple-        Acknowledgments
+mented to address this issue. Second, the bench-
+mark and evaluation process may inherit the in-           We thank Muhan Gao and the JHU CLSP commu-
+ternal knowledge or semantic distribution biases          nity for their discussions and inspiration, and the
+of GPT-4o, which could skew the evaluation of             HKUST KnowComp community for their help with
+other LLMs and reduce the generalizability of our         data annotation. The authors of this paper were
+findings. Lastly, a minor issue is scalability, as cu-    supported by the ITSP Platform Research Project
+rating larger datasets using a proprietary model can      (ITS/189/23FP) from the Innovation and Tech-
+be resource-intensive and may limit accessibility         nology Commission of Hong Kong SAR, China;
+when extending our framework to other literature          the AoE (AoE/E-601/24-N), RIF (R6021-20), and
+or domains. Future work can explore the use of            GRF (16205322) from the Research Grants Coun-
+open-source LLMs to replicate the entire process          cil of Hong Kong SAR, China; and the ONR grant
+for convenient adaptation to other tabular datasets.      (N0001424-1-2089) from the U.S. Office of Naval
+                                                          Research.
+Ethics Statement
+The A RXIV D IGES TABLES (Newman et al., 2024)            References
+dataset used in our work is shared under the Open         Ojas Ahuja, Jiacheng Xu, Akshay Gupta, Kevin
+Data Commons License, which grants us access                Horecka, and Greg Durrett. 2022. ASPECTNEWS:
+to it and allows us to improve and redistribute it          aspect-oriented summarization of news documents.
+for research purposes. Regarding language models,           In Proceedings of the 60th Annual Meeting of the
+we access all open-source LMs via the Hugging                2
+                                                                 https://platform.openai.com/
+
+                                                      7611
+
+===== PDF p.12 =====
+Association for Computational Linguistics (Volume           Yuxuan Liu, Yuyang Zhou, Y. X. Zhu, Yanhong Xu,
+  1: Long Papers), ACL 2022, Dublin, Ireland, May             Yanping Huang, Yaohui Li, Yi Zheng, Yuchen Zhu,
+  22-27, 2022, pages 6494–6506. Association for Com-          Yunxian Ma, Ying Tang, Yukun Zha, Yuting Yan,
+  putational Linguistics.                                     Z. Z. Ren, Zehui Ren, Zhangli Sha, Zhe Fu, Zhean
+                                                              Xu, Zhenda Xie, Zhengyan Zhang, Zhewen Hao,
+John Dagdelen, Alexander Dunn, Sanghoon Lee,                  Zhicheng Ma, Zhigang Yan, Zhiyu Wu, Zihui Gu, Zi-
+  Nicholas Walker, Andrew S Rosen, Gerbrand Ceder,            jia Zhu, Zijun Liu, Zilin Li, Ziwei Xie, Ziyang Song,
+  Kristin A Persson, and Anubhav Jain. 2024. Struc-           Zizheng Pan, Zhen Huang, Zhipeng Xu, Zhongyu
+  tured information extraction from scientific text with      Zhang, and Zhen Zhang. 2025. Deepseek-r1: Incen-
+  large language models. Nature Communications,               tivizing reasoning capability in llms via reinforce-
+  15(1):1418.                                                 ment learning. Preprint, arXiv:2501.12948.
+
+Pradeep Dasigi, Kyle Lo, Iz Beltagy, Arman Cohan,          DeepSeek-AI, Aixin Liu, Bei Feng, Bing Xue, Bingx-
+  Noah A. Smith, and Matt Gardner. 2021. A dataset           uan Wang, Bochao Wu, Chengda Lu, Chenggang
+  of information-seeking questions and answers an-           Zhao, Chengqi Deng, Chenyu Zhang, Chong Ruan,
+  chored in research papers. In Proceedings of the           Damai Dai, Daya Guo, Dejian Yang, Deli Chen,
+  2021 Conference of the North American Chapter of           Dongjie Ji, Erhang Li, Fangyun Lin, Fucong Dai,
+  the Association for Computational Linguistics: Hu-         Fuli Luo, Guangbo Hao, Guanting Chen, Guowei
+  man Language Technologies, NAACL-HLT 2021, On-             Li, H. Zhang, Han Bao, Hanwei Xu, Haocheng
+  line, June 6-11, 2021, pages 4599–4610. Association        Wang, Haowei Zhang, Honghui Ding, Huajian Xin,
+  for Computational Linguistics.                             Huazuo Gao, Hui Li, Hui Qu, J. L. Cai, Jian Liang,
+                                                             Jianzhong Guo, Jiaqi Ni, Jiashi Li, Jiawei Wang,
+DeepSeek-AI, Daya Guo, Dejian Yang, Haowei Zhang,            Jin Chen, Jingchang Chen, Jingyang Yuan, Junjie
+  Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu,           Qiu, Junlong Li, Junxiao Song, Kai Dong, Kai Hu,
+  Shirong Ma, Peiyi Wang, Xiao Bi, Xiaokang Zhang,           Kaige Gao, Kang Guan, Kexin Huang, Kuai Yu, Lean
+  Xingkai Yu, Yu Wu, Z. F. Wu, Zhibin Gou, Zhihong           Wang, Lecong Zhang, Lei Xu, Leyi Xia, Liang Zhao,
+  Shao, Zhuoshu Li, Ziyi Gao, Aixin Liu, Bing Xue,           Litong Wang, Liyue Zhang, Meng Li, Miaojun Wang,
+  Bingxuan Wang, Bochao Wu, Bei Feng, Chengda Lu,            Mingchuan Zhang, Minghua Zhang, Minghui Tang,
+  Chenggang Zhao, Chengqi Deng, Chenyu Zhang,                Mingming Li, Ning Tian, Panpan Huang, Peiyi Wang,
+  Chong Ruan, Damai Dai, Deli Chen, Dongjie Ji,              Peng Zhang, Qiancheng Wang, Qihao Zhu, Qinyu
+  Erhang Li, Fangyun Lin, Fucong Dai, Fuli Luo,              Chen, Qiushi Du, R. J. Chen, R. L. Jin, Ruiqi Ge,
+  Guangbo Hao, Guanting Chen, Guowei Li, H. Zhang,           Ruisong Zhang, Ruizhe Pan, Runji Wang, Runxin
+  Han Bao, Hanwei Xu, Haocheng Wang, Honghui                 Xu, Ruoyu Zhang, Ruyi Chen, S. S. Li, Shanghao
+  Ding, Huajian Xin, Huazuo Gao, Hui Qu, Hui Li,             Lu, Shangyan Zhou, Shanhuang Chen, Shaoqing Wu,
+  Jianzhong Guo, Jiashi Li, Jiawei Wang, Jingchang           Shengfeng Ye, Shengfeng Ye, Shirong Ma, Shiyu
+  Chen, Jingyang Yuan, Junjie Qiu, Junlong Li, J. L.         Wang, Shuang Zhou, Shuiping Yu, Shunfeng Zhou,
+  Cai, Jiaqi Ni, Jian Liang, Jin Chen, Kai Dong, Kai         Shuting Pan, T. Wang, Tao Yun, Tian Pei, Tianyu Sun,
+  Hu, Kaige Gao, Kang Guan, Kexin Huang, Kuai                W. L. Xiao, and Wangding Zeng. 2024. Deepseek-v3
+  Yu, Lean Wang, Lecong Zhang, Liang Zhao, Litong            technical report. CoRR, abs/2412.19437.
+  Wang, Liyue Zhang, Lei Xu, Leyi Xia, Mingchuan
+                                                           Chunyuan Deng, Yilun Zhao, Xiangru Tang, Mark Ger-
+  Zhang, Minghua Zhang, Minghui Tang, Meng Li,
+                                                             stein, and Arman Cohan. 2024a. Investigating data
+  Miaojun Wang, Mingming Li, Ning Tian, Panpan
+                                                             contamination in modern benchmarks for large lan-
+  Huang, Peng Zhang, Qiancheng Wang, Qinyu Chen,
+                                                             guage models. In Proceedings of the 2024 Con-
+  Qiushi Du, Ruiqi Ge, Ruisong Zhang, Ruizhe Pan,
+                                                             ference of the North American Chapter of the As-
+  Runji Wang, R. J. Chen, R. L. Jin, Ruyi Chen,
+                                                             sociation for Computational Linguistics: Human
+  Shanghao Lu, Shangyan Zhou, Shanhuang Chen,
+                                                             Language Technologies (Volume 1: Long Papers),
+  Shengfeng Ye, Shiyu Wang, Shuiping Yu, Shunfeng
+                                                             NAACL 2024, Mexico City, Mexico, June 16-21, 2024,
+  Zhou, Shuting Pan, S. S. Li, Shuang Zhou, Shaoqing
+                                                             pages 8706–8719. Association for Computational
+  Wu, Shengfeng Ye, Tao Yun, Tian Pei, Tianyu Sun,
+                                                             Linguistics.
+  T. Wang, Wangding Zeng, Wanjia Zhao, Wen Liu,
+  Wenfeng Liang, Wenjun Gao, Wenqin Yu, Wentao             Zheye Deng, Chunkit Chan, Weiqi Wang, Yuxi Sun,
+  Zhang, W. L. Xiao, Wei An, Xiaodong Liu, Xiaohan           Wei Fan, Tianshi Zheng, Yauwai Yim, and Yangqiu
+  Wang, Xiaokang Chen, Xiaotao Nie, Xin Cheng, Xin           Song. 2024b. Text-tuple-table: Towards information
+  Liu, Xin Xie, Xingchao Liu, Xinyu Yang, Xinyuan Li,        integration in text-to-table generation via global tuple
+  Xuecheng Su, Xuheng Lin, X. Q. Li, Xiangyue Jin,           extraction. In Proceedings of the 2024 Conference on
+  Xiaojin Shen, Xiaosha Chen, Xiaowen Sun, Xiaoxi-           Empirical Methods in Natural Language Processing,
+  ang Wang, Xinnan Song, Xinyi Zhou, Xianzu Wang,            EMNLP 2024, Miami, FL, USA, November 12-16,
+  Xinxia Shan, Y. K. Li, Y. Q. Wang, Y. X. Wei, Yang         2024, pages 9300–9322. Association for Computa-
+  Zhang, Yanhong Xu, Yao Li, Yao Zhao, Yaofeng               tional Linguistics.
+  Sun, Yaohui Wang, Yi Yu, Yichao Zhang, Yifan Shi,
+  Yiliang Xiong, Ying He, Yishi Piao, Yisong Wang,         Jay DeYoung, Iz Beltagy, Madeleine van Zuylen, Bailey
+  Yixuan Tan, Yiyang Ma, Yiyuan Liu, Yongqiang Guo,           Kuehl, and Lucy Lu Wang. 2021. Ms\ˆ2: Multi-
+  Yuan Ou, Yuduan Wang, Yue Gong, Yuheng Zou, Yu-             document summarization of medical studies. In Pro-
+  jia He, Yunfan Xiong, Yuxiang Luo, Yuxiang You,             ceedings of the 2021 Conference on Empirical Meth-
+                                                       7612
+
+===== PDF p.13 =====
+ods in Natural Language Processing, EMNLP 2021,            40th International ACM SIGIR Conference on Re-
+  Virtual Event / Punta Cana, Dominican Republic, 7-         search and Development in Information Retrieval
+  11 November, 2021, pages 7494–7513. Association            (SIGIR 2017), Tokyo, Japan, August 11, 2017, vol-
+  for Computational Linguistics.                             ume 1888 of CEUR Workshop Proceedings, pages
+                                                             69–82. CEUR-WS.org.
+Yihong Dong, Xue Jiang, Huanyu Liu, Zhi Jin, Bin Gu,
+  Mengfei Yang, and Ge Li. 2024. Generalization or        Tom Kwiatkowski, Jennimaria Palomaki, Olivia Red-
+  memorization: Data contamination and trustworthy          field, Michael Collins, Ankur P. Parikh, Chris Alberti,
+  evaluation for large language models. In Findings of      Danielle Epstein, Illia Polosukhin, Jacob Devlin, Ken-
+  the Association for Computational Linguistics, ACL        ton Lee, Kristina Toutanova, Llion Jones, Matthew
+  2024, Bangkok, Thailand and virtual meeting, August       Kelcey, Ming-Wei Chang, Andrew M. Dai, Jakob
+  11-16, 2024, pages 12039–12050. Association for           Uszkoreit, Quoc Le, and Slav Petrov. 2019. Natu-
+  Computational Linguistics.                                ral questions: a benchmark for question answering
+                                                            research. Trans. Assoc. Comput. Linguistics, 7:452–
+Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey,            466.
+  Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman,         Yoonjoo Lee, Kyungjae Lee, Sunghyun Park, Dasol
+  Akhil Mathur, Alan Schelten, Amy Yang, Angela             Hwang, Jaehyeon Kim, Hong-In Lee, and Moontae
+  Fan, Anirudh Goyal, Anthony Hartshorn, Aobo Yang,         Lee. 2023. QASA: advanced question answering
+  Archi Mitra, Archie Sravankumar, Artem Korenev,           on scientific articles. In International Conference
+  Arthur Hinsvark, Arun Rao, Aston Zhang, Aurélien          on Machine Learning, ICML 2023, 23-29 July 2023,
+  Rodriguez, Austen Gregerson, Ava Spataru, Bap-            Honolulu, Hawaii, USA, volume 202 of Proceedings
+  tiste Rozière, Bethany Biron, Binh Tang, Bobbie           of Machine Learning Research, pages 19036–19052.
+  Chern, Charlotte Caucheteux, Chaya Nayak, Chloe           PMLR.
+  Bi, Chris Marra, Chris McConnell, Christian Keller,
+  Christophe Touret, Chunyang Wu, Corinne Wong,           Minghao Li, Lei Cui, Shaohan Huang, Furu Wei,
+  Cristian Canton Ferrer, Cyrus Nikolaidis, Damien Al-      Ming Zhou, and Zhoujun Li. 2020. Tablebank: Ta-
+  lonsius, Daniel Song, Danielle Pintz, Danny Livshits,     ble benchmark for image-based table detection and
+  David Esiobu, Dhruv Choudhary, Dhruv Mahajan,             recognition. In Proceedings of The 12th Language
+  Diego Garcia-Olano, Diego Perino, Dieuwke Hupkes,         Resources and Evaluation Conference, LREC 2020,
+  Egor Lakomkin, Ehab AlBadawy, Elina Lobanova,             Marseille, France, May 11-16, 2020, pages 1918–
+  Emily Dinan, Eric Michael Smith, Filip Radenovic,        1925. European Language Resources Association.
+  Frank Zhang, Gabriel Synnaeve, Gabrielle Lee, Geor-
+  gia Lewis Anderson, Graeme Nail, Grégoire Mialon,       Tong Li, Zhihao Wang, Liangying Shao, Xuling Zheng,
+  Guan Pang, Guillem Cucurell, Hailey Nguyen, Han-          Xiaoli Wang, and Jinsong Su. 2023. A sequence-
+  nah Korevaar, Hu Xu, Hugo Touvron, Iliyan Zarov,          to-sequence&set model for text-to-table generation.
+  Imanol Arrieta Ibarra, Isabel M. Kloumann, Ishan          In Findings of the Association for Computational
+  Misra, Ivan Evtimov, Jade Copet, Jaewon Lee, Jan          Linguistics: ACL 2023, Toronto, Canada, July 9-14,
+  Geffert, Jana Vranes, Jason Park, Jay Mahadeokar,         2023, pages 5358–5370. Association for Computa-
+  Jeet Shah, Jelmer van der Linde, Jennifer Billock,        tional Linguistics.
+  Jenny Hong, Jenya Lee, Jeremy Fu, Jianfeng Chi,
+  Jianyu Huang, Jiawen Liu, Jie Wang, Jiecao Yu,          Shayne Longpre, Robert Mahari, Naana Obeng-Marnu,
+  Joanna Bitton, Joe Spisak, Jongsoo Park, Joseph           William Brannon, Tobin South, Katy Ilonka Gero,
+  Rocca, Joshua Johnstun, Joshua Saxe, Junteng Jia,         Alex Pentland, and Jad Kabbara. 2024. Position:
+  Kalyan Vasuden Alwala, Kartikeya Upasani, Kate            Data authenticity, consent, & provenance for AI are
+  Plawiak, Ke Li, Kenneth Heafield, Kevin Stone, and        all broken: what will it take to fix them? In Forty-
+  et al. 2024. The llama 3 herd of models. CoRR,            first International Conference on Machine Learning,
+  abs/2407.21783.                                           ICML 2024, Vienna, Austria, July 21-27, 2024. Open-
+                                                            Review.net.
+Joseph L Fleiss. 1971. Measuring nominal scale agree-     Xinyuan Lu, Liangming Pan, Qian Liu, Preslav Nakov,
+   ment among many raters. Psychological bulletin,          and Min-Yen Kan. 2023. SCITAB: A challenging
+  76(5):378.                                                benchmark for compositional reasoning and claim
+                                                            verification on scientific tables. In Proceedings of the
+Muhan Gao, Jash Shah, Weiqi Wang, and Daniel                2023 Conference on Empirical Methods in Natural
+ Khashabi. 2025. Science hierarchography: Hier-             Language Processing, EMNLP 2023, Singapore, De-
+ archical organization of science literature. CoRR,         cember 6-10, 2023, pages 7787–7813. Association
+ abs/2504.13834.                                            for Computational Linguistics.
+Hayato Hashimoto, Kazutoshi Shinoda, Hikaru Yokono,       Yao Lu, Yue Dong, and Laurent Charlin. 2020. Multi-
+  and Akiko Aizawa. 2017. Automatic generation of           xscience: A large-scale dataset for extreme multi-
+  review matrices as multi-document summarization           document summarization of scientific articles. In
+  of scientific papers. In Proceedings of the 2nd Joint     Proceedings of the 2020 Conference on Empirical
+  Workshop on Bibliometric-enhanced Information Re-         Methods in Natural Language Processing, EMNLP
+  trieval and Natural Language Processing for Dig-          2020, Online, November 16-20, 2020, pages 8068–
+  ital Libraries (BIRNDL 2017) co-located with the          8074. Association for Computational Linguistics.
+                                                      7613
+
+===== PDF p.14 =====
+Mistral-AI. 2024. Large enough. Mistral AI Blog.            Daniel M. Russell, Mark Stefik, Peter Pirolli, and Stu-
+                                                              art K. Card. 1993. The cost structure of sensemak-
+Nafise Sadat Moosavi, Andreas Rücklé, Dan Roth,               ing. In Human-Computer Interaction, INTERACT
+  and Iryna Gurevych. 2021. Scigen: a dataset for            ’93, IFIP TC13 International Conference on Human-
+  reasoning-aware text generation from scientific tables.     Computer Interaction, 24-29 April 1993, Amsterdam,
+  In Proceedings of the Neural Information Process-           The Netherlands, jointly organised with ACM Con-
+  ing Systems Track on Datasets and Benchmarks 1,             ference on Human Aspects in Computing Systems
+  NeurIPS Datasets and Benchmarks 2021, December              CHI’93, pages 269–276. ACM.
+  2021, virtual.
+                                                            Liangtai Sun, Yang Han, Zihan Zhao, Da Ma, Zhennan
+Benjamin Newman, Yoonjoo Lee, Aakanksha Naik,
+                                                              Shen, Baocai Chen, Lu Chen, and Kai Yu. 2024. Sci-
+  Pao Siangliulue, Raymond Fok, Juho Kim, Daniel S.
+                                                              eval: A multi-level large language model evaluation
+  Weld, Joseph Chee Chang, and Kyle Lo. 2024. Arx-
+                                                              benchmark for scientific research. In Thirty-Eighth
+  ivdigestables: Synthesizing scientific literature into
+                                                              AAAI Conference on Artificial Intelligence, AAAI
+  tables using language models. In Proceedings of
+                                                              2024, Thirty-Sixth Conference on Innovative Applica-
+  the 2024 Conference on Empirical Methods in Nat-
+                                                              tions of Artificial Intelligence, IAAI 2024, Fourteenth
+  ural Language Processing, EMNLP 2024, Miami,
+                                                              Symposium on Educational Advances in Artificial
+  FL, USA, November 12-16, 2024, pages 9612–9631.
+                                                              Intelligence, EAAI 2014, February 20-27, 2024, Van-
+  Association for Computational Linguistics.
+                                                              couver, Canada, pages 19053–19061. AAAI Press.
+OpenAI. 2024a. Gpt-4o mini: advancing cost-efficient
+  intelligence. OpenAI.                                     Anirudh Sundar, Christopher Richardson, and Larry
+                                                              Heck. 2024.     gtbls: Generating tables from
+OpenAI. 2024b. Hello gpt-4o. OpenAI.                          text by conditional question answering. CoRR,
+                                                              abs/2403.14457.
+OpenAI. 2025a. Introducing deep research. OpenAI
+  Blog.                                                     Xiangru Tang, Yiming Zong, Jason Phang, Yilun Zhao,
+OpenAI. 2025b. Introducing openai o3 and o4-mini.             Wangchunshu Zhou, Arman Cohan, and Mark Ger-
+  OpenAI.                                                     stein. 2023. Struc-bench: Are large language models
+                                                              really good at generating complex structured data?
+OpenAI. 2025c. Openai o3-mini. OpenAI Blog.                   CoRR, abs/2309.08963.
+
+Jiefu Ou, William Gantt Walden, Kate Sanders, Zheng-        Qwen Team. 2025. Qwen3 technical report. CoRR,
+   ping Jiang, Kaiser Sun, Jeffrey Cheng, William            abs/2505.09388.
+   Jurayj, Miriam Wanner, Shaobo Liang, Candice
+   Morgan, Seunghoon Han, Weiqi Wang, Chandler              Weiqi Wang, Limeng Cui, Xin Liu, Sreyashi Nag,
+   May, Hannah Recknor, Daniel Khashabi, and Ben-            Wenju Xu, Chen Luo, Sheikh Muhammad Sarwar,
+   jamin Van Durme. 2025. CLAIMCHECK: how                    Yang Li, Hansu Gu, Hui Liu, Changlong Yu, Jiaxin
+   grounded are LLM critiques of scientific papers? In       Bai, Yifan Gao, Haiyang Zhang, Qi He, Shuiwang
+   Findings of the Association for Computational Lin-        Ji, and Yangqiu Song. 2025a. Ecomscriptbench: A
+   guistics: EMNLP 2025, Suzhou, China, November             multi-task benchmark for e-commerce script plan-
+   4-9, 2025, pages 21712–21735. Association for Com-        ning via step-wise intention-driven product associa-
+   putational Linguistics.                                   tion. In Proceedings of the 63rd Annual Meeting of
+                                                             the Association for Computational Linguistics (Vol-
+Vishakh Padmakumar, Joseph Chee Chang, Kyle Lo,              ume 1: Long Papers), ACL 2025, Vienna, Austria,
+  Doug Downey, and Aakanksha Naik. 2025. Setting             July 27 - August 1, 2025, pages 1–22. Association for
+  the table with intent: Intent-aware schema generation      Computational Linguistics.
+  and editing for literature review tables. To appear.
+Pritika Ramu, Aparna Garimella, and Sambaran Bandy-         Weiqi Wang, Tianqing Fang, Wenxuan Ding, Baixuan
+   opadhyay. 2024. Is this a bad table? A closer look        Xu, Xin Liu, Yangqiu Song, and Antoine Bosselut.
+   at the evaluation of table generation from text. In       2023a. CAR: conceptualization-augmented reasoner
+   Proceedings of the 2024 Conference on Empirical           for zero-shot commonsense question answering. In
+   Methods in Natural Language Processing, EMNLP             Findings of the Association for Computational Lin-
+   2024, Miami, FL, USA, November 12-16, 2024, pages         guistics: EMNLP 2023, Singapore, December 6-10,
+   22206–22216. Association for Computational Lin-           2023, Findings of ACL, pages 13520–13545. Associ-
+   guistics.                                                 ation for Computational Linguistics.
+
+Nils Reimers and Iryna Gurevych. 2019. Sentence-bert:       Weiqi Wang, Tianqing Fang, Chunyang Li, Haochen
+  Sentence embeddings using siamese bert-networks.           Shi, Wenxuan Ding, Baixuan Xu, Zhaowei Wang, Ji-
+  In Proceedings of the 2019 Conference on Empiri-           axin Bai, Xin Liu, Cheng Jiayang, Chunkit Chan, and
+  cal Methods in Natural Language Processing and             Yangqiu Song. 2024a. CANDLE: iterative concep-
+  the 9th International Joint Conference on Natural          tualization and instantiation distillation from large
+  Language Processing, EMNLP-IJCNLP 2019, Hong               language models for commonsense reasoning. In
+  Kong, China, November 3-7, 2019, pages 3980–3990.          Proceedings of the 62nd Annual Meeting of the As-
+  Association for Computational Linguistics.                 sociation for Computational Linguistics (Volume 1:
+                                                        7614
+
+===== PDF p.15 =====
+Long Papers), ACL 2024, Bangkok, Thailand, Au-               Proceedings of the 60th Annual Meeting of the As-
+  gust 11-16, 2024, pages 2351–2374. Association for           sociation for Computational Linguistics (Volume 1:
+  Computational Linguistics.                                   Long Papers), ACL 2022, Dublin, Ireland, May 22-27,
+                                                               2022, pages 2518–2533. Association for Computa-
+Weiqi Wang, Tianqing Fang, Haochen Shi, Baixuan Xu,            tional Linguistics.
+ Wenxuan Ding, Liyu Zhang, Wei Fan, Jiaxin Bai,
+  Haoran Li, Xin Liu, and Yangqiu Song. 2025b. On           Shuo Zhang and Krisztian Balog. 2018. On-the-fly
+  the role of entity and event level conceptualization in     table generation. In The 41st International ACM
+  generalizable reasoning: A survey of tasks, methods,        SIGIR Conference on Research & Development in
+  applications, and future directions. In Findings of the     Information Retrieval, SIGIR 2018, Ann Arbor, MI,
+ Association for Computational Linguistics: EMNLP             USA, July 08-12, 2018, pages 595–604. ACM.
+  2025, Suzhou, China, November 4-9, 2025, pages
+  2260–2281. Association for Computational Linguis-
+  tics.
+
+Weiqi Wang, Tianqing Fang, Baixuan Xu, Chun
+ Yi Louis Bo, Yangqiu Song, and Lei Chen. 2023b.
+ CAT: A contextualized conceptualization and instan-
+ tiation framework for commonsense reasoning. In
+ Proceedings of the 61st Annual Meeting of the As-
+ sociation for Computational Linguistics (Volume 1:
+ Long Papers), ACL 2023, Toronto, Canada, July 9-14,
+ 2023, pages 13111–13140. Association for Computa-
+ tional Linguistics.
+
+Weiqi Wang, Xin Liu, Binxuan Huang, Hejie Cui,
+ Rongzhi Zhang, Changlong Yu, Shuowei Jin,
+ Jingfeng Yang, Qingyu Yin, Zhengyang Wang,
+ Zheng Li, Yifan Gao, Priyanka Nigam, Bing Yin, Li-
+ hong Li, and Yangqiu Song. 2026. Heapa: Difficulty-
+ aware heap sampling and on-policy query augmen-
+ tation for LLM reinforcement learning. CoRR,
+ abs/2601.22448.
+
+Weiqi Wang and Yangqiu Song. 2025. MARS: bench-
+ marking the metaphysical reasoning abilities of lan-
+ guage models with a multi-task evaluation dataset.
+ In Proceedings of the 63rd Annual Meeting of the
+ Association for Computational Linguistics (Volume
+ 1: Long Papers), ACL 2025, Vienna, Austria, July 27
+ - August 1, 2025, pages 1568–1596. Association for
+ Computational Linguistics.
+
+Xingbo Wang, Samantha L. Huey, Rui Sheng, Saurabh
+  Mehta, and Fei Wang. 2024b. Scidasynth: Interactive
+  structured knowledge extraction and synthesis from
+  scientific literature with large language model. CoRR,
+  abs/2404.13765.
+
+Thomas Wolf, Lysandre Debut, Victor Sanh, Julien
+  Chaumond, Clement Delangue, Anthony Moi, Pier-
+  ric Cistac, Tim Rault, Rémi Louf, Morgan Funtowicz,
+  Joe Davison, Sam Shleifer, Patrick von Platen, Clara
+  Ma, Yacine Jernite, Julien Plu, Canwen Xu, Teven Le
+  Scao, Sylvain Gugger, Mariama Drame, Quentin
+  Lhoest, and Alexander M. Rush. 2020. Transformers:
+  State-of-the-art natural language processing. In Pro-
+  ceedings of the 2020 Conference on Empirical Meth-
+  ods in Natural Language Processing: System Demon-
+  strations, EMNLP 2020 - Demos, Online, November
+  16-20, 2020, pages 38–45. Association for Computa-
+  tional Linguistics.
+
+Xueqing Wu, Jiacheng Zhang, and Hang Li. 2022. Text-
+  to-table: A new way of information extraction. In
+                                                        7615
+
+===== PDF p.16 =====
+Appendices                                                                            
+
+
+
+
+                                                            ) U H T X H Q F \  R I  7 D E O H V
+                                                                                                        
+                                                                                                        
+A    Additional Analysis                                                                                 
+                                                                                                         
+A.1 Method Efficiency Evaluations                                                                        
+                                                                                                         
+In addition to quality metrics (Table 2), we com-                                                                                     
+pare generation efficiency based on (i) generation                                                                 1 X P E H U  R I  5 H I H U H Q F H  3 D S H U V  S H U  7 D E O H
+success rate (GSR) under the backbone context win-
+dow limit, (ii) average token usage per table, and               Figure 7: Distribution of number of papers in each table.
+(iii) average runtime. These statistics are reported
+in Table 9. Overall, our method achieves a 100%
+success rate while keeping token usage controlled,             produces all schema/unary/pairwise QAs from a
+indicating that iterative batching improves robust-            table; a distinct answerer then answers those QAs
+ness without incurring excessive context overhead.             from the comparison table. We then swap roles
+   To assess the efficiency and scalability of our iter-       and recompute scores. Stability is measured by
+ative batch-based method, we report computational              (i) rank correlations of method orderings (Spear-
+statistics in Table 9. Each method was run using               man, Kendall) over model×method tuples, and (ii)
+the same LLaMA-3.3 model backend. We measure                   the maximum absolute F1 change per dimension
+three aspects: (1) generation success rate, defined            (Schema/Unary/Pairwise).
+as the proportion of prompts yielding complete ta-                Setup. We evaluate four synthesizer→answerer
+bles within the context window, (2) average token              pairs:        GPT-4o→GPT-4o-mini,          GPT-4o-
+usage per table, and (3) average runtime per table.            mini→GPT-4o, GPT-4o→Llama-3.3, Llama-
+Our method achieves a 100% success rate, outper-               3.3→GPT-4o (Table 11),             and addition-
+forming the baselines that occasionally fail due to            ally include a cross-family swap using
+context limitations or prompt instability. While our           Qwen3-30B-A3B-Instruct (Table 12).              We
+runtime is moderately longer than Baseline 1 and               randomly sample 50 tables (stratified by table size)
+Baseline 2, it remains comparable to Newman et al.             and include all generation methods (Baseline 1,
+and stays well within acceptable latency for practi-           Baseline 2, Newman et al., Ours). Decoding
+cal usage. Furthermore, token usage remains con-               temperature is 0.5; the same seeds as the main runs
+trolled, confirming that our iterative approach does           are reused. Each run uses the same QA quantity as
+not incur excessive computational cost despite its             the main evaluation (all schema and unary QAs,
+multi-step structure. These results demonstrate that           10 pairwise QAs per table).
+our method offers a favorable trade-off between                   Result. Across swaps, macro Kendall ≈
+performance and efficiency.                                    0.68–0.71 and macro Spearman ≈ 0.84–0.87,
+                                                               while max absolute F1 changes remain ≤ 2.1
+A.2 Additional Backbone Comparisons                            points. Method rankings are therefore stable, and
+    (GPT-5.1 and GPT-o3)                                       absolute performance differences are small, sug-
+To test whether the relative improvements of our               gesting limited evaluator dependence and address-
+iterative batch-based method persist under stronger            ing circularity concerns.
+proprietary backbones, we run additional compar-
+isons with GPT-5.1 and GPT-o3 under the same                     Cross-family evaluator swap with Qwen3. In
+evaluation protocol as in the main experiments.                  addition to the swaps above, we also test evaluator
+Due to cost constraints, GPT-o3 results are reported             independence by replacing GPT-4o with the open-
+on a fixed 50-table subset. We report T3 utiliza-                source Qwen3-30B-A3B-Instruct (Team, 2025)
+tion metrics (Paper/Schema/Unary/Pairwise F1 and                 as either the QA synthesizer or the answerer on a
+their average) in Table 6.                                       subset. We report the relative change in macro-F1
+                                                                 (vs. GPT-4o as the default evaluator) and ranking
+A.3 Evaluator Independence Checks                                stability in Table 12.
+This section tests whether our utilization-based                    Together with Tables 10–11, these results indi-
+evaluation depends on which LLM synthesizes QA                   cate that method rankings are stable under evaluator
+pairs versus which LLM answers them. We de-                      changes across both proprietary and open-source
+couple QA synthesis and answering: a synthesizer                 model families.
+                                                       7616
+
+===== PDF p.17 =====
+Backbone & Method                              Paper F1       Schema F1   Unary F1    Pairwise F1   Avg
+             GPT-5.1 + Baseline 2                             76.0           55.0        49.0         38.0       47.3
+             GPT-5.1 + Ours                                   78.2           59.3        59.3         54.5       57.8
+             GPT-o3 + Baseline 2 (50-table subset)            75.0           53.0        47.0         36.0       45.3
+             GPT-o3 + Ours (50-table subset / full set)       77.2           58.3        58.3         53.5       56.7
+
+Table 6: Results under stronger proprietary backbones using the same utilization-based evaluation protocol. GPT-o3
+rows are evaluated on a fixed subset due to cost; GPT-5.1 rows follow the same evaluation setup as the corresponding
+main experiments.
+
+
+             Method              GSR        #Tokens                    Method          Success Rate    #Tokens    Avg. Runtime
+             Baseline 1        48.19%        128K                      Baseline 1          48.2%        128K             37
+             Baseline 2        98.23%        167K                      Baseline 2          98.2%        167K            118
+             Newman et al.     99.71%        110K                      Newman et al.       99.7%        110K            208
+             Ours              100.0%        118K                      Ours               100.0%        118K            194
+
+Table 7: Comparison of the efficiency of different meth-               Table 9: Computational cost and efficiency metrics
+ods. GSR stands for generation success rate.                           across different generation methods using LLaMA-3.3.
+                                                                       We report the generation success rate, average token
+ Statistic    Paper Count    Column Count     Distractor Count         usage, and average runtime (s) per table.
+ Min               1              2                   4
+ Max              32              13                  10
+ Mean            3.65            3.56                5.21              proach reduces downstream risk of missing truly
+ Total           7158            6967               10196              relevant papers during human verification.
+Table 8: Summary statistics of the AR X IV 2TABLE                      B     Implementation Details
+benchmark. We report aggregate values for the number
+of papers, columns, and distractor papers per table.                   In this section, we provide additional implemen-
+                                                                       tation details about our benchmark curation and
+                                                                       evaluation pipeline, including the prompt we used
+A.4 Additional Retrieval Baselines and                                 and the models we accessed.
+    Rationale
+We compare dense and sparse retrieval for con-                         B.1    Prompts Used
+structing candidate pools used in distractor ver-                      We provide all prompts used in our benchmark
+ification. Each table’s user demand is matched                         construction and evaluation. In benchmark con-
+against all paper titles and abstracts. We evalu-                      struction, the key steps are (i) rewriting captions
+ate TF–IDF, BM25, and a dense retriever based                          into user demands without leaking schema/values
+on sentence-t5-xxl (SentenceTransformers) on                           and (ii) synthesizing QA pairs from the ground-
+a 200-table slice. All methods return top-k can-                       truth table. In evaluation, we normalize tables,
+didates; we report macro Precision@k (P@k),                            canonicalize headers, decouple QA synthesis from
+Recall@k (R@k), and Average Precision (AP).                            answering, and run a reverse-QA pass for precision.
+Sparse methods use standard tokenization with                          User demand rewrite (benchmark construction).
+stopword removal; dense retrieval encodes the con-                     This prompt rewrites terse/arXiv-style captions
+catenation of title and abstract and ranks by cosine                   into contextually self-contained user demands that
+similarity.                                                            specify the table’s purpose without leaking col-
+   We additionally probe different cutoffs to assess                   umn names or specific values. It improves realism
+stability. Results at smaller and larger k show the                    by emulating well-specified but abstract requests
+same ordering, with the dense method maintaining                       while keeping evaluation fair.
+a recall advantage as k increases.
+   These results justify our use of an embedding-                            Given a literature review table, along
+based retriever to construct a semantically challeng-                        with its caption, you are tasked with
+ing yet realistic candidate pool. Sparse baselines                           writing a user demand or intention for
+remain competitive in precision at very small cut-                           the creator of this table.          The user
+offs (e.g., @5), but they under-recall paraphrastic                          demand should be written as though
+matches common in scientific text. The dense ap-                             you are instructing an AI system to
+
+                                                                 7617
+
+===== PDF p.18 =====
+Schema F1                  Unary F1              Pairwise F1
+                        Synth→Ans
+                                            Mean ∆ Max ∆               Mean ∆ Max ∆           Mean ∆ Max ∆
+                        4o → 4o-mini              0.4      1.5           0.5          1.6           0.6        1.8
+                        4o-mini → 4o              0.5      1.7           0.6          1.8           0.7        1.9
+                        4o → Llama3.3             0.6      1.9           0.7          2.0           0.9        2.1
+                        Llama3.3 → 4o             0.5      1.7           0.6          1.9           0.8        2.0
+
+Table 10: Absolute F1 drift (percentage points) when swapping the QA synthesizer and answerer. Values are
+averaged over model×method tuples.
+
+Synth→Ans          Spearman (Schema/Unary/Pairwise) ↑          Kendall (Schema/Unary/Pairwise) ↑      Macro Spearman ↑     Macro Kendall ↑
+4o → 4o-mini                 0.87 / 0.88 / 0.86                        0.71 / 0.72 / 0.70                   0.87                 0.71
+4o-mini → 4o                 0.85 / 0.86 / 0.86                        0.69 / 0.70 / 0.70                   0.86                 0.70
+4o → Llama3.3                0.83 / 0.84 / 0.85                        0.67 / 0.68 / 0.69                   0.84                 0.68
+Llama3.3 → 4o                0.84 / 0.85 / 0.86                        0.68 / 0.69 / 0.70                   0.85                 0.69
+
+Table 11: Ranking stability across methods under evaluator swaps. Correlations computed over model×method
+tuples.
+
+
+     generate the table.               Avoid directly                           table:
+     mentioning column names in the table                                       <PAPER-1> . . . <PAPER-N>
+     itself, but instead, focus on explaining                                   Write the user demand for this table. Do
+     why    the     table    is    needed         and   what                    not include the column names in the user
+     information it should contain. You may                                     demand. Write a concise and clear user
+     include a description of the table’s                                       demand covering the function, topic, and
+     structure, whether it requires detailed                                    structure of the table with one or two
+     or summarized columns.               Additionally,                         sentences. The user demand is:
+     infer the user’s intentions from the
+     titles of the papers the table will                                 Leak check for user demands (guardrail). Im-
+     include. Limit each user demand to 1-2                              mediately after rewriting, we run a leak check to
+     sentences. Examples of good user demands                            ensure the demand does not expose schema labels
+     are: I need a table that outlines how                               or table values, and to auto-rewrite if needed. This
+     each study conceptualizes the problem,                              keeps construction oracle-free and reproducible.
+     categorizes the task,              describes the
+     data analyzed, and summarizes the main                                     You are given: (i) a user demand written
+     findings. The table should have detailed                                   from a caption, and (ii) the target
+     columns      for     each    of    these       aspects.                    table (schema and a few cell values).
+     Generate a detailed table comparing                                        Decide if the user demand leaks any
+     the theoretical background,                   research                     column names or specific cell values,
+     methodology, and key results of these                                      or directly paraphrases them.
+     papers.       You can use several columns                                  Return      {ACCEPT,        REWRITE}       and     a
+     to    capture       these    aspects         for   each                    one-sentence         reason.          If   REWRITE,
+     paper. I want to create a table that                                       produce a version that removes leaked
+     summarizes the datasets used to evaluate                                   tokens      while     staying        specific    and
+     different GNN models, focusing on the                                      self-contained.
+     common       features       and   characteristics                          Output JSON only: {"decision": "...",
+     found across the papers listed below.                                      "reason": "...", "demand": "..." }
+     The table should have concise columns to
+     highlight these dataset attributes. Now,                            QA synthesis from ground truth (recall side).
+     write a user demand for the table below.                            This prompt generates binary QA pairs from the
+     The caption of the table is “<CAPTION>”.                            gold table to test whether a system table retains
+     The table looks like this:                                          schema, values, and pairwise relations. It provides
+    <TABLE>                                                              full coverage for schema/unary and a sampled, di-
+     The following papers are included in the                            verse set for pairwise.
+                                                                    7618
+
+===== PDF p.19 =====
+Synthesizer & Answerer              Relative ∆F1 vs. GPT-4o   Spearman ρ     Kendall τ
+                    GPT-4o → Qwen3-30B-A3B                       +1.7                 0.89         0.78
+                    Qwen3-30B-A3B → GPT-4o                       +2.4                 0.86         0.74
+
+Table 12: Cross-family evaluator swap using Qwen3-30B-A3B-Instruct. Relative ∆F1 is computed against the
+default GPT-4o-based evaluation on the same subset; rank correlations are computed over model×method tuples.
+
+
+ Constraint     Operationalization (what we enforce)                                            @5           @20
+                                                                        Method           P@5      R@5     P@20 R@20
+ Self-          Mentions the topic and the intended compari-
+ contained      son goal without assuming access to the gold            TF–IDF           0.58     0.25       0.35   0.49
+                table.                                                  BM25             0.62     0.28       0.38   0.55
+ Goal-          Specifies what decision/analysis the table              SentenceBERT     0.65     0.33       0.40   0.62
+ oriented       should support (e.g., comparing families of
+                methods, tracing trends, or summarizing            Table 15: Precision/recall at @5 and @20. Dense re-
+                benchmark settings).
+ Non-           Avoids verbatim column headers and specific        trieval sustains higher recall across cutoffs.
+ leaking        numeric/string values from the gold table;
+                avoids directly paraphrasing headers.
+ Concise        1–2 sentences; avoids long enumerations of               CL, TL the loss function for paper
+                fields to keep the request natural.                      CN-LexNet?     Pairwise Value QA Pairs:
+                                                                         Check whether a relationship between
+Table 13: Checklist used for caption-to-demand rewrit-
+                                                                         two values remains consistent in the
+ing. The automatic leak check (Appendix B) flags vio-
+                                                                         generated table. Example: Is ResNet-v2
+lations and triggers rewriting.
+                                                                         using more evaluation metrics than GAN?
+                                                                         For Schema and Unary Value, generate
+           Method               P@10   R@10      AP
+                                                                         a QA pair for every column and every
+           TF–IDF               0.44    0.36     0.31                    cell, respectively. For Pairwise Value,
+           BM25                 0.49    0.40     0.36
+           SentenceBERT         0.54    0.47     0.42                    randomly sample 10 pairs per table and
+                                                                         construct the corresponding QA pairs.
+Table 14: Top-10 retrieval quality (macro). Dense re-                    Step 2: Answering QA Pairs Using the
+trieval improves recall and AP, which is critical for min-               Generated Table After generating the QA
+imizing false negatives in later filtering.                              pairs, answer them using the generated
+                                                                         table.    Provide only "yes" or "no"
+                                                                         responses: If the information is present
+     You will evaluate the quality of a
+                                                                         in the generated table, respond with
+     generated table by comparing it against
+                                                                         "yes." If the information is missing or
+     a ground-truth table.              The goal is
+                                                                         different, respond with "no." Your task
+     to assess whether the generated table
+                                                                         is to generate the QA pairs based on the
+     correctly retains the schema, individual
+                                                                         ground-truth table and then answer them
+     values, and pairwise relationships. This
+                                                                         based on the generated table. Now, begin
+     is     achieved      by    generating     targeted
+                                                                         by generating the QA pairs.
+     QA pairs based on the ground-truth
+     table and answering them using the
+                                                                   Answering gold QAs on the system table (decou-
+     generated table.             Step 1:      QA Pair
+                                                                   pled answerer). When we decouple synthesis from
+     Generation Based on the Ground-Truth
+                                                                   answering (for evaluator-independence checks and
+     Table Generate binary (Yes/No) QA pairs
+                                                                   robustness), we use an answer-only prompt that
+     focusing       on    three    aspects:      Schema
+                                                                   strictly binds answers to the system table content.
+     QA Pairs:           Check whether a specific
+     column     from      the     ground-truth    table                  Input: (i) a normalized generated table,
+     appears in the generated table schema.                              and (ii) a list of binary Yes/No QAs
+     Example:       Is Dataset included in the                           synthesized from the ground-truth table.
+     table schema?             Unary Value QA Pairs:                     Answer each QA using only the generated
+     Check whether a specific cell value                                 table.    If explicitly supported and
+     from the ground-truth table is present                              consistent,    answer    "yes";       otherwise
+     in the generated table.             Example: Is                     "no".
+
+                                                               7619
+
+===== PDF p.20 =====
+Return one lowercase token per line:                           You are given a table in arbitrary
+     yes/no (no explanations).                                      Markdown/LaTeX/CSV. Normalize it into a
+                                                                    rectangular CSV with a header row, one
+Reverse-QA synthesis from the system table                          row per paper.
+(precision side). To measure precision, we synthe-                  – Trim whitespace; collapse multi-line
+size QAs from the system table and answer them                      cells; preserve units and text verbatim;
+on the gold table. This credits only content sup-                   fill missing cells with "N/A".
+ported by the gold table and rejects unsupported                    – Do not infer new columns or values.
+“novel” entries.                                                    Return CSV only (no commentary).
+
+     Given     a   normalized    generated     table,
+     create    binary   Yes/No    QAs   for:     (i)       Schema alias canonicalization (header map-
+     schema presence,      (ii) specific cell              ping). We canonicalize header synonyms (e.g.,
+     values, and (iii) pairwise relations                  “Dataset” vs “Data”) before computing schema
+     (10 pairs).                                           scores to reduce false mismatches due to phrasing.
+     Write unambiguous questions that can
+                                                                    Given two header lists (gold vs system),
+     be answered solely from this generated
+                                                                    produce    a    one-to-one   or    one-to-many
+     table. Avoid trivial or duplicate QAs.
+                                                                    mapping    of     system   headers   to   gold
+     Return               JSON                 list:
+                                                                    headers    when     they   are    semantically
+     ["type":"schema|unary|pairwise","q":"..."
+                                                                    equivalent.
+     ...]
+                                                                    Rules:     prefer exact matches;          allow
+                                                                    synonyms; keep units consistent; do not
+Answering reverse-QAs on the gold table (preci-
+                                                                    map if semantics differ.
+sion side). This answer-only prompt binds answers
+                                                                    Return JSON: ["system": "...", "gold":
+to the gold table. By instruction, any system-only
+                                                                    "...", "justification": "..." ...]
+content is answered “no”.
+     Input: (i) a normalized gold table, and                  The distribution of number of papers per table
+     (ii) a list of Yes/No QAs synthesized                 in AR X IV 2TABLE is shown in Figure 7.
+     from the generated table.
+                                                           B.2       Evaluation Implementations
+     Answer each QA using only the gold table.
+     Novel content not present in gold must                We access all open-source LLMs via the Hugging
+     be answered "no".                                     Face library (Wolf et al., 2020). The models used
+     Return one lowercase token per line:                  are      meta-llama/Llama-3.3-70B-Instruct,
+     yes/no.                                               mistralai/Mistral-Large-Instruct-2411,
+                                                           and deepseek-ai/DeepSeek-V3.                    For
+QA validation and deduplication (quality filter).          GPT models, we access them via the of-
+Before answering, we filter QAs to remove ill-             ficial OpenAI Batch API3 . The models
+formed, non-binary, trivial, or duplicate items. This      used are gpt-4o-mini-2024-07-18 and
+reduces evaluator brittleness and ensures consistent       gpt-4o-2024-08-06. Note that the DeepSeek
+scoring.                                                   model family has a context window limit of 64K
+                                                           tokens, whereas the others have a limit of 128K
+     Given a list of binary QAs, remove
+                                                           tokens. The generation temperature is set to 0.5
+     any that are ill-formed,           non-binary,
+                                                           for all experiments. All experiments are repeated
+     trivially true/false, or duplicates.
+                                                           twice and the average performance is reported.
+     Return the filtered list as JSON in the
+                                                              We normalize both gold and generated tables to
+     same schema and include a "removed" list
+                                                           CSV grids with a single header row and “N/A” for
+     with reasons.
+                                                           missing cells, then apply schema-alias canonical-
+                                                           ization before scoring. For the recall side, we syn-
+Table normalization (robust parsing). We nor-
+                                                           thesize QAs from the gold table and answer them
+malize both gold and system tables to a rectangular
+                                                           on the system table; for the precision side, we syn-
+CSV with consistent headers and “N/A” for miss-
+                                                           thesize QAs from the system table and answer them
+ing entries so that downstream prompts and scripts
+operate deterministically.                                     3
+                                                                   https://platform.openai.com/docs/guides/batch
+
+                                                        7620
+
+===== PDF p.21 =====
+on the gold table. Answers are strictly “yes”/“no”;      D    Case Studies
+we lowercase, strip punctuation, and parse the first
+                                                         Table 16 shows examples of original captions and
+token if extra text is emitted. Schema and unary
+                                                         rewritten user demands, illustrating how short or
+QAs are exhaustive; for pairwise, we sample 10
+                                                         context-dependent captions can be transformed into
+pairs per table while avoiding duplicates and pro-
+                                                         self-contained requests that better specify the in-
+moting coverage over distinct columns. Random-
+                                                         tended comparison goal. Table 17 provides illus-
+ization uses fixed seeds when supported; otherwise
+                                                         trative examples of schema, unary, and pairwise
+we repeat evaluation twice and average.
+                                                         questions used by our utilization-based evaluation
+   For cross-evaluator checks, we decouple QA            to measure schema coverage, factual retention, and
+synthesis and answering and swap the evaluator           relational consistency.
+models as reported in Appendix A.3. Decoding                We additionally include two example pairs of
+parameters use temperature 0.5, top_p 1.0, no rep-       ground-truth and generated tables in Table 18.
+etition penalties, and a max_new_tokens budget           These examples highlight common behaviors in
+that comfortably covers the QA list; timeouts are        literature-review table generation: systems can en-
+120s per call with up to two retries on transient        rich tables by adding helpful organizing fields, but
+errors. Significance testing for main-table compar-      may also omit important attributes from the ground
+isons uses table-level bootstrap (10,000 resamples)      truth or introduce overly fine-grained fields that di-
+with 95% confidence intervals; full CIs and prompt       lute the central comparison. Overall, the examples
+JSON I/O schemas will be released with code. For         underscore the importance of jointly handling pa-
+the additional cross-family evaluator swap, we also      per selection, schema induction, and value ground-
+use Qwen3-30B-A3B-Instruct under the same de-            ing.
+coding settings (Wang et al., 2026, 2024a, 2025b,
+2023b,a, 2025a; Wang and Song, 2025).
+
+
+C    Annotation Details
+
+To ensure high-quality annotations, we recruited
+19 trained graduate-level annotators with computer-
+science research experience and admitted them
+only after passing qualification rounds. For each
+candidate paper, annotators received clear, layman-
+friendly instructions with definitions and multiple
+examples, then confirmed they had read them via
+a checkbox before starting. Using the interface
+in Figure 8, each instance was judged with a bi-
+nary {include, exclude} decision relative to the
+user demand and the known reference papers (ti-
+tle+abstract basis). Every instance received two in-
+dependent labels; on disagreement, two additional
+adjudicators resolved to consensus. We continu-
+ously monitored performance, provided targeted
+feedback on common errors, and removed spam-
+mers or underperformers. The study ran for eleven
+days; first-pass agreement reached 94% pairwise
+with Fleiss’ κ=0.73, the self-reported median time
+per decision was about seven minutes, and annota-
+tors were compensated above the local minimum
+wage. The final corpus contains 10,196 curated
+distractor labels across 1,957 tables (with 10 initial
+candidates per table before filtering), supporting
+the quality reported in Section 4.2.
+                                                     7621
+
+===== PDF p.22 =====
+Original Table Caption                    User Demand
+Comparison of trajectory and path         I need a table that compares recent trajectory/path planning methods, emphasizing how
+planning approaches                       they handle safety constraints (e.g., collision avoidance) and what assumptions they
+                                          make about the environment. Please summarize the key strengths, limitations, and
+                                          typical application settings for each approach.
+Publications with deep-learning fo-       Please create a table that organizes learning-based sampling methods by how candidates
+cused sampling methods. We cluster        are generated and how they are scored, so it is easy to see the main design choices across
+the papers based on the space the sam-    papers. If a method uses an extra refinement step or additional supervision, highlight
+ple through and how the samples are       that in the comparison.
+evaluated. Some approaches further
+consider an optional refinement stage.
+Categorization of textual explanation     I want a table that groups approaches for producing textual explanations by what kind
+methods.                                  of explanation they generate and what evidence they rely on (e.g., rationales, templates,
+                                          retrieved facts). The goal is to quickly compare how different families of methods
+                                          justify their predictions.
+Metadata of the three benchmarks that     Please produce a table that contrasts these benchmarks in terms of what they measure
+we focus on. XSumSota is a com-           and how they are evaluated, including how labels are obtained and what the evaluation
+bined benchmark of cite:1400aac and       protocol looks like. I want to understand which benchmark is most suitable for compar-
+cite:d420ef8 for summaries generated      ing modern summarization systems.
+by the state-of-the-art summarization
+models.
+Review of open access ground-based        I need a table summarizing open-access forest datasets, focusing on what is recorded,
+forest datasets                           when and where data are collected, and what tasks each dataset supports. The table
+                                          should make it easy to choose a dataset for a specific forest monitoring objective.
+Comparison of existing consistency-       Please construct a table comparing consistency-oriented models by what notion of
+type models.                              consistency they enforce and how they operationalize it (objective, constraints, or
+                                          training signal). The table should make clear how each model differs in assumptions
+                                          and what settings it is intended for.
+
+Table 16: Examples of original captions and rewritten user demands. User demands are written to be self-contained
+and goal-oriented while avoiding direct leakage of gold headers or specific cell values.
+
+
+
+
+Schema QA (presence of a field)               Unary QA (a specific entry)                    Pairwise QA (a relation)
+Is the evaluation benchmark included in       Is ZsRE listed as an evaluation benchmark      Does ROME achieve higher reported accu-
+the table schema?                             for ROME?                                      racy than MEND on ZsRE?
+Is the training signal/objective described    Is consistency regularization listed           Do methods that use consistency
+in the table schema?                          as a training signal for at least one method   regularization report better perfor-
+                                              in the table?                                  mance than those that do not on the same
+                                                                                             benchmark?
+Is the data source or dataset type included   Is ImageNet listed as a dataset used in any    Is Method A evaluated on more datasets
+in the table schema?                          compared method?                               than Method B in the table?
+Is the compute setting (e.g., hardware or     Is 8×A100 listed as the hardware setting       Does Method A report a lower compute
+budget) included in the table schema?         for any method?                                budget than Method B under the same eval-
+                                                                                             uation setup?
+Is the publication year or timeframe in-      Is 2023 listed as the publication year for     Are post-2022 methods reported as out-
+cluded in the table schema?                   Method X?                                      performing pre-2020 methods on the same
+                                                                                             metric in the table?
+
+Table 17: Illustrative examples of schema/unary/pairwise questions. In the benchmark, questions are synthesized
+from each ground-truth table and are answerable by reading the corresponding comparison table.
+
+
+
+
+                                                              7622
+
+===== PDF p.23 =====
+Figure 8: The annotation interface we used for collecting the gold labels for distractor papers.
+
+
+
+
+                                             7623
+
+===== PDF p.24 =====
+Tasks            #Categories     Evaluation Metric
+                                      fine-grained        100            mean accuracy
+                                      face                9131                 -
+
+                                     (a) Ground-truth table of the first pair of example.
+
+Number of Images       Number of Subjects     Avg. Images per Sub-          Number of Classes                 Dataset Purpose
+                                              ject
+     10,000            100                    100                           100                      Fine-grained visual classification
+    3,310,000          9,131                  362.6                         9,131                    Face recognition across variations
+
+                                       (b) Generated table of the first pair of example.
+
+Problem                                               Description
+Visual Reference Resolution                           Capturing related visual region through an associative attention memory.
+Visual Reference Resolution                           Selectively referring dialogue history to refine the visual attention until referenc-
+                                                      ing the answer.
+Visual Reference Resolution                           Establishing mapping of visual object and textual entities to exclude undesired
+                                                      visual content.
+Visual-based Dialogue Strategies Optimization         Enhancing response generator with discriminator by RL reward.
+Visual-based Dialogue Strategies Optimization         Maximizing the information gain while asking questions with a RL paradigm
+                                                      for explicit dialogue goals.
+Pre-trained Vision Language Model-based VAD           Training unified Transformer encoder initialized by BERT with two visual
+                                                      training objectives.
+Pre-trained Vision Language Model-based VAD           Utilizing GPT-2 to capture cross-modal semantic dependencies.
+Unique Training Schemes-based VAD                     Simulating Dual-coding theory of human cognition to adaptively find query-
+                                                      related information from the image.
+Unique Training Schemes-based VAD                     Asking questions to confirm the conjecture of models about the referent guided
+                                                      by human cognitive literature.
+
+                                    (c) Ground-truth table of the second pair of example.
+
+    ID          Method Used                Dataset               Problem     Ad-    Performance          Results              Model Type
+                                                                 dressed            Metric               Achieved
+ 5677543        Attention      memory      VisDial              Visual dialog       Answer predic-        16% improve-        Generative
+                model                                           with reference      tion accuracy        ment over state-
+                                                                resolution                               of-the-art
+54446647        Recursive Visual Atten-    VisDial v0.9         Visual       co-    Mean Rank            State-of-the-art     Generative
+                tion mechanism                                  reference                                performance
+                                                                resolution
+236478107       Multimodal transformer     VisDial     v0.9     Visual dialogue     BLEU                 Achieves new         Generative
+                with visual grounding      and v1.0             generation                               state-of-the-art
+                                                                                                         results
+24537813        Adversarial learning       VisDial               Visual dialog      Recall@5             +2.14%       im-     Generative
+                with co-attention                                generation                              provement over
+                                                                                                         the     previous
+                                                                                                         best
+196180698       Goal-oriented question     GuessWhat?!          Goal-oriented       Accuracy             67.19%        on     Generative
+                generation model                                visual dialogue                          GuessWhat?!
+216562638       Vision-dialog     trans-   VisDial     v0.9     Visual dialog       NDCG                 New        state-    Generative
+                former architecture        and v1.0                                                      of-the-art           and    Dis-
+                                                                                                         performance          criminative
+220045105       GPT-2 based architec-      AVSD                  Video-             BLEU                 Outperforms          Generative
+                ture                                             grounded                                existing      ap-
+                                                                 dialogue                                proaches
+208138178       Adaptive dual encoding     VisDial               Visual dialogue    Accuracy             State-of-the-art     Generative
+                framework                                                                                results
+237491596       Beam search re-ranking     GuessWhat?!           Referential        Task accuracy        +4.35%       im-     Generative
+                algorithm                                        guessing games                          provement with
+                                                                                                         re-ranking
+
+                                     (d) Generated table of the second pair of example.
+
+             Table 18: Case studies on the generation of literature review tables in AR X IV 2TABLE.
+
+
+                                                              7624

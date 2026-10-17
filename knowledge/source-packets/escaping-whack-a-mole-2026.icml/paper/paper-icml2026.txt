@@ -1,0 +1,1826 @@
+===== PDF p.1 =====
+Escaping Whack-a-Mole: Optimizing Documentation as
+                         Repo-Specific Playbooks for Coding Agents
+
+
+            Yutong Cheng 1 * Haifeng Chen 2 Wenchao Yu 2 Xujiang Zhao 2 Peng Gao 1 Wei Cheng 2
+
+
+                         Abstract                                      (a) Iterative Refinement with Output Coupling (b) Docsearch: Dependency-Guided Bilevel Search
+                                                                        Dependency DAG                                 Dependency DAG
+                                                                                                                                    4
+                                                                              A   1
+                                                                                                                                A
+
+     As large language models increasingly function                                                                         2               3
+                                                                        B 2           C                                 B               C
+     as autonomous coding agents, code documenta-
+                                                                                                                                    1
+                                                                              D 3
+     tion should be designed not for human readability,                                                                         D
+
+                                                                                                                      Refinement Iterations
+     but for agent executability — serving as repo-                      Refinement Iterations
+                                                                                                                        1   Refine doc(D)         S = {D}
+     specific playbooks that specify precise behaviors                    1   Refine doc(A)      Result: A   ✅
+                                                                                                                        2   Refine doc(B)         S = {D, B}
+     agents can follow. We formulate agent-oriented                       2   Refine doc(B)      Result: B   ✅, A ✗
+     documentation generation as a black-box opti-                                                                      3   Refine doc(C)         S = {D, B, C}
+
+
+     mization problem over the documentation space,                       3   Refine doc(D)      Result: D   ✅, B ✗     4   Refine doc(A)         S = {D, B, C, A}
+
+     where quality is defined solely by downstream
+     code correctness. A central challenge for con-                   Figure 1. Iterative refinement vs. D OC S EARCH. (a) Output
+     ventional LLM refinement methods is output cou-                  coupling induces a whack-a-mole effect: fixing one entity breaks
+                                                                      another, causing the solve rate to oscillate around 55%. (b) D OC -
+     pling—program entities are interdependent, and
+                                                                      S EARCH processes entities in reverse topological order under a
+     refining the documentation of one entity can inval-              worthy condition, ensuring monotonic progress beyond 90%.
+     idate its callers, resulting in a persistent whack-a-
+     mole phenomenon during inference-time scaling.
+                                                                      1. Introduction
+     We propose D OC S EARCH, a dependency-guided
+     bi-level search framework that systematically ex-                Documentation bridges human intent and machine-
+     ploits test-time feedback. The outer level con-                  generated code. As large language models become capable
+     ducts a priority search over the program-entity de-              of synthesizing complex software modules, a fundamen-
+     pendency DAG, enforcing a callee-before-caller                   tal shift occurs: documentation is increasingly consumed
+     refinement order to prevent downstream interfer-                 by coding agents, not just human developers. Repository-
+     ence. The inner level performs a beam search                     level code generation (Zhang et al., 2023a; Li et al., 2025),
+     over documentation refinements, using diversi-                   legacy modernization, and API reimplementation all rely
+     fied error message sampling from self-generated                  on agents interpreting documentation to produce code. This
+     unit tests to better exploit diagnostic signals                  shift demands a new perspective: documentation should
+     and escape local optima. On DevEval+, D OC -                     serve as a repo-specific playbook for coding agents — an
+     S EARCH achieves 90.7% solve rate with GPT-4o,                   executable behavioral specification tailored to a particular
+     outperforming the strongest baseline by 32.6%.                   codebase, rather than human-oriented prose. We formalize
+     Cross-language experiments further demonstrate                   this task as agent-oriented documentation generation. Un-
+     that optimized documentation transfers effec-                    like human-oriented documentation, where quality can be
+     tively to different target programming languages.                assessed through subjective metrics like comprehensiveness,
+     Code is available at https://github.com/                         helpfulness, and clarity (Luo et al., 2024; Yang et al., 2025),
+     ccsnow127/docsearch.                                             agent-oriented documentation is evaluated by the posterior
+                                                                      quality of code generated by an LLM or agent conditioned
+  ∗
+                                                                      solely on the documentation, where correctness of the result-
+    Work done during an internship at NEC Laboratories America.       ing implementation is the only reliable signal. This raises
+1
+ Department of Computer Science, Virginia Tech, Blacksburg, VA,
+USA 2 NEC Laboratories America, Princeton, NJ, USA. Corre-            a fundamental question: how can such documentation be
+spondence to: Wei Cheng <weicheng@nec-labs.com>.                      optimized? The space is vast and unstructured, with effec-
+                                                                      tively infinite natural-language formulations and no intrinsic
+Proceedings of the 43 rd International Conference on Machine          metric to guide search.
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026
+by the author(s).                                                     We formulate agent-oriented documentation generation as a
+
+                                                                  1
+
+===== PDF p.2 =====
+Escaping Whack-a-Mole
+
+black-box optimization problem and address it using LLM-              rections but also helps escape local optima by exposing
+based search. The formulation arises naturally from two               heterogeneous failure signals. Refinement proceeds via a
+observations. First, test execution yields a well-defined,            two-stage diagnosis-prescription process: failures are ana-
+computable objective: candidate documentation is evaluated            lyzed to identify root causes, and targeted documentation
+by generating code and measuring test pass rates against              updates are generated to address them. A worthy condition
+unit tests self-generated by the LLM from the original code,          couples both levels, committing refinements only when they
+forming a closed-loop self-improvement process. Second,               resolve the target without regressing previously solved en-
+test failures contain rich diagnostic signals beyond binary           tities, guaranteeing monotonic progress toward a globally
+pass/fail—error messages reveal type mismatches, assertion            correct solution.
+failures expose incorrect outputs, and stack traces indicate
+                                                                      To sum up, our contributions are as follows:
+where execution diverged. This information directly re-
+veals the agent’s knowledge gap: what it misunderstood                • We reframe documentation as repo-specific playbooks for
+that caused incorrect generation. Together, these define a              coding agents and formulate playbook optimization as a
+search structure: documentation states, test-driven transi-             black-box search problem; we identify output coupling
+tions guided by failure analysis, and an objective function             as the root cause of the whack-a-mole phenomenon in
+computed via posterior feedback. The optimization task is               iterative refinement (§2).
+then to navigate this space, letting errors guide refinement
+toward documentation that enables correct code synthesis.             • We propose D OC S EARCH, a bi-level search approach that
+                                                                        escapes the whack-a-mole trap via reverse topological
+For this black-box optimization problem, a natural way is
+                                                                        traversal, error-driven refinement, beam search with di-
+to employ scaling inference solutions (Brown et al., 2024;
+                                                                        versified sampling and a worthy condition guaranteeing
+Gandhi et al., 2024). The most common approaches itera-
+                                                                        monotonic progress (§3).
+tively refine documentation using downstream test feedback,
+either via sequential (i.e., line-search) refinement (Shinn           • We validate D OC S EARCH on D EV E VAL +, demonstrating
+et al., 2023; Madaan et al., 2023), or by generating multi-             that it consistently outperforms strong baselines across
+ple documentation candidates and selecting the best using               LLMs, achieving a +32.6% improvement in ground-truth
+test-time evaluation—commonly known as best-of-N sam-                   test pass rate over the leading baseline, exhibits monotonic
+pling (?Lightman et al., 2024). Alternatively, feedback                 progress while avoiding the whack-a-mole phenomenon,
+can be exploited to revise solutions in a tree-structured man-          and enables effective cross-language transfer, validating
+ner (Wan et al., 2024; Chen et al., 2024a). However, incorpo-           optimized documentation as a language-agnostic, repo-
+rating code generation into the optimization loop introduces            specific playbook for coding agent. (§4).
+a challenge absent from typical optimization problems: out-
+put coupling (as illustrated in Figure 1a). Generated code
+                                                                      2. Problem Formulation
+entities exhibit call dependencies—when entity A invokes
+entity B, the correctness of A’s code depends on B’s actual           We formalize agent-oriented documentation generation as
+implementation, not merely its documentation. Refining                a search problem and identify output coupling as its key
+B’s documentation may yield a different (though correct)              distinction from standard optimization.
+implementation, breaking A even when A’s documentation
+is unchanged. This coupling produces the whack-a-mole                 2.1. Agent-Oriented Documentation Generation
+phenomenon: improving one entity breaks another; fixing
+that breaks a third; the search oscillates without convergence.       Consider a code repository containing n entities E =
+We prove that greedy optimization achieves arbitrarily poor           {e1 , . . . , en } (functions, classes, or methods) with call
+approximation ratios under output coupling (Theorem 1).               graph G = (E, E), where (ei , ej ) ∈ E indicates that ei
+                                                                      invokes ej . Each entity ei has associated documentation di
+We propose D OC S EARCH, a dependency-guided bi-level                 and a test suite Ti specifying correctness criteria.
+search framework that navigates the documentation space
+while avoiding the whack-a-mole trap (Figure 1b). ❶ At                Definition 1 (Agent-Oriented Documentation Generation).
+the outer level, a priority search on the entity dependency           Given an agent (LLM) G, documentation D = (d1 , . . . , dn )
+DAG (Directed Acyclic Graph) selects which entity to refine           produces code C = (c1 , . . . , cn ) where ci = G(D, ei ). The
+first via reverse topological traversal of call dependencies,         quality of documentation for entity ei is measured by the
+ensuring callees are refined before callers. ❷ At the in-             pass rate:
+ner level, a beam tree search explores how to refine the                                     1 X
+                                                                                   ϕi (D) =              1[PASS(ci , t)],         (1)
+selected entity, with each beam branch leveraging diversi-                                  |Ti |
+                                                                                                  t∈Ti
+fied sampling of error messages from LLM self-generated                where 1[·] is the indicator function and PASS(ci , t) is true
+unit tests. This not only explores multiple refinement di-            iff code ci passes test t. An entity is solved if ϕi (D) = 1.
+
+                                                                  2
+
+===== PDF p.3 =====
+Escaping Whack-a-Mole
+
+Let S(D) = {ei : ϕi (D) = 1} be the solved set—entities                        Output coupling makes interference pervasive rather than
+whose generated code passes all tests. The goal is to find                     exceptional, producing characteristic oscillation—a whack-
+documentation maximizing the number of solved entities:                        a-mole cycle where fixing one entity breaks another, pre-
+                   D∗ = arg max |S(D)|.                              (2)       venting convergence.
+                                   D
+                                                                               Theorem 1 (Suboptimality of Self-Refinement). For any
+This formulation naturally yields a search problem: test                       n ≥ 2, there exists a problem instance where self-refinement
+execution provides a computable objective, and test fail-                      achieves |S|/|S ∗ | = O(1/n), where S ∗ denotes the optimal
+ures offer rich diagnostic signals—error messages reveal                       solved set.
+type mismatches, assertion failures expose incorrect out-
+puts, and stack traces indicate where execution diverged.                      The proof constructs an adversarial star-graph instance; refer
+These signals directly reveal the agent’s knowledge gap:                       to Appendix §A.1 for details.
+what it misunderstood that caused incorrect generation. The                    Even when interference is avoided through careful order-
+optimization task is to navigate documentation space, let-                     ing, a second challenge remains: finding refinements that
+ting errors guide refinement toward descriptions that enable                   actually improve the target entity. We term this homo-
+correct code synthesis.                                                        geneous exploration. Self-refinement conditions updates
+                                                                               on all error messages simultaneously. Since test cases are
+2.2. The Whack-a-Mole Phenomenon                                               LLM-generated, their quality varies: some are informative
+Code generation introduces a challenge absent in typical                       (revealing true knowledge gaps), some are uninformative
+search problems: the outputs are coupled through the call                      (providing no learning signal), and some are noisy (mislead-
+graph.                                                                         ing the refinement direction). When noisy errors co-occur,
+                                                                               the LLM infers spurious patterns and produces overfitted
+Definition 2 (Output Coupling). A generation task exhibits                     documentation that addresses artifacts rather than genuine
+output coupling if the correctness of ci depends not only                      deficiencies. Moreover, repeated sampling under identi-
+on its specification di but also on the actual realizations of                 cal error context yields homogeneous candidates, trapping
+outputs it depends on:                                                         the search in local optima. We formalize this phenomenon
+           ϕi (D) = ϕi (d1 , . . . , dn , c1 , . . . , cn ).         (3)       through an ICL-theoretic analysis in §3.3, showing that
+                                                                               refinement quality degrades predictably with error noise.
+When entity ei calls ej , the correctness of ci depends on
+cj ’s actual implementation—not merely its documentation                       Escaping these limitations requires: (i) dependency-guided
+dj . Refining dj to improve cj may produce a different                         traversal that processes callees before callers to prevent in-
+(though correct) implementation, which breaks ci even when                     terference and ensure monotonic progress (§3.2), and (ii)
+di remains unchanged. This coupling propagates through                         diversity-augmented exploration that conditions refinements
+the call graph, producing the whack-a-mole phenomenon:                         on different error subsets to increase the probability of find-
+improving one entity breaks another; fixing that breaks a                      ing high-quality solutions (§3.3).
+third; the search oscillates without convergence.
+                                                                               3. DocSearch
+2.3. Limitations of Self-Refinement
+                                                                               3.1. Overview
+The dominant paradigm for LLM-based code improvement
+is self-refinement: the model iteratively refines its outputs                  D OC S EARCH is a self-improving framework that iteratively
+based on execution feedback (Madaan et al., 2023; Chen                         refines documentation guided by test feedback. We con-
+et al., 2024b). While effective for independent tasks, this                    struct pseudo test cases to guide the search: an LLM gen-
+paradigm exhibits two failure modes under output coupling.                     erates complete test functions which are then validated by
+                                                                               execution on the reference implementation, retaining only
+Self-refinement selects entities to refine without reasoning                   verified-correct tests. This enables a closed loop—D →
+over dependency structure—typically at random or by pri-                       C → e → D′ —where documentation produces code, test
+oritizing entities with the most errors. This ignores the call                 failures diagnose knowledge gaps, and targeted refinements
+graph: when entity ei calls ej , refining ej may change its                    yield improved documentation.
+implementation, breaking ei even when ei ’s documentation
+is unchanged. We call this refinement interference.                            The central challenge is output coupling: refining one en-
+                                                                               tity’s documentation may change its implementation, break-
+Definition 3 (Refinement Interference). Let D[di 7→ d′i ]                      ing callers even when their documentation is unchanged.
+denote documentation with di replaced by d′i . A refinement                    Escaping this whack-a-mole trap requires addressing two
+di → d′i exhibits interference if it degrades other entity:                    failure modes of iterative refinement (§2.3). First, refine-
+           ∃j ̸= i :     ϕj (D[di 7→ d′i ]) < ϕj (D)                 (4)       ment interference—refining an entity without considering
+
+                                                                           3
+
+===== PDF p.4 =====
+Escaping Whack-a-Mole
+
+                                                         Diversity-Augmented Beam Search
+                                                                                                     Worthy Condition:
+                                                                   s0
+                  Priority Search over Dependency DAG
+
+                                                                                                          Error Batch Sampling (Distribution Shift)
+             L0             e1             e2                                  44%
+                                                                               |S|+1
+                                                                                                           Failing tests for e6:
+
+                                                                                                            t1    t3     t4    t6
+
+             L1        e3             e4          e5              57%          44%           60%
+                                                                  |S|+1        |S|-1         |S|-1                       sampled batches
+
+
+                                                                                                                                    diag1   d'1
+             L2             e6              e7
+                                                                                             e4                                     diag2   d'2
+
+                  Solved    Current        Unsolved      Worthy     Rejected           Expanded                                     diag3   d'3
+                                                          Node       Node              Candidates
+
+
+
+Figure 2. Overview of D OC S EARCH. The outer level (left) selects entities in reverse topological order via the call graph. The inner level
+(center) performs beam search over documentation refinements, committing only those satisfying the worthy condition (green path). Error
+batch sampling (right) induces diverse diagnoses by varying test subset composition, enabling escape from local optima.
+
+dependencies may break its callers. We prevent this by pro-                    common callees. Among eligible siblings, we prioritize
+cessing entities in reverse topological order, ensuring that                   those with fewer failing tests, as entities with fewer errors
+when refining an entity, all its callees have already stabilized.              likely have simpler knowledge gaps, and solving them first
+Second, exploration collapse—even when interference is                         provides stable context for harder siblings. This combina-
+avoided, conditioning on all error messages simultaneously                     tion of reverse topological order and error-count priority
+causes refinements to concentrate around similar hypothe-                      defines a deterministic traversal that processes the depen-
+ses. We escape this by conditioning each candidate on a                        dency DAG systematically from leaves to roots.
+different error batch, increasing the probability of sampling
+refinements that improve the target entity.                                    3.3. Inner Level: Diversity-Augmented Beam Search
+These mechanisms naturally decompose into a dependency-                        Given the selected entity e and its failing tests F, the inner-
+guided bi-level search (illustrated in Figure 2, refer to §B                   level search explores how to refine the documentation by
+for details):                                                                  generating W candidates in parallel and committing the first
+                                                                               that meets the worthy condition.
+• Outer level (§3.2): A priority search over the dependency
+  DAG determines which entity to refine, following reverse                     The Signal Corruption Problem. The diagnostic value
+  topological order with siblings prioritized by error count.                  of failing tests is inherently heterogeneous. Some tests
+• Inner level (§3.3): A diversity-augmented beam search                        directly reveal the knowledge gap causing incorrect gener-
+  explores how to refine the selected entity, with each beam                   ation, while others fail due to cascading effects from de-
+  branch conditioned on a different error batch to escape                      pendencies or provide redundant signals that dilute the true
+  local optima.                                                                pattern. We formalize this heterogeneity: the truly informa-
+• Worthy condition (§3.4): A coupling mechanism governs                        tive errors form only a subset of all observed failures.
+  when to commit refinements, ensuring monotonic progress                      Definition 4 (Error Partition). Let F denote failing tests for
+  by rejecting regressive updates.                                             entity e. We partition F into:
+3.2. Outer Level: Priority Search over Dependency                              • F + (informative): errors that directly reveal the knowl-
+     DAG                                                                         edge gap g ∗
+The outer-level search determines which entity to refine next.                 • F − (noisy): errors arising from cascading effects, redun-
+The key constraint is output coupling: if entity ei calls ej ,                   dant signals, or misleading patterns
+then refining ej may change its implementation, potentially
+breaking ei even when ei ’s documentation is unchanged.                        This partition is unknown a priori, but F + alone suffices to
+We eliminate downstream interference by processing enti-                       identify g ∗ .
+ties in reverse topological order—an entity becomes eligible                   Theorem 2 (Signal Corruption). Let q(e)             =
+for refinement only when all its callees have been finalized                   P (successful refinement | e) denote the success prob-
+(solved or marked intractable). By the time we refine entity                   ability when conditioning on error batch e. Under
+e, everything e depends on has stabilized, so our refinement                   Assumptions 1–5 (Appendix §A.2), for batches e+ ⊆ F +
+cannot propagate downward. Interference is thus confined                       and e− ⊆ F − :
+to siblings: entities at the same topological level that share                                      q(e− ) ≪ q(e+ )               (5)
+
+                                                                          4
+
+===== PDF p.5 =====
+Escaping Whack-a-Mole
+
+ Moreover, mixing noisy errors with informative ones de-              3.5. Handling Realistic Dependency Structures
+grades performance: q(e+ ∪ e− ) < q(e+ ) when |e− | > 0.
+                                                                      While the bi-level search in §3.2–§3.4 assumes a clean de-
+The proof is provided in Appendix §A.2.                               pendency DAG, real codebases may contain cyclic depen-
+                                                                      dencies or imprecise call graphs from dynamic dispatch
+Diversified Batch Sampling. Since the informative sub-                and indirect calls; D OC S EARCH extends to these settings
+set F + is unknown, we increase the probability of encoun-            with minimal additions. For cycles, a preprocessing step
+tering an informative-dominated batch through diversified             contracts each strongly connected component (SCC) into
+sampling. We formalize refinement as d′ ∼ Pθ (· | d, e),              a meta-entity refined jointly, restoring a DAG over meta-
+where d is current documentation, e is the error batch, and           entities; the worthy condition naturally extends by commit-
+θ denotes LLM parameters.                                             ting an SCC refinement only if no entity regresses, inside
+Definition 5 (Sampling Strategies). Given budget W and                or outside the SCC. For imprecise call graphs, the worthy
+failing tests F:                                                      condition itself serves as a fallback detector: if refining ej
+                                                                      triggers regression on a previously-solved ei whose depen-
+• Uniform sampling: condition on all errors F and draw                dency was not captured statically, the implicit edge (ei , ej )
+  W i.i.d. samples.                                                   is added to G, the topological order is updated, and the
+• Diversified sampling: construct W distinct batches                  existing search proceeds as normal.
+  {e1 , . . . , eW } via subset selection with varying composi-
+  tion, and draw one sample per batch.                                4. Experiments
+Coverage Advantage of Diversified Sampling. By Theo-                  4.1. Experimental Setup
+rem 2, conditioning on the informative subset F + achieves
+                                                                      Benchmark. We evaluate on D EV E VAL +, a curated
+higher success probability than conditioning on the full set
+                                                                      benchmark for module-level code generation comprising
+F: q(F + ) > q(F ). Since F + is unknown a priori, uniform
+                                                                      20 Python modules with 227 entities validated by 631
+sampling draws all W candidates conditioned on the same
+                                                                      test cases. Modules are sourced from DevEval (Li et al.,
+full set F, with success probability 1 − (1 − q(F))W . Di-
+                                                                      2025) and additional GitHub repositories, selected for di-
+versified sampling instead spreads the W candidates across
+                                                                      versity across application domains (finance, biological anal-
+distinct batches, so as long as at least one batch with suc-
+                                                                      ysis, signal processing, etc.). The benchmark exhibits sig-
+cess probability higher than q(F) is reachable with non-
+                                                                      nificant structural complexity: average dependency graph
+negligible probability, the chance of obtaining at least one
+                                                                      depth of 4.2, maximum depth of 9, providing a challenging
+successful refinement is improved. In other words, diversi-
+                                                                      testbed for studying output coupling effects (full details in
+fied sampling acts as a hedging strategy—it covers more of
+                                                                      Appendix §G).
+the batch space, increasing the probability of encountering
+an informative-dominated configuration without requiring
+knowledge of the partition F + /F − .                                 Baselines.   We compare against three categories:
+                                                                      • Static methods: RepoAgent (Luo et al., 2024) and DocA-
+3.4. Worthy Condition: Coupling the Two Levels                          gent (Yang et al., 2025) generate documentation without
+                                                                        test feedback, representing human-oriented documenta-
+The worthy condition couples the outer and inner levels by              tion paradigms.
+determining when to commit refinements, ensuring mono-                • Commercial agents: Cursor (Truell et al., 2022) and
+tonic progress throughout the search. The search process                Claude Code (Anthropic, 2024), state-of-the-art coding
+constructs a tree where each node v represents a documen-               assistants evaluated under four configurations: (1) base:
+tation state Dv with associated pass rates {ϕe (Dv )}e∈E ;              generate documentation with default settings; (2) +Topo:
+the root contains the initial documentation, and children               provide reverse topological order as context to guide
+of a node represent alternative refinements from different              generation sequences; (3) +Test: prompt the agent to
+error batches. A node v with parent u is worthy if the re-              generate test cases from documentation, then iteratively
+finement causes no regression: ϕe (Dv ) ≥ ϕe (Du ) for all              refine code until tests pass; (4) +Topo+Test: combine
+e ∈ E. A worthy path is a root-to-node path where every                 both strategies. Cursor supports Gemini-2.5-Flash and
+node is worthy (illustrated in Figure 2). The worthy condi-             Claude-4.5-Sonnet but not GPT-4o; Claude Code only
+tion commits a refinement if and only if the resulting node             supports Claude models.
+lies on a worthy path. This guarantees monotonicity: along
+                                                                      • Iterative refinement: refines documentation using
+any worthy path v0 → v1 → · · · → vT , the solved set
+                                                                        test feedback, selecting the next entity either randomly
+Sv = {e : ϕe (Dv ) = 1} satisfies Sv0 ⊆ Sv1 ⊆ · · · ⊆ SvT ,
+                                                                        (Iterative) or in reverse topological order (Iterative+Topo).
+directly preventing the whack-a-mole phenomenon—once
+an entity is solved, it remains solved.                               For all comparisons, final results are reported using ground-
+
+                                                                  5
+
+===== PDF p.6 =====
+Escaping Whack-a-Mole
+
+Table 1. Main results on D EV E VAL +. |S|: Solve Rate (%). ϕ̄:        ambiguities unpredictably, yielding different implementa-
+Pass Rate (%). Best in bold, second best underlined.                   tions from the same underspecified phrase. This gap cannot
+                   Gemini-2.5-Flash Claude-4.5-Sonnet GPT-4o           be closed by prompting alone and requires documentation
+ Method             |S|      ϕ̄      |S|      ϕ̄       |S| ϕ̄          optimized for agent comprehension.
+ Static Methods (No Optimization)
+                                                                       Commercial Agents: Missing Structural Mechanisms.
+ RepoAgent         21.1    32.8     37.0     49.6     29.5 42.0
+                                                                       Cursor and Claude Code, even with test feedback and
+ DocAgent          15.9    29.3     30.4     46.9     23.3 39.1
+ Commercial Coding Agents
+                                                                       topological ordering (+Topo+Test), achieve only 55.1%
+ Cursor            17.2    26.9     32.2     42.0       –   –          and 64.8% respectively—substantially below D OC S EARCH.
+    + Topo         22.9    32.8     38.8     48.2       –   –          These tools incorporate sophisticated code understanding
+    + Test         33.9    42.0     50.2     54.7       –   –          and generation capabilities, yet lack two mechanisms our
+    + Topo + Test 42.7     49.8     55.1     59.4       –   –          analysis identifies as essential. First, without the worthy con-
+ Claude Code         –       –      41.9     52.3       –   –          dition, they commit refinements that solve the current entity
+    + Topo           –       –      47.1     57.5       –   –          but inadvertently break others, accumulating regressions
+    + Test           –       –      58.1     65.0       –   –          over iterations. Second, without tree search, they cannot
+    + Topo + Test –          –      64.8     71.5       –   –
+                                                                       backtrack from suboptimal early refinements, allowing a
+ Iterative Refinement
+                                                                       single poor decision to propagate through later iterations.
+ Iterative         41.4    46.4     62.6     63.4     52.9 56.6
+    + Topo         44.1    48.7     67.4     67.5     58.1 60.9
+                                                                       This performance gap shows that raw model capacity is
+ Ours
+                                                                       insufficient; principled search structure is required.
+ D OC S EARCH      74.4    79.4     95.2     96.2     90.7 93.3        Iterative Refinement: Ordering Alone Is Insufficient.
+                                                                       Iterative methods with test feedback achieve 41.4–67.4%
+                                                                       solve rate—substantial improvement over static methods,
+truth test cases, which are not visible to the search algo-            confirming that execution feedback provides valuable signal.
+rithms. Instead, the search is guided by LLM-generated tests.          Adding topological ordering (+Topo) yields consistent but
+Details of test case generation are provided in Appendix §H;           modest improvements (2.7–5.2%), validating that process-
+Implementation details and prompts for all baselines are               ing order matters for managing dependencies. However,
+provided in Appendix §F.                                               even with correct ordering, iterative methods trail D OC -
+                                                                       S EARCH by 27.8–30.3%. This gap reveals the critical miss-
+Metrics. We report Solve Rate |S|/n (proportion of enti-               ing mechanism: the worthy condition. Without it, these
+ties achieving ϕi = 1) as the primary metric, and Pass Rate            methods commit refinements that solve the target entity but
+ϕ̄ = n1 i ϕi (average test pass rate) as a secondary metric            break siblings at the same topological level—entities that
+        P
+capturing partial progress.                                            share common callees. The result is the characteristic os-
+                                                                       cillation predicted by Theorem 1: each iteration’s gains are
+4.2. Main Results                                                      partially offset by regressions, preventing convergence to
+                                                                       high solve rates.
+Table 1 presents comprehensive comparisons across meth-
+ods and base LLMs. D OC S EARCH achieves the highest                   Cross-Model Consistency. The improvement pattern is
+solve rates across all three LLMs: 74.4% with Gemini-                  remarkably consistent across LLMs of varying capabili-
+2.5-Flash, 95.2% with Claude-4.5-Sonnet, and 90.7% with                ties. Despite substantial differences in base performance—
+GPT-4o. The consistency of improvements (27.8–32.6% ab-                Gemini-2.5-Flash achieves only 44.1% with the best it-
+solute gains over the best iterative baseline) suggests that our       erative baseline while Claude-4.5-Sonnet reaches 67.4%.
+approach addresses fundamental optimization challenges                 D OC S EARCH delivers comparable absolute gains across
+rather than exploiting model-specific behaviors. Below, we             all models (+30.3%, +27.8%, and +32.6% respectively
+analyze why each baseline category falls short.                        over Iterative+Topo). This consistency suggests that D OC -
+                                                                       S EARCH addresses a fundamental challenge in the optimiza-
+Static Methods: The Documentation-Agent Gap. RepoA-                    tion landscape—output coupling—rather than compensating
+gent and DocAgent achieve solve rates of only 15.9–37.0%,              for specific model weaknesses. Stronger models achieve
+revealing a fundamental documentation-agent gap: docu-                 higher absolute performance but face the same structural
+mentation optimized for human readability often misleads               barriers that D OC S EARCH overcomes.
+LLMs into incorrect implementations. Human developers
+naturally fill in gaps through world knowledge and contex-             4.3. Escaping the Whack-a-Mole Trap
+tual reasoning—they understand that “returns a list of items”
+likely means maintaining input order, or that “processes               Having established D OC S EARCH’s effectiveness, we now
+the data” implies specific error handling conventions. By              analyze how it escapes the whack-a-mole trap that limits
+contrast, LLMs interpret documentation literally but resolve           iterative approaches.
+
+                                                                   6
+
+===== PDF p.7 =====
+Escaping Whack-a-Mole
+
+                      100
+                                                                                                                                       Repo
+
+                       90                                                                                                                     stocktrend
+
+                                                                                                                                                 pso
+                       80                                                                                                                       schedule
+      Pass Rate (%)
+
+
+
+                       70               Whack-a-mole oscillation zone
+                                                                                                                                                quantfin
+
+                                                                                                                                                 toon
+                       60
+                                                                                                                                       Method
+
+                       50                                                                                                                       docsearch
+
+                                                                                                                                              iterative+topo
+                       40                                   DocSearch
+                                                            Iterative + Topo                                                                     iterative
+                                                            Iterative
+                       30
+                            0   1   2     3          4         5         6
+                                        Depth                                        Figure 4. Exploration efficiency: pass rate vs. number of explored
+Figure 3. Pass rate trajectories on a 3-module subset of D EV E VAL +                documentation variants. D OC S EARCH (red) clusters in the top-
+(GPT-4o). The x-axis denotes the number of entities processed; the                   left (high performance, few explorations), while Iterative+Topo
+y-axis denotes cumulative pass rate. Iterative refinement (orange)                   (orange) and Iterative (blue) require more exploration for inferior
+oscillates due to regressions, while D OC S EARCH (blue) achieves                    results. Each point represents one module.
+monotonic progress.
+
+                                                                                     they induce similar hypotheses and fail together if sig-
+Table 2. Ablation study (GPT-4o) on a subset of D EV E VAL + with                    nals are misleading; diversified sampling increases the
+10 modules. Each row removes one component from the full
+D OC S EARCH.                                                                        probability that at least one batch reveals the true pattern.
+                                                                                     The worthy condition’s smaller degradation (−7.0%)
+     Configuration                       |S| (%)         ϕ̄ (%)         ∆|S|         reflects that reverse topological order already eliminates
+     D OC S EARCH (full)                  90.7            93.3            –          most interference—the remaining impact comes from
+       w/o Reverse Topo                   72.2            75.8          -18.5        sibling conflicts (entities at the same level sharing common
+       w/o Error Diversity                81.1            83.5           -9.6        callees), which the worthy condition resolves by rejecting
+       w/o Worthy Condition               83.7            85.9           -7.0        refinements that solve one entity but break its siblings.
+
+                                                                                     4.3.3. E XPLORATION E FFICIENCY
+4.3.1. V ISUALIZING THE P HENOMENON
+                                                                                     Figure 4 plots pass rate against the number of explored docu-
+Figure 3 directly visualizes the whack-a-mole phenomenon                             mentation variants, revealing a striking efficiency gap. D OC -
+on a representative subset of 3 modules (34 entities). Both                          S EARCH points cluster in the top-left corner—achieving
+iterative variants exhibit characteristic oscillation within the                     88–97% pass rate while exploring only 15–25 variants per
+shaded “whack-a-mole zone”: Iterative+Topo (orange) fluc-                            module. Iterative+Topo, despite exploring 1.5–2× more
+tuates between 52–62%, while Iterative without topological                           variants, achieves inferior performance that plateaus around
+ordering (red, dashed) shows even more severe oscillation                            70–75%. Iterative without topological ordering performs
+between 43–58%, with gains offset by regressions—this                                worst, requiring 40–50 explorations while achieving only
+reflects systematic interference from output coupling (Defi-                         59–70% pass rate.
+nition 2), not random noise. When a callee’s documentation
+is refined, its implementation may change, breaking callers                          This efficiency gap has two sources. First, error-driven re-
+that implicitly depended on specific details. In contrast,                           finement targets specific knowledge gaps rather than explor-
+D OC S EARCH (blue) achieves monotonic improvement: the                              ing randomly. Each refinement addresses a diagnosed defi-
+worthy condition ensures each committed refinement main-                             ciency, making exploration purposeful rather than diffuse.
+tains or increases the solved set, breaking the oscillation                          Second, reverse topological ordering eliminates wasted ef-
+cycle and converging to over 90% pass rate.                                          fort on refinements that would be invalidated by subsequent
+                                                                                     downstream changes. In iterative approaches, refining entity
+4.3.2. C OMPONENT C ONTRIBUTION A NALYSIS                                            ei can be undone if a later refinement of callee ej reverses it,
+                                                                                     wasting the effort on ei . A complementary token-efficiency
+Table 2 isolates each component’s contribution. The                                  analysis is provided in §4.6.
+largest degradation (−18.5%) comes from removing
+reverse topological order, confirming it as the structural
+                                                                                     4.4. Downstream Utility: Cross-Language Generation
+foundation: it prevents downstream interference by
+ensuring callees are finalized before callers, confining                             Beyond improving same-language code generation, can the
+interference to siblings rather than the entire call chain.                          synthesized playbook serve broader purposes? We explore
+Error diversity (−9.6%) addresses exploration collapse:                              whether it functions as a language-agnostic playbook — a
+when all candidates condition on identical error batches,                            behavioral specification that, although optimized for one
+
+                                                                                 7
+
+===== PDF p.8 =====
+Escaping Whack-a-Mole
+
+Table 3. Cross-language generation with GPT-4o. Python→Java is
+evaluated on the 10-module subset of D EV E VAL +; Python→Go
+on a 5-module subset. Doc-only substantially outperforms Source-
+only across both targets, suggesting the synthesized documentation
+serves as an effective language-agnostic playbook.
+
+                        Python→Java    Python→Go
+   Input Configuration |S| (%) ϕ̄ (%) |S| (%) ϕ̄ (%)
+   Source-only           41.4   52.3   39.6    44.7
+   Doc-only (optimized)  68.7   74.2   62.3    68.9
+   Doc+Source            79.3   83.6   72.1    78.4
+
+
+source language, enables code generation in languages other              Figure 5. Token efficiency on D EV E VAL + (GPT-4o): cross-module
+than the source.                                                         average pass rate ϕ̄ as a function of cumulative output tokens.
+
+Experimental Setup. We evaluate cross-language trans-
+fer from Python to two target languages, Java and Go, on
+                                                                         mized documentation is also more useful to human readers.
+subsets of our suite (10 modules for Python→Java and 5
+modules for Python→Go). We select modules whose se-                      Protocol. We randomly select 30 entities from 6 mod-
+mantics are amenable to cross-language transfer (see Ap-                 ules in D EV E VAL + where the documentation changed sub-
+pendix G.4 for details). Documentation is first optimized by             stantively between the initial and D OC S EARCH-optimized
+D OC S EARCH for Python code generation, and test harnesses              versions (GPT-4o, B=50). Five annotators with computer-
+are then manually rewritten in the target language while                 science backgrounds independently rate each documenta-
+preserving original input–output pairs to ensure semantic                tion pair, blinded to version identity with presentation order
+equivalence. We compare three configurations: Source-                    randomized across entities. Each documentation is rated
+only (direct cross-language translation from Python source),             on five 1–5 Likert dimensions—Completeness, Correct-
+Doc-only (generation from optimized documentation), and                  ness, Clarity, Helpfulness, and Specificity (full rubric in
+Doc+Source (using both documentation and source code).                   Appendix C)—and we report Krippendorff’s ordinal α as
+                                                                         the inter-annotator agreement measure.
+Results and Analysis. Table 3 reveals a consistent pattern
+across both target languages: Doc-only substantially out-
+performs Source-only (Java: 68.7% vs. 41.4%, +27.3; Go:
+                                                                         Table 4. Paired human evaluation of documentation quality. Scores
+62.3% vs. 39.6%, +22.7). This gap reflects a fundamental                 are mean ± standard deviation over 30 entities, each rated by 5
+difference in representations: source code describes how to              annotators. α: Krippendorff’s ordinal α.
+compute using Python-specific idioms (list comprehensions,
+duck typing), requiring the LLM to simultaneously under-                      Dimension           Initial       Optimized       α
+stand the idioms, identify intent, and map to target-language                 Completeness     3.10 ± 1.03     4.67 ± 0.54     0.94
+equivalents; documentation describes what the function                        Correctness      3.58 ± 0.86     4.50 ± 0.85     0.78
+                                                                              Clarity          2.88 ± 0.91     4.42 ± 0.67     0.92
+computes, abstracting away Python-specific details and free-
+                                                                              Helpfulness      2.40 ± 1.16     4.43 ± 0.80     0.71
+ing the LLM to choose target-appropriate implementations.
+                                                                              Specificity      2.17 ± 1.05     4.52 ± 0.85     0.75
+The Doc+Source combination achieves the best results on
+both targets (79.3% and 72.1%), as documentation specifies
+behavioral intent while source code conveys precise compu-
+tations difficult to describe in natural language—together               Results and Analysis. Table 4 reports per-dimension scores.
+providing both the “what” and the “how”. The fact that Java              Optimized documentation improves across all five dimen-
+and Go—two languages with different paradigms (object-                   sions, with the largest gains in Specificity (+2.35) and Help-
+oriented vs. structural, exception-based vs. error-value)—               fulness (+2.03)—the two dimensions most tied to action-
+exhibit the same ordering and comparable improvement                     able behavioral information—followed by Completeness
+magnitudes suggests that D OC S EARCH-optimized docu-                    (+1.57) and Clarity (+1.54). Inter-annotator agreement is
+mentation captures language-agnostic behavioral specifica-               high (α ≥ 0.71), indicating these improvements are not ar-
+tions rather than patterns specific to any single target.                tifacts of annotator subjectivity. The pattern aligns with the
+                                                                         qualitative shift observed throughout optimization: D OC -
+                                                                         S EARCH moves documentation from high-level descriptions
+4.5. Human Evaluation of Documentation Quality
+                                                                         of what an entity does to precise specifications of how it
+While D OC S EARCH optimizes documentation against down-                 behaves (example in Appendix D); the gain in Correctness
+stream code correctness rather than human readability, we                (+0.92) further suggests that test-driven refinement also
+conduct a paired human evaluation to test whether the opti-              corrects subtle inaccuracies.
+
+                                                                     8
+
+===== PDF p.9 =====
+Escaping Whack-a-Mole
+
+4.6. Cost Worthiness                                                code synthesis (Chen et al., 2023; Zhang et al., 2023b) and
+                                                                    as the verification signal for reconstructing entire reposito-
+We acknowledge that D OC S EARCH’s beam search and wor-
+                                                                    ries: ProgramBench (Yang et al., 2026) generates behavioral
+thy condition involve multiple generation cycles. However,
+                                                                    tests via agent-driven fuzzing to evaluate whole-program
+a token-level analysis reveals that this apparent overhead
+                                                                    rebuilds, and RepoZero (Zhang et al., 2026) performs it-
+actually yields superior efficiency. Figure 5 tracks ϕ̄ as a
+                                                                    erative LLM-based test generation as part of its agentic
+function of cumulative output tokens: at just 20k tokens,
+                                                                    code-test evolution loop to verify repository-level outputs.
+D OC S EARCH (68.3%) already exceeds Iterative’s final per-
+                                                                    D OC S EARCH validates LLM-generated tests against the ref-
+formance at 200k tokens (56.6%), a 10× efficiency gap.
+                                                                    erence implementation, preserving both oracle correctness
+Moreover, D OC S EARCH is a one-time offline optimization:
+                                                                    and diagnostic signal.
+the optimized documentation is reused across all down-
+stream tasks without re-incurring the search cost.
+                                                                    5.3. Inference Time Scaling
+
+5. Related Work                                                     Inference-time scaling has become a central paradigm for
+                                                                    improving LLM reasoning at test time. Early work focused
+5.1. Code Documentation                                             on prompting strategies that elicit intermediate reasoning,
+                                                                    such as chain-of-thought and tree-based prompting (Wei
+Code documentation generation has evolved through three
+                                                                    et al., 2022; Yao et al., 2023). Beyond prompting, recent
+paradigms. Early template-based approaches relied on rule-
+                                                                    efforts explore sampling-based search and reward-guided
+driven heuristics and predefined templates to extract struc-
+                                                                    aggregation to further boost inference performance (Light-
+tural information from source code (Haiduc et al., 2010;
+                                                                    man et al., 2024; Brown et al., 2024; Snell et al., 2025; Wu
+Sridhara et al., 2010; Moreno et al., 2013). Training-
+                                                                    et al., 2025; Light et al., 2025c;b; Liu et al., 2025b), includ-
+based methods subsequently emerged, leveraging neural
+                                                                    ing REBASE (Wu et al., 2025), which uses a process reward
+architectures such as LSTMs with attention (Iyer et al.,
+                                                                    model (PRM) to prioritize promising reasoning trajectories.
+2016) and Transformer-based models (Ahmad et al., 2020)
+                                                                    More recently, multi-agent frameworks scale inference via
+trained on code-comment pairs for function-level summa-
+                                                                    coordination and iterative self-improvement, exemplified
+rization. More recently, LLM-based approaches have scaled
+                                                                    by SWE-Search (Antoniades et al., 2025), which combines
+to repository-level documentation: RepoAgent (Luo et al.,
+                                                                    MCTS with multi-agent learning (Jin et al., 2025; Light
+2024) leverages global structure analysis and reference re-
+                                                                    et al., 2025a; Zhang et al., 2025b;c;a). However, these
+lationships, while DocAgent (Yang et al., 2025) employs
+                                                                    approaches cannot be directly applied to agent-oriented doc-
+multi-agent collaboration with topological code process-
+                                                                    umentation generation due to the output coupling problem.
+ing. However, these methods remain fundamentally human-
+oriented—quality is assessed through subjective metrics
+like completeness and helpfulness (Luo et al., 2024; Yang           6. Conclusion
+et al., 2025), or text similarity measures such as BLEU
+                                                                    In this paper, we introduced D OC S EARCH, a dependency-
+and ROUGE (Roy et al., 2021). As LLMs increasingly
+                                                                    guided bi-level search framework for synthesizing repo-
+serve as autonomous coding agents, documentation must be
+                                                                    specific playbooks for coding agents, framing playbook
+optimized for agent comprehension, not just human readabil-
+                                                                    optimization as a black-box optimization problem driven
+ity (Hong et al., 2024; Qian et al., 2024). To our knowledge,
+                                                                    by downstream code correctness. By explicitly modeling
+D OC S EARCH is the first to formulate agent-oriented doc-
+                                                                    call dependencies through a priority search and exploiting
+umentation generation, measuring quality by downstream
+                                                                    test-time feedback via a beam tree search with diversified
+code correctness rather than subjective human assessment.
+                                                                    error-message sampling, D OC S EARCH avoids the output-
+                                                                    coupling–induced whack-a-mole phenomenon that hinders
+5.2. LLM-Based Test Generation
+                                                                    conventional refinement methods. We provided theoretical
+LLM-based test generation has emerged as a practical al-            guarantees of monotonic progress under a worthy condi-
+ternative when ground-truth tests are unavailable. Early            tion and showed how diversified diagnostic signals help
+work shows that LLMs can produce coverage-driven test               escape local optima during inference-time optimization.
+suites (Schäfer et al., 2024; Chen et al., 2024c), though          Empirically, D OC S EARCH achieves substantial improve-
+generated tests often cluster around similar patterns and           ments on D EV E VAL +, consistently outperforming strong
+miss critical edge cases (Jain et al., 2025). Coverage-guided       baselines across multiple LLMs, exhibiting stable conver-
+sampling (Lemieux et al., 2023) and interactive test-driven         gence behavior, and enabling effective cross-language trans-
+refinement (Fakhoury et al., 2024) have been proposed to im-        fer. These results suggest that the synthesized playbooks
+prove diversity and accuracy. Beyond standalone test gener-         serve as language-agnostic, repo-specific specifications for
+ation, recent work uses LLM-generated tests as feedback for         agentic code generation.
+
+
+                                                                9
+
+===== PDF p.10 =====
+Escaping Whack-a-Mole
+
+Acknowledgements                                                     Scaling inference compute with repeated sampling. arXiv
+                                                                     preprint arXiv:2407.21787, 2024.
+This work is supported in part by the National Science
+Foundation under grant 2442171 and the Google Academic             Chen, B., Zhang, F., Nguyen, A., Zan, D., Lin, Z., Lou, J.-
+Research Award (GARA). Any opinions, findings, and con-              G., and Chen, W. CodeT: Code generation with generated
+clusions made in this paper are those of the authors and do          tests. In ICLR, 2023.
+not necessarily reflect the views of the funding agencies.
+                                                                   Chen, G., Liao, M., Li, C., and Fan, K. Alphamath almost
+                                                                     zero: Process supervision without process. In NeurIPS,
+Impact Statement                                                     2024a.
+This paper proposes a method for improving the reliability
+                                                                   Chen, X., Lin, M., Schärli, N., and Zhou, D. Teaching large
+and effectiveness of large language models as autonomous
+                                                                     language models to self-debug. In ICLR, 2024b.
+coding agents by optimizing code documentation through
+inference-time search. By enabling more systematic and sta-        Chen, Y., Hu, Z., Zhi, C., Han, J., Deng, S., and Yin, J.
+ble self-improvement without additional human supervision,           ChatUniTest: A framework for LLM-based test genera-
+this work has the potential to reduce development costs,             tion. In FSE Demo, 2024c.
+improve software quality, and support broader adoption of
+LLM-based programming tools. At the same time, more                Fakhoury, S., Naik, A., Sakkas, G., Chakraborty, S., and
+capable coding agents may lower the barrier to producing             Lahiri, S. K. LLM-based test-driven interactive code
+software at scale, which could amplify both beneficial and           generation: User study and empirical evaluation. IEEE
+harmful applications. However, our approach does not in-             TSE, 2024.
+troduce new capabilities beyond code document generation
+and relies on existing test-based evaluation, and we do not        Gandhi, K., Lee, D. H. J., Grand, G., Liu, M., Cheng, W.,
+anticipate novel ethical risks beyond those already associ-          Sharma, A., and Goodman, N. Stream of search (SoS):
+ated with LLM-based software development. Overall, this              Learning to search in language. In COLM, 2024.
+work aims to advance the field of machine learning, and            Haiduc, S., Aponte, J., Moreno, L., and Marcus, A. On
+we believe its societal implications are aligned with well-          the use of automated text summarization techniques for
+established considerations in deploying automated coding             summarizing source code. In WCRE, 2010.
+systems.
+                                                                   Hong, S., Zhuge, M., Chen, J., Zheng, X., Cheng, Y., Zhang,
+References                                                           C., Wang, J., Wang, Z., Yau, S. K. S., Lin, Z., Zhou, L.,
+                                                                     Ran, C., Xiao, L., Wu, C., and Schmidhuber, J. Metagpt:
+Agrawal, L. A., Kanade, A., Goyal, N., Lahiri, S. K., and            Meta programming for a multi-agent collaborative frame-
+  Rajamani, S. K. Monitor-guided decoding of code LMs                work. In ICLR, 2024.
+ with static analysis of repository context. In NeurIPS,
+  2023.                                                            Iyer, S., Konstas, I., Cheung, A., and Zettlemoyer, L. Sum-
+                                                                     marizing source code using a neural attention model. In
+Ahmad, W., Chakraborty, S., Ray, B., and Chang, K.-W. A              ACL, 2016.
+  transformer-based approach for source code summariza-
+  tion. In ACL, 2020.                                              Jain, K., Synnaeve, G., and Rozière, B. TestGenEval: A real
+                                                                      world unit test generation and test completion benchmark.
+Anthropic. Claude code. https://code.claude.                          In ICLR, 2025.
+  com/, 2024.
+                                                                   Jin, C., Peng, H., Zhang, Q., Tang, Y., Metaxas, D. N., and
+Antoniades, A., Örwall, A., Zhang, K., Xie, Y., Goyal,               Che, T. Two heads are better than one: Test-time scaling
+ A., and Wang, W. Y. SWE-search: Enhancing software                   of multi-agent collaborative reasoning. In NeurIPS SEA
+  agents with monte carlo tree search and iterative refine-          Workshop, 2025.
+  ment. In ICLR, 2025.
+                                                                   Lemieux, C., Inala, J. P., Lahiri, S. K., and Sen, S. Co-
+Bairi, R., Sonwane, A., Kanade, A., C., V. D., Iyer, A.,             daMOSA: Escaping coverage plateaus in test generation
+  Parthasarathy, S., Rajamani, S. K., Ashok, B., and Shet,           with pre-trained large language models. In ICSE, 2023.
+  S. Codeplan: Repository-level coding using LLMs and
+  planning. In FSE, 2024.                                          Li, B., Wu, W., Tang, Z., Shi, L., Yang, J., Li, J., Yao, S.,
+                                                                     Qian, C., Hui, B., Zhang, Q., et al. Prompting large
+Brown, B., Juravsky, J., Ehrlich, R., Clark, R., Le, Q. V.,          language models to tackle the full software development
+  Ré, C., and Mirhoseini, A. Large language monkeys:                lifecycle: A case study. In COLING, 2025.
+
+                                                              10
+
+===== PDF p.11 =====
+Escaping Whack-a-Mole
+
+Light, J., Cai, M., Chen, W., Wang, G., Chen, X., Cheng,               Roy, D., Fakhoury, S., and Arnaoudova, V. Reassessing au-
+  W., Yue, Y., and Hu, Z. Strategist: Self-improvement of                tomatic evaluation metrics for code summarization tasks.
+  llm decision making via bi-level tree search. In ICLR,                 In FSE, 2021.
+  2025a.
+                                                                       Schäfer, M., Nadi, S., Eghbali, A., and Tip, F. An empirical
+Light, J., Cheng, W., Yue, W., Oyamada, M., Wang, M., Pa-                evaluation of using large language models for automated
+  ternain, S., and Chen, H. Disc: Dynamic decomposition                  unit test generation. IEEE TSE, 2024.
+  improves llm inference scaling. NeurIPS, 2025b.                      Shinn, N., Cassano, F., Berman, E., Gopinath, A.,
+Light, J., Wu, Y., Sun, Y., Yu, W., Liu, Y., Zhao, X., Hu,               Narasimhan, K., and Yao, S. Reflexion: Language agents
+  Z., Chen, H., and Cheng, W. SFS: Smarter code space                    with verbal reinforcement learning. In NeurIPS, 2023.
+  search improves LLM inference scaling. In ICLR, 2025c.               Shrivastava, D., Larochelle, H., and Tarlow, D. Repository-
+                                                                         level prompt generation for large language models of
+Lightman, H., Kosaraju, V., Burda, Y., Edwards, H., Baker,
+                                                                         code. In ICML, 2023.
+  B., Lee, T., Leike, J., Schulman, J., Sutskever, I., and
+  Cobbe, K. Let’s verify step by step. In ICLR, 2024.                  Snell, C. V., Lee, J., Xu, K., and Kumar, A. Scaling LLM
+                                                                         test-time compute optimally can be more effective than
+Liu, X., Lan, B., Hu, Z., Liu, Y., Zhang, Z., Wang, F.,                  scaling parameters for reasoning. In ICLR, 2025.
+  Shieh, M. Q., and Zhou, W. CodexGraph: Bridging large
+  language models and code repositories via code graph                 Sridhara, G., Hill, E., Muppaneni, D., Pollock, L., and Vijay-
+  databases. In NAACL, 2025a.                                            Shanker, K. Towards automatically generating summary
+                                                                         comments for java methods. In ASE, 2010.
+Liu, Y., Li, Z., Fang, Z., Xu, N., He, R., and Tan, T. Rethink-
+  ing the role of prompting strategies in LLM test-time                Truell, M., Sanger, A., Asif, S., and Lunnemark, A. Cursor.
+  scaling: A perspective of probability theory. In ACL,                  https://cursor.com/, 2022.
+  2025b.                                                               Wan, Z., Feng, X., Wen, M., McAleer, S. M., Wen, Y.,
+                                                                        Zhang, W., and Wang, J. AlphaZero-like tree-search can
+Luo, Q., Ye, Y., Liang, S., Zhang, Z., Qin, Y., Lu, Y., Wu, Y.,         guide large language model decoding and training. In
+  Cong, X., Lin, Y., Zhang, Y., Che, X., Liu, Z., and Sun, M.           ICML, 2024.
+  RepoAgent: An LLM-powered open-source framework
+  for repository-level code documentation generation. In               Wei, J., Wang, X., Schuurmans, D., Bosma, M., Ichter, B.,
+  EMNLP Demo, 2024.                                                     Xia, F., Chi, E. H., Le, Q. V., and Zhou, D. Chain-of-
+                                                                        thought prompting elicits reasoning in large language
+Madaan, A., Tandon, N., Gupta, P., Hallinan, S., Gao, L.,               models. In NeurIPS, 2022.
+ Wiegreffe, S., Alon, U., Dziri, N., Prabhumoye, S., Yang,
+ Y., Gupta, S., Majumder, B. P., Hermann, K., Welleck,                 Wu, D., Ahmad, W. U., Zhang, D., Ramanathan, M. K., and
+ S., Yazdanbakhsh, A., and Clark, P. Self-refine: Iterative             Ma, X. Repoformer: Selective retrieval for repository-
+ refinement with self-feedback. In NeurIPS, 2023.                       level code completion. In ICML, 2024.
+                                                                       Wu, Y., Sun, Z., Li, S., Welleck, S., and Yang, Y. Inference
+Moreno, L., Aponte, J., Sridhara, G., Marcus, A., Pollock,
+                                                                        scaling laws: An empirical analysis of compute-optimal
+ L., and Vijay-Shanker, K. Automatic generation of natu-
+                                                                        inference for LLM problem-solving. In ICLR, 2025.
+ ral language summaries for java classes. In ICPC, 2013.
+                                                                       Yang, D., Simoulin, A., Qian, X., Liu, X., Cao, Y., Teng,
+Ouyang, S., Yu, W., Ma, K., Xiao, Z., Zhang, Z., Jia, M.,                Z., and Yang, G. DocAgent: A multi-agent system for
+  Han, J., Zhang, H., and Yu, D. RepoGraph: Enhancing                    automated code documentation generation. In ACL Demo,
+ AI software engineering with repository-level code graph.               2025.
+  In ICLR, 2025.
+                                                                       Yang, J., Lieret, K., Ma, J., Thakkar, P., Pedchenko, D.,
+Putra, R. R., Basuki, R. S. P., Cheng, Y., and Gao, P.                   Sootla, S., McMilin, E., Yin, P., Hou, R., Synnaeve, G.,
+  NL2Logic: AST-guided translation of natural language                   Yang, D., and Press, O. ProgramBench: Can language
+  into first-order logic with large language models. In EACL             models rebuild programs from scratch? arXiv preprint
+  Findings, 2026.                                                        arXiv:2605.03546, 2026.
+Qian, C., Liu, W., Liu, H., Chen, N., Dang, Y., Li, J., Yang,          Yao, S., Yu, D., Zhao, J., Shafran, I., Griffiths, T. L., Cao,
+  C., Chen, W., Su, Y., Cong, X., Xu, J., Li, D., Liu, Z., and           Y., and Narasimhan, K. R. Tree of thoughts: Deliberate
+  Sun, M. Chatdev: Communicative agents for software                     problem solving with large language models. In NeurIPS,
+  development. In ACL, 2024.                                             2023.
+
+                                                                  11
+
+===== PDF p.12 =====
+Escaping Whack-a-Mole
+
+Zhang, F., Chen, B., Zhang, Y., Keung, J., Liu, J., Zan,
+  D., Mao, Y., Lou, J.-G., and Chen, W. RepoCoder:
+  Repository-level code completion through iterative re-
+  trieval and generation. In EMNLP, 2023a.
+Zhang, G., Yue, Y., Li, Z., Yun, S., Wan, G., Wang, K.,
+  Cheng, D., Yu, J. X., and Chen, T. Cut the crap: An
+  economical communication pipeline for llm-based multi-
+  agent systems. In ICLR, 2025a.
+Zhang, G., Yue, Y., Sun, X., Wan, G., Yu, M., Fang, J.,
+  Wang, K., Chen, T., and Cheng, D. G-designer: Archi-
+  tecting multi-agent communication topologies via graph
+  neural networks. In ICML, 2025b.
+
+Zhang, J., Xiang, J., Yu, Z., Teng, F., Chen, X.-H., Chen,
+  J., Zhuge, M., Cheng, X., Hong, S., Wang, J., Zheng, B.,
+  Liu, B., Luo, Y., and Wu, C. AFlow: Automating agentic
+  workflow generation. In ICLR, 2025c.
+Zhang, K., Wang, D., Xia, J., Wang, W. Y., and Li, L.
+  ALGO: Synthesizing algorithmic programs with LLM-
+  generated oracle verifiers. In NeurIPS, 2023b.
+Zhang, Y., Ruan, H., Fan, Z., and Roychoudhury, A. Au-
+  toCodeRover: Autonomous program improvement. In
+  ISSTA, 2024.
+
+Zhang, Z., Xu, Y., Liang, J., Li, W., Chen, X., Qian, L., Pei,
+  X., Huang, J., Sun, R., and Wu, Y. RepoZero: Can LLMs
+  generate a code repository from scratch? arXiv preprint
+  arXiv:2605.07122, 2026.
+
+
+
+
+                                                                 12
+
+===== PDF p.13 =====
+Escaping Whack-a-Mole
+
+A. Proofs
+This appendix provides complete proofs for the theoretical results stated in the main paper.
+
+A.1. Proof of Theorem 1 (Greedy Suboptimality)
+Theorem (Greedy Suboptimality). For any n ≥ 2, there exists a problem instance where:
+                                                                            
+                                                          |S GREEDY |       1
+                                                                      =O                                                         (6)
+                                                             |S ∗ |         n
+
+
+Proof. We construct an adversarial instance using a star graph topology.
+
+Construction. Consider n entities E = {e1 , e2 , . . . , en } with call graph G where e1 calls all other entities: (e1 , ej ) ∈ E
+for j = 2, . . . , n. Each entity has a binary documentation space Di = {d0i , d1i }.
+Define the pass rate functions as:
+                                                  (
+                                                      1    if d1 = d11 and ∀j > 1 : dj = d0j
+                                       ϕ1 (D) =                                                                                  (7)
+                                                      0    otherwise
+
+                                              
+                                              0
+                                                         if d1 = d11
+                                      ϕj (D) = 1          if d1 = d01 and dj = d1j   for j > 1                                   (8)
+                                              
+                                                0         otherwise
+                                              
+
+
+Key Property. The construction encodes a fundamental conflict: e1 can only be solved when all leaves use d0j , but each
+leaf ej can only be solved when it uses d1j and e1 uses d01 . Crucially, once d1 = d11 is committed, all leaves become
+permanently unsolvable regardless of their documentation.
+
+Greedy Execution. Starting from the initial state s0 = (d01 , d02 , . . . , d0n ), all pass rates are zero by construction, so
+|S(s0 )| = 0. Greedy evaluates each single-step modification: flipping d01 → d11 achieves ϕ1 = 1 (gain of one entity), and
+flipping any d0j → d1j for j > 1 likewise achieves ϕj = 1 (gain of one entity). All options yield the same immediate gain;
+suppose tie-breaking selects e1 . Greedy then commits to s1 = (d11 , d02 , . . . , d0n ) with |S(s1 )| = 1.
+At s1 , entity e1 is solved (ϕ1 (s1 ) = 1), while ϕj (s1 ) = 0 for every j > 1. Crucially, the construction makes this state
+absorbing for the leaves: as long as d1 = d11 , we have ϕj = 0 regardless of dj , so no single-step modification can increase
+the solved set. Greedy therefore terminates with |S GREEDY | = 1.
+
+Optimal Solution. Consider the alternative state s∗ = (d01 , d12 , . . . , d1n ). Here ϕ1 (s∗ ) = 0, since the condition for solving
+e1 requires all leaves to use d0j , which is violated. Every leaf, however, is solved: ϕj (s∗ ) = 1 for all j > 1, giving
+|S ∗ | = n − 1.
+
+Approximation Ratio.
+                                                                               
+                                                 |S GREEDY |    1              1
+                                                      ∗
+                                                             =     =O                                                            (9)
+                                                    |S |       n−1             n
+
+This ratio approaches zero as n → ∞, completing the proof.
+
+Remark 1 (Robustness of the Construction). The construction can be extended to handle randomized tie-breaking by
+making e1 ’s improvement slightly larger (e.g., ϕ1 = 1 vs ϕj = 1 − ϵ for arbitrarily small ϵ). The approximation ratio
+remains O(1/n).
+
+                                                                  13
+
+===== PDF p.14 =====
+Escaping Whack-a-Mole
+
+A.2. Proof of Theorem 2
+We restate Theorem 2 for completeness.
+Theorem (Signal Corruption, restatement of Theorem 2). Let F be the set of failing tests for an entity, partitioned into F =
+F + ∪F − , where F + are informative errors and F − are noisy errors (Definition 4). Let q(e) = P (successful refinement | e)
+denote the success probability when conditioning on an error batch e. Under Assumptions 1–5 below, for any batches
+e+ ⊆ F + and e− ⊆ F − , we have
+                                                     q(e− ) ≪ q(e+ ),                                                    (10)
+and mixing noisy errors with informative ones strictly degrades performance:
+
+                                      q(e+ ∪ e− ) < q(e+ )          whenever |e− | > 0.                                 (11)
+
+Setup. We model refinement as diagnosing a latent knowledge gap. Let G be a finite set of candidate knowledge gaps,
+with the ground-truth gap denoted by g ∗ ∈ G. Each error message e is treated as an observation generated from a likelihood
+P (e | g).
+Assumption 1 (Conditional Independence within a Batch). Conditioned on g ∈ G, errors in a batch are independent: for
+any batch e = {e1 , . . . , em },
+                                                        m
+                                                        Y
+                                            P (e | g) =   P (et | g).                                           (12)
+                                                              t=1
+
+Assumption 2 (Informative Separation). There exists a constant γ ∈ (0, 1) such that for every incorrect gap g ̸= g ∗ and
+every informative error e ∈ F + ,
+                                                   P (e | g)
+                                                               ≤ γ.                                                  (13)
+                                                  P (e | g ∗ )
+Equivalently, each informative error provides at least − log γ > 0 log-likelihood advantage to the true gap.
+Assumption 3 (Noise Non-Discriminativity (Adversarial-to-True)). For every incorrect gap g ̸= g ∗ and every noisy error
+e ∈ F −,
+                                                  P (e | g)
+                                                              ≥ 1.                                                 (14)
+                                                 P (e | g ∗ )
+That is, noisy errors provide no evidence in favor of g ∗ and can weakly favor incorrect gaps.
+Assumption 4 (Posterior-based Diagnosis). The diagnosis step selects ĝ(e) = arg maxg∈G P (g | e) under a prior π(g)
+that is strictly positive on all g ∈ G.
+Assumption 5 (Success Monotone in Correct Identification). There exist constants 0 < a ≤ b ≤ 1 such that for any batch
+e,
+                             a · P (ĝ(e) = g ∗ | e) ≤ q(e) ≤ b · P (ĝ(e) = g ∗ | e).                            (15)
+This captures that correctly identifying the knowledge gap is necessary and approximately sufficient for producing a
+successful refinement.
+
+Key Lemma: posterior odds bound.
+Lemma 1 (Posterior Odds under Informative vs. Noisy Errors). Under Assumptions 1–4, for any g ̸= g ∗ and any batch e,
+                                            P (g | e)   π(g) Y P (e | g)
+                                                ∗
+                                                      =        ·                 .                                      (16)
+                                            P (g | e)   π(g ∗ ) e∈e P (e | g ∗ )
+
+In particular, for e+ ⊆ F + and e− ⊆ F − ,
+                           P (g | e+ )   π(g)        +         P (g | e+ ∪ e− )     P (g | e+ )
+                               ∗
+                                       ≤    ∗
+                                               · γ |e | ,                         ≥               .                     (17)
+                                   +
+                           P (g | e )    π(g )                 P (g ∗ | e+ ∪ e− )   P (g ∗ | e+ )
+
+Proof. The posterior-odds identity follows from Bayes rule:
+                                                             π(g)P (e | g)
+                                             P (g | e) = P                    ,
+                                                            h∈G π(h)P (e | h)
+
+                                                             14
+
+===== PDF p.15 =====
+Escaping Whack-a-Mole
+
+hence
+                                                  P (g | e)      π(g)P (e | g)
+                                                              =                     .
+                                                  P (g ∗ | e)   π(g ∗ )P (e | g ∗ )
+                                  Q
+Assumption 1 gives P (e | g) =       e∈e P (e | g), yielding the product form.
+                                                                                   P (e|g)        |e+ |
+For the informative bound, apply Assumption 2 to each e ∈ e+ :
+                                                                           Q
+                                                                              e∈e+ P (e|g ∗ ) ≤ γ       .
+For the monotonicity under adding noisy errors, write
+                              P (g | e+ ∪ e− )     π(g)  Y P (e | g)  Y P (e | g) 
+                                                 =                                       .
+                              P (g ∗ | e+ ∪ e− )   π(g ∗ ) +
+                                                             P (e | g ∗ ) −
+                                                                            P (e | g ∗ )
+                                                                  e∈e                          e∈e
+
+Assumption 3 implies each factor in the last product is ≥ 1, so the whole ratio is ≥ the ratio without e− .
+
+Proof of Theorem 2. We prove two claims: (i) noisy-only batches have low identification probability compared to informative
+batches; (ii) adding noisy errors degrades identification, hence degrades q(·).
+
+Step 1: Informative errors drive posterior mass to g ∗ .             Fix any g ̸= g ∗ . By Lemma 1,
+                                                   P (g | e+ )     π(g) |e+ |
+                                                                 ≤         γ  .
+                                                   P (g ∗ | e+ )   π(g ∗ )
+Summing over all g ̸= g ∗ and using                      ) = 1 − P (g ∗ | e+ ), we obtain
+                                                            +
+                                       P
+                                          g̸=g ∗ P (g | e
+                                                            X
+                                       1 − P (g ∗ | e+ ) =      P (g | e+ )                                                    (18)
+                                                                g̸=g ∗
+                                                                                X π(g)       +
+                                                            ≤ P (g ∗ | e+ )           ∗
+                                                                                         γ |e | .                              (19)
+                                                                                 ∗
+                                                                                   π(g )
+                                                                               g̸=g
+
+Rearranging yields
+                                                                               1
+                                           P (g ∗ | e+ ) ≥           P                                 ,                     (20)
+                                                                                 π(g)
+                                                                1+        g̸=g ∗ π(g ∗ )       γ |e+ |
+
+which increases monotonically with |e+ | and approaches 1 as |e+ | → ∞.
+
+Step 2: Noisy errors cannot increase identification of g ∗ and can decrease it. Consider e+ ⊆ F + and any non-empty
+e− ⊆ F − with |e− | > 0. By Lemma 1, for every g ̸= g ∗ ,
+                                                P (g | e+ ∪ e− )   P (g | e+ )
+                                                    ∗        −
+                                                                 ≥               .
+                                                        +
+                                                P (g | e ∪ e )     P (g ∗ | e+ )
+Equivalently, the posterior odds against g ∗ weakly increase for all incorrect gaps when adding e− . This implies the posterior
+mass on g ∗ cannot increase:
+                                               P (g ∗ | e+ ∪ e− ) ≤ P (g ∗ | e+ ).                                         (21)
+                                                                                                    (e|g)
+Moreover, if there exists at least one incorrect g and at least one noisy error e ∈ e− such that PP(e|g ∗ ) > 1, then the inequality
+
+is strict:
+                                                P (g ∗ | e+ ∪ e− ) < P (g ∗ | e+ ).                                            (22)
+
+Step 3: From posterior identification to refinement success. By Assumption 4, the probability of correct identification
+P (ĝ(e) = g ∗ | e) is monotone in P (g ∗ | e) (ties can be broken deterministically). Therefore Step 2 implies
+
+                                    P (ĝ(e+ ∪ e− ) = g ∗ | e+ ∪ e− )P (ĝ(e+ ) = g ∗ | e+ ),                                  (23)
+
+whenever |e− | > 0 and some noisy error strictly favors an incorrect gap. Applying Assumption 5 yields
+
+                                                      q(e+ ∪ e− ) < q(e+ ).                                                    (24)
+
+                                                                     15
+
+===== PDF p.16 =====
+Escaping Whack-a-Mole
+
+Step 4: Comparing noisy-only vs. informative batches. A noisy-only batch e− ⊆ F − provides no advantage to g ∗ by
+Assumption 3, hence it cannot drive P (g ∗ | e− ) close to 1. In contrast, Step 1 shows that with sufficiently many informative
+errors, P (g ∗ | e+ ) can be made arbitrarily close to 1. By Assumption 5, the same separation translates to success probability,
+establishing q(e− ) ≪ q(e+ ). This completes the proof.
+
+
+
+
+                                                                                  (e|g)
+Remark 2. If a weaker noise model is preferred, Assumption 3 can be relaxed to PP(e|g ∗ ) ≥ exp(−η) for some η ≥ 0 (approx-
+                                                                                                                   ∗    +
+                                                                                                         P (g |e )
+imately non-discriminative). Then Step 2 yields a quantitative bound: P (g ∗ | e+ ∪e− ) ≤ P (g∗ |e+ )+(1−P  (g ∗ |e+ )) exp(−η|e− |) ,
+                                             −
+and the degradation remains monotone in |e |.
+
+B. Algorithm Details
+Algorithm 1 presents the complete D OC S EARCH procedure with all subroutines.
+
+
+
+
+Algorithm 1 D OC S EARCH: Complete Bi-level Search
+Require: Initial documentation D(0) , call graph G, test suite T , width W , budget B
+Ensure: Optimized documentation D∗
+ 1: // Initialization
+ 2: C (0) ← G ENERATE(D(0) )                                                                                     ▷ Generate initial code
+ 3: ϕ(0) ← E VALUATE(C (0) , T )                                                                                          ▷ Run all tests
+                           (0)
+ 4: S (0) ← {ei : ϕi = 1}                                                                                     ▷ Initially solved entities
+      (0)
+ 5: I ← ∅                                                                                             ▷ Initially no intractable entities
+ 6: vroot ← C REATE N ODE(D(0) , C (0) , ϕ(0) , S (0) , I (0) )
+ 7: T REE ← {vroot }
+ 8: vcurrent ← vroot
+ 9: π ← R EVERSE T OPOLOGICAL O RDER(G)                                                                      ▷ Fixed processing order
+10: // Main search loop
+11: while budget not exhausted do
+12:      e ← S ELECT E NTITY(vcurrent , π)                                                                                  ▷ Algorithm 2
+13:      if e = NULL then
+14:           break                                                                                            ▷ All entities processed
+15:      // Inner level: parallel beam search over W error batches
+16:      {err1 , . . . , errW } ← S AMPLE E RROR BATCHES(e, vcurrent , W )
+17:                      ′
+         {v1′ , . . . , vW   } ← E XPAND PARALLEL(vcurrent , e, {err1 , . . . , errW })                                          ▷ Alg. 3
+18:      T REE ← T REE ∪ {v1′ , . . . , vW   ′
+                                                }
+19:      // Select first worthy candidate
+20:      v ∗ ← NULL
+21:                                ′
+         for v ′ ∈ {v1′ , . . . , vW } do
+22:           if I S W ORTHY(v ′ , vcurrent , e) then
+23:                  v∗ ← v′
+24:                  break
+25:      // Commit or mark intractable
+26:      if v ∗ ̸= NULL then
+27:           Sv∗ ← Svcurrent ∪ {e}
+28:           vcurrent ← v ∗
+29:      else
+30:           Ivcurrent ← Ivcurrent ∪ {e}                                                                              ▷ Mark intractable
+31: // Return best solution found
+32: return Dvcurrent
+
+
+                                                                   16
+
+===== PDF p.17 =====
+Escaping Whack-a-Mole
+
+Algorithm 2 S ELECT E NTITY: Reverse Topological Selection with Error Priority
+Require: Node v, topological order π
+Ensure: Selected entity e or NULL
+ 1: U ← E \ (Sv ∪ Iv )                                                                                       ▷ Unsolved entities
+ 2: C ← ∅                                                                                                  ▷ Eligible candidates
+ 3: // Collect entities whose dependencies are resolved
+ 4: for e in π do                                                                          ▷ Iterate in reverse topological order
+ 5:     if e ∈ U and C ALLEES(e) ⊆ Sv ∪ Iv then
+ 6:          C ← C ∪ {e}
+ 7: if C = ∅ then
+ 8:     return NULL
+ 9: // Prioritize by error count (fewer errors first)
+                            (v)                                                                 (v)
+10: return arg mine∈C |Fe |                                                                 ▷ Fe : failing tests for e at node v
+
+
+
+Algorithm 3 E XPAND PARALLEL: Parallel Node Expansion
+Require: Parent node v, target entity e, error batches {err1 , . . . , errW }
+Ensure: Child nodes {v1′ , . . . , vW′
+                                       }
+ 1: for k = 1 to W in parallel do
+ 2:     // Error-driven refinement (two-stage)
+                               (v)
+ 3:     fk ← D IAGNOSE(de , errk )                                                                         ▷ Stage 1: Diagnosis
+          (k)                     (v)
+ 4:     de ← P RESCRIBE(de , fk )                                                                        ▷ Stage 2: Prescription
+           (k)        (v)       (k)
+ 5:     D ← D [e 7→ de ]                                                                               ▷ Update documentation
+ 6:     // Regenerate and evaluate
+ 7:     C (k) ← G ENERATE(D(k) )
+ 8:     ϕ(k) ← E VALUATE(C (k) , T )
+ 9:     // Create child node
+10:     vk′ ← C REATE N ODE(D(k) , C (k) , ϕ(k) , Sv , Iv )
+11:     S ET PARENT(vk′ , v)
+                           ′
+12: return {v1′ , . . . , vW }
+
+
+
+C. Human Evaluation Rubric
+Annotators rated each documentation on a 1–5 Likert scale across five dimensions, from the perspective of a human reader
+trying to understand the entity’s purpose and behavior. Annotators had access to both the documentation under review and
+the reference source code; the source code served as ground truth for factual checks (e.g., Correctness, Completeness), while
+the rating reflected the documentation’s quality as a reading aid. The rubric below was provided to all annotators prior to
+rating, together with two calibration examples (one high-quality, one low-quality), and was the only source of guidance on
+dimension semantics. Annotators were instructed to (i) rate dimensions independently to mitigate halo effects, and (ii) avoid
+central tendency by using the full 1–5 range when warranted.
+
+Completeness       — coverage of the entity’s documented surface.
+• Diagnostic checklist: (a) purpose / one-line summary; (b) each parameter’s role and accepted values; (c) return value
+  and its structure; (d) conditional behavior (branches, modes); (e) side effects, raised exceptions, or state mutation; (f)
+  noteworthy edge cases (empty inputs, boundaries).
+• 5: Every checklist item that applies to the entity is addressed; the reader has no obvious unanswered “what does it do
+  when. . . ” question.
+• 3: Purpose and main parameters/return are covered, but two or more secondary items (e.g., edge cases, raised exceptions)
+  are omitted.
+• 1: Multiple core items are missing; the reader cannot form a basic picture of inputs, outputs, or purpose.
+
+Correctness      — factual fidelity to the reference implementation.
+
+                                                                     17
+
+===== PDF p.18 =====
+Escaping Whack-a-Mole
+
+• Diagnostic checklist: (a) types and shapes of inputs/outputs; (b) ordering, sorting, or sequencing claims; (c) conditional
+  logic (“if X, then Y”); (d) handling of boundary values; (e) absence of fabricated parameters, fields, or behaviors not
+  present in the code.
+
+• 5: All claims, including subtle ones (types, ordering, boundaries), are consistent with the reference implementation.
+
+• 3: Predominantly accurate, with one or two minor misstatements (e.g., a slightly wrong type, an under-stated boundary
+  condition) that do not invert the overall meaning.
+
+• 1: Contains at least one major inaccuracy (e.g., wrong return semantics, fabricated parameter, inverted condition) that
+  would mislead the reader about what the entity does.
+
+Clarity   — linguistic readability and unambiguity.
+• Diagnostic checklist: (a) sentences parse on a single read; (b) no undefined jargon, project-internal terms, or unresolved
+  acronyms; (c) pronouns and references have a single clear antecedent; (d) quantifiers and conditions are unambiguous (no
+  “some”, “usually”, “if needed” without specification); (e) consistent terminology for the same concept.
+
+• 5: Reads fluently; every sentence admits a single reasonable interpretation.
+
+• 3: Mostly clear, but the reader pauses on one or two phrases that admit multiple readings or rely on undefined terms.
+
+• 1: Frequently ambiguous, awkwardly phrased, or self-contradictory; the reader cannot pin down a single intended meaning
+  for core claims.
+
+Helpfulness    — utility as a reading aid for understanding the entity.
+• Diagnostic checklist: (a) the documentation conveys what the entity does beyond restating its name or signature; (b) it
+  surfaces non-obvious behavior that would otherwise require careful reading of the source; (c) it helps the reader anticipate
+  output behavior for typical inputs; (d) it clarifies when this entity should be used vs. similarly-named alternatives.
+
+• 5: The documentation substantially accelerates understanding—a reader grasps the entity’s behavior much faster than by
+  reading code alone.
+
+• 3: The documentation provides useful orientation but the reader still relies heavily on the source for non-trivial details.
+
+• 1: The documentation adds little beyond what the signature already conveys; the reader gains almost no acceleration from
+  reading it.
+
+Specificity   — level of operational detail (“how” vs “what”).
+• Diagnostic checklist: (a) explicit decision rules (“if X then Y, else Z”) rather than vague verbs (“processes”, “handles”);
+  (b) concrete input–output relationships rather than abstract category labels; (c) named conditions, thresholds, or invariants
+  where applicable; (d) ordering and iteration discipline made explicit when relevant.
+
+• 5: The documentation conveys the entity’s logic at a mechanism level: rules, branches, and orderings are named explicitly.
+
+• 3: Mixes operational detail with high-level phrases; some behavior is specified concretely, other behavior is only labeled
+  (“handles edge cases”, “returns the result”).
+
+• 1: High-level task labeling only (e.g., “processes the input and returns a result”); the reader is told what the entity is for
+  but not how it produces its output.
+
+D. Documentation Showcase: Good vs. Bad
+To illustrate the qualitative difference between partially and fully optimized documentation, we trace the refinement trajectory
+of a representative entity: LineBreak.get ohlc data from the stocktrends module. This entity generates a Line
+Break financial chart from price data—a task requiring precise specification of trend detection and reversal logic.
+
+                                                              18
+
+===== PDF p.19 =====
+Escaping Whack-a-Mole
+
+D.1. Initial Documentation (ϕ = 0.25)
+
+    Initial Documentation
+    LineBreak.get ohlc data --- Generates a Line Break chart from input price data.
+    Returns a DataFrame representing the chart.
+
+
+The initial documentation states the purpose but provides no actionable detail. An LLM conditioned on this description has
+no way to infer the output columns, trend-tracking logic, or reversal handling.
+
+D.2. Refinement A: Partial Improvement (ϕ : 0.25 → 0.50)
+
+    Refinement A (Partial)
+
+    LineBreak.get ohlc data --- Generates a Line Break chart as a DataFrame. Starts with
+    a number of initial lines equal to line number and expands the chart based on price
+    reversals and trend continuation. Tracks uptrend or downtrend reversal conditions
+    using the uptrend reversal and downtrend reversal methods. Returns DataFrame with
+    columns: index, date, open, high, low, close, uptrend.
+
+
+Refinement A adds output column names and references the helper methods, resolving half the failures. However, this is the
+failure mode of partially-optimized documentation: it specifies what the function returns but not how to produce it. The
+LLM can construct the DataFrame schema but cannot infer the actual OHLC value assignments.
+
+D.3. Refinement B: Fully Resolved (ϕ : 0.50 → 1.00)
+
+    Refinement B (Fully Resolved)
+
+    LineBreak.get ohlc data --- Generates a Line Break chart by constructing a chart
+    DataFrame from the input price data using trend continuation and reversal logic.
+    Initializes the chart with the first line number rows, setting all entries as
+    uptrend. Determines the current trend direction by comparing the last closing
+    price to the first opening price. In an uptrend, appends a new row when the current
+    close exceeds the previous close, using the previous close as the open and low; in
+    a downtrend, appends when the current close falls below the previous close, using
+    the previous close as the open and high. When a reversal is detected via the
+    reversal-checking methods, flips the trend direction and assigns open/high/low/close
+    values symmetrically. Returns the constructed chart DataFrame.
+
+
+Refinement B resolves all remaining failures by specifying (i) the exact trend detection rule (compare last close to first
+open), (ii) the precise OHLC assignment under each trend direction, and (iii) the reversal handling logic. The documentation
+now contains the full algorithmic specification required for an LLM to produce correct code.
+
+D.4. Key Observation
+This example illustrates the core principle that D OC S EARCH exploits: agent-oriented documentation quality is not a smooth
+function of detail level. Refinement A is substantially more detailed than the initial version yet only resolves half the test
+cases; the gap between Refinement A and Refinement B is precisely the inclusion of operational specifications—the exact
+computational rules—rather than descriptive ones. This is the qualitative pattern that human annotators rate as “Specificity”
+improvements in §4.5, and it is also the pattern that test-driven feedback most efficiently surfaces: failures on specific OHLC
+values directly reveal the missing assignment rules, while a human-readability metric would have no way to distinguish
+Refinement A from Refinement B.
+
+E. Prompt Templates
+The error-driven refinement process consists of two stages: diagnosis and prescription.
+
+                                                             19
+
+===== PDF p.20 =====
+Escaping Whack-a-Mole
+
+E.1. Stage 1: Diagnosis Prompt
+
+   Diagnosis Prompt Template
+
+  You are analyzing test failures to diagnose why an LLM failed to generate correct
+   code from a given documentation.
+   Entity Information:
+  - Name: {entity name}
+  - Type: {entity type} (function/class/method)
+  - Current Documentation:
+   {current doc}
+   Generated Code (produced by the LLM from the current documentation; this is the
+   artifact under diagnosis):
+   {generated code}
+  Test Failures:
+  The generated code failed the following tests:
+   {error messages}
+  Task:
+   By comparing the generated code against the test failures and the current
+   documentation, diagnose:
+    1. What went wrong? Identify the specific errors (type mismatches, incorrect
+       outputs, missing logic, etc.) visible in the generated code.
+
+    2. Why did the LLM fail? What information is missing or ambiguous in the
+       documentation that led to this implementation?
+
+    3. What knowledge gap exists? What does the documentation need to convey so that
+       an LLM would not make this same mistake?
+
+   Output:
+   Provide a concise diagnosis in the following format:
+  - Error Type: [brief description]
+  - Root Cause: [what the documentation failed to convey]
+  - Missing Information: [what needs to be clarified in the documentation]
+
+
+E.2. Stage 2: Prescription Prompt
+
+   Prescription Prompt Template
+
+  You are refining documentation for a code entity based on a diagnosis of test
+   failures.
+   Entity Information:
+  - Name: {entity name}
+  - Type: {entity type}
+  - Current Documentation:
+   {current doc}
+   Diagnosis:
+   {diagnosis output}
+  Task:
+   Refine the documentation to address the diagnosed issues. The refined documentation
+   should:
+    1. Directly address the identified knowledge gap.
+    2. Clarify the ambiguous or missing information using general behavioral rules,
+       invariants, or input--output relationships.
+    3. Be precise enough for an LLM to generate correct code.
+    4. Preserve all existing correct information.
+   Critical Constraint:
+   Do NOT hard-code specific test input values or expected output values from the
+
+
+
+                                             20
+
+===== PDF p.21 =====
+Escaping Whack-a-Mole
+
+
+   failures into the documentation. The refined documentation must describe the
+   entity’s general behavior, not memorize the particular test cases used during the
+   search.
+   Output:
+   Provide only the refined documentation, without any explanation.
+
+
+E.3. Code Generation Prompt
+
+   Code Generation Prompt Template
+
+   Generate Python code for all entities in this module based on their documentation.
+   Module: {module name}
+   Documentation:
+   {all entity documentation}
+   Requirements:
+
+      • Implement each entity exactly according to its documentation
+      • Ensure all cross-entity calls are consistent
+
+      • Do not add functionality not specified in the documentation
+
+   Output:
+   Provide the complete Python implementation for all entities, without any explanation
+   or markdown.
+
+
+E.4. Test Case Generation Prompt
+This prompt elicits diverse test inputs from the LLM, which are then executed on the reference implementation to derive
+expected outputs (Appendix H). The prompt emphasizes coverage across normal, edge, and corner cases.
+
+   Test Case Generation Prompt Template
+
+   You are generating pytest-style test functions for a code entity. Each test must be
+    a complete, self-contained function with concrete inputs and assertions.
+    Entity Information:
+   - Name: {entity name}
+   - Type: {entity type} (function/class/method)
+   - Signature: {signature}
+   - Source Code:
+    {source code}
+    Dependencies:
+   The following entities are called by this entity:
+    {dependency signatures}
+    Coverage Feedback (uncovered lines):
+    {uncovered lines with source snippets}
+    External Dependencies Detected:
+    {detected io network time calls}
+   Task:
+    Generate diverse pytest test functions that cover:
+    1. Normal cases:        typical usage scenarios
+    2. Edge cases:       boundary conditions, empty inputs, single elements
+    3. Corner cases:        special values, type boundaries
+    4. Targeted cases:         inputs that exercise the listed uncovered lines
+   Requirements:
+      • Each test must be a complete def test *():                function with concrete inputs and at
+        least one assert statement
+
+
+                                                          21
+
+===== PDF p.22 =====
+Escaping Whack-a-Mole
+
+
+       • Include informative assertion messages where possible (e.g., assert x == y,
+         f"Expected {y} got {x}")
+
+       • For any detected external dependency, isolate it with a pytest fixture (mock
+         filesystem/network, freeze time, seed randomness)
+       • Each test must directly exercise the target entity, not reach it only through
+         unrelated callers
+
+   Output:
+   Provide a Python module containing only the test functions and any required fixtures,
+   without any explanation or markdown.
+
+
+
+E.5. Iterative Refinement Prompt (Baseline)
+
+    Iterative Refinement Prompt Template
+
+   You are refining documentation for a code entity based on test failures.
+    Entity Information:
+   - Name: {entity name}
+   - Type: {entity type}
+   - Current Documentation:
+    {current doc}
+    Generated Code (produced by the LLM from the current documentation):
+    {generated code}
+   Test Failures:
+   The generated code failed the following tests:
+    {all error messages}
+   Task:
+    Refine the documentation to fix the issues revealed by the test failures. The
+    refined documentation should enable an LLM to generate correct code. Do not
+    hard-code specific test input or output values into the documentation; describe
+    behavior in general terms.
+    Output:
+    Provide only the refined documentation, without any explanation.
+
+
+Note: Unlike D OC S EARCH’s two-stage diagnosis-prescription process, the iterative baseline conditions on all error messages
+simultaneously in a single refinement step, which can lead to the signal corruption phenomenon described in §3.3.
+
+E.6. Commercial Agent Prompts
+We evaluate commercial coding agents (Cursor and Claude Code) on the task of generating documentation for code entities.
+Below are the prompt templates for each configuration.
+
+E.6.1. BASE C ONFIGURATION P ROMPT
+    Commercial Agent Base Prompt
+
+    Generate documentation for all entities in this module, refining it through
+    self-critique. Your final output (documentation only) will be evaluated by an
+    external pipeline that generates code from your documentation and runs it against
+    held-out test cases.
+    Module: {module name}
+    Entities (signatures and reference code):
+    {all entity signatures and code}
+    Internal Workflow (you may run up to B refinement iterations within your own
+    session):
+
+     1. Draft documentation for each entity describing its purpose, parameters, return
+        values, and behavior.
+
+
+                                                             22
+
+===== PDF p.23 =====
+Escaping Whack-a-Mole
+
+
+    2. Critically review your own documentation: identify any ambiguity, missing edge
+       cases, or under-specified behavior that could lead another LLM (which does not
+       see the source code) to generate an incorrect implementation.
+
+    3. Refine the documentation to address the issues identified in step 2.
+    4. Repeat steps 2--3 until you judge the documentation to be unambiguous and
+       complete, or until the iteration budget B is exhausted. Each pass through steps
+       2--3 counts as one iteration.
+   Output:
+   Provide only the final documentation for each entity, without source code or
+   explanation.
+
+
+E.6.2. +T OPO C ONFIGURATION P ROMPT
+   Commercial Agent +Topo Prompt
+
+   Generate documentation for all entities in this module, using the call-dependency
+   structure and refining through self-critique. Your final output (documentation
+   only) will be evaluated by an external pipeline that generates code from your
+   documentation and runs it against held-out test cases.
+   Module: {module name}
+   Dependency Structure (callee ← caller):
+   {dependency graph}
+   Entities (signatures and reference code):
+   {all entity signatures and code}
+   Internal Workflow (you may run up to B refinement iterations across all entities
+   within your own session):
+
+    1. Process entities in reverse topological order (callees before callers), drafting
+       documentation for each.
+
+    2. For the current entity, critically review your own documentation: identify any
+       ambiguity, missing edge cases, or under-specified behavior; also check that the
+       documentation is consistent with the (already-stabilized) documentation of its
+       callees.
+
+    3. Refine the documentation to address the issues identified in step 2.   Each
+       refinement counts as one iteration against the budget B.
+
+    4. Move to the next entity in reverse topological order, and repeat steps 2--3.
+
+    5. Continue until all entities have been processed and you judge the documentation
+       complete, or until the global budget B is exhausted.
+
+   Output:
+   Provide only the final documentation for each entity, without source code or
+   explanation.
+
+
+E.6.3. +T EST C ONFIGURATION P ROMPT
+   Commercial Agent +Test Prompt
+
+   Generate documentation for all entities in this module, using a self-verification
+   loop. Your final output (documentation only) will be evaluated by an external
+   pipeline that generates code from your documentation and runs it against held-out
+   test cases.
+   Module: {module name}
+   Entities (signatures and reference code):
+   {all entity signatures and code}
+   Internal Workflow (you may iterate within your own session):
+
+
+
+                                                23
+
+===== PDF p.24 =====
+Escaping Whack-a-Mole
+
+
+    1. Draft documentation for each entity.
+    2. Generate Python test cases that would distinguish a correct implementation
+       of your documentation from common mis-implementations. Validate these tests
+       against the provided reference source code: if a test fails on the reference,
+       the test itself is incorrect and must be revised.
+
+    3. Generate a candidate implementation from your documentation alone (i.e., without
+       looking at the reference).
+    4. Run the validated tests against this candidate implementation. If any tests
+       fail, the failure indicates that your documentation is ambiguous or incomplete
+      --- refine the documentation accordingly.
+    5. Repeat steps 3--4 until the candidate implementation passes all validated tests,
+       or until your iteration budget is exhausted.
+
+   Output:
+   Provide only the final documentation for each entity, without source code, tests, or
+   explanation.
+
+
+E.6.4. +T OPO +T EST C ONFIGURATION P ROMPT
+   Commercial Agent +Topo+Test Prompt
+
+   Generate documentation for all entities in this module, using the call-dependency
+   structure and a self-verification loop. Your final output (documentation only) will
+   be evaluated by an external pipeline that generates code from your documentation and
+   runs it against held-out test cases.
+   Module: {module name}
+   Dependency Structure (callee ← caller):
+   {dependency graph}
+   Entities (signatures and reference code):
+   {all entity signatures and code}
+   Internal Workflow (you may run up to B refinement iterations across all entities
+   within your own session):
+
+    1. Process entities in reverse topological order (callees before callers), drafting
+       documentation for each.
+
+    2. For the current entity, generate Python test cases that would distinguish
+       correct implementations from common mis-implementations; validate them against
+       the reference source code and discard any test that the reference fails.
+
+    3. Generate a candidate implementation of the current entity from its documentation
+       alone (no reference). Run the validated tests; if any fail, refine the
+       documentation. Each refinement of an entity’s documentation counts as one
+       iteration against the budget B.
+
+    4. When moving to a caller, ensure its documentation is consistent with the
+       (already-stabilized) documentation of its callees.
+
+    5. Repeat until all entities pass their self-verification, or the global iteration
+       budget B is exhausted.
+
+   Output:
+   Provide only the final documentation for each entity, without source code, tests, or
+   explanation.
+
+
+
+F. Baseline Implementation Details
+Static Methods. RepoAgent (Luo et al., 2024): We use the official implementation with default hyperparameters.
+Documentation is generated in a single pass without test feedback. DocAgent (Yang et al., 2025): We use the official
+
+                                                        24
+
+===== PDF p.25 =====
+Escaping Whack-a-Mole
+
+implementation. Multi-agent collaboration generates documentation iteratively until convergence.
+
+Commercial Agents. We evaluate Cursor and Claude Code under four configurations: (1) Base: generate documentation
+for all entities in a single session; (2) +Topo: provide the dependency graph as context for one-shot documentation
+generation; (3) +Test: prompt the agent to generate test cases from documentation, then iteratively refine code until tests
+pass, with a budget of 50 manual action approvals (agents typically terminate before exhausting the budget); (4) +Topo+Test:
+combine both strategies. Cursor supports Gemini-2.5-Flash and Claude-4.5-Sonnet but not GPT-4o; Claude Code only
+supports Claude models. Prompts are provided in Appendix E.6.
+
+Iterative Refinement. Algorithm 4 presents the iterative baseline. The Iterative variant selects entities randomly, while
+Iterative+Topo follows reverse topological order. Neither variant employs the worthy condition, allowing regressions.
+
+Algorithm 4 Iterative Refinement Baseline
+Require: Documentation D, max iterations T
+ 1: for t = 1 to T do
+ 2:     F ← entities with failing tests
+ 3:     e ← S ELECT E NTITY(F)                                                                            ▷ Random or Topo order
+ 4:     e ← error messages for e
+ 5:     d′e ← R EFINE(de , e)
+ 6:     D ← D[e 7→ d′e ]
+
+
+
+G. DevEval+ Benchmark
+This appendix provides details about the evaluation suite used in our experiments, intended to enable reproducibility rather
+than to introduce a new benchmark.
+
+G.1. Composition
+The suite comprises 20 Python modules with 227 entities (functions, classes, and methods) validated by 631 test cases.
+Each module contains 11.4 entities on average, with 2.8 tests per entity.
+
+                        Table 5. Modules used in our evaluation suite. Source: D = DevEval, G = GitHub.
+
+                           Module                                    Source    Domain
+                           arXiv digest                                D       Academic/NLP
+                           hybrid images                               D       Image Processing
+                           textcnn                                     D       Deep Learning/NLP
+                           chakin                                      D       NLP/Embeddings
+                           geotext                                     D       Geography/NLP
+                           hone                                        D       Data Processing
+                           lice                                        D       Utilities
+                           particle-swarm-optimization                 D       Optimization
+                           readtime                                    D       Text Processing
+                           stocktrends                                 D       Finance
+                           taskflow                                    G       Workflow/Systems
+                           quantfin                                    G       Quantitative Finance
+                           toon                                        G       Image Processing
+                           biomarker-analysis                          G       Bioinformatics
+                           streamprocess                               G       Data Streaming
+                           cronparser                                  G       Scheduling/Cron
+                           graphkit                                    G       Graph Algorithms
+                           signalflow                                  G       Signal Processing
+                           policyengine                                G       Rule Engine
+                           datavalidator                               G       Data Validation
+
+
+
+                                                              25
+
+===== PDF p.26 =====
+Escaping Whack-a-Mole
+
+Selection Criteria. Modules were selected to satisfy three criteria relevant to studying output coupling: (i) call-graph
+depth of at least three, so that coupling effects manifest non-trivially; (ii) every entity admits well-defined input–output
+behavior amenable to automated testing; and (iii) minimal external dependencies beyond the Python standard library, to
+keep evaluation reproducible.
+
+Sources. The suite combines 10 modules from DevEval (Li et al., 2025)—whose original human-verified test cases we
+retained without modification—and 10 additional modules from open-source Python repositories under permissive licenses
+(MIT, Apache 2.0, BSD), each with an existing test suite. For the GitHub modules, we executed the original test suite against
+the reference source code and retained only the tests that passed, ensuring every test serves as a reliable oracle of intended
+behavior. The combined suite spans NLP, image processing, finance, optimization, bioinformatics, and signal processing.
+
+G.2. Dependency Structure
+The suite exhibits the structural complexity needed to induce meaningful output coupling effects: across all 20 modules, the
+average call-graph depth is 4.2 (maximum 9). This depth ensures that refinements to callee documentation can propagate
+through multiple levels of callers, creating the conditions necessary to observe and address the whack-a-mole phenomenon.
+
+G.3. Test Suite
+All tests are sourced from existing ground-truth suites (DevEval’s human-verified tests and the original repositories’ test
+suites). Each retained test was verified to (i) pass on the reference implementation, and (ii) directly exercise its target entity
+rather than reach it only via transitive calls, so that failures can be localized to the entity under refinement.
+
+G.4. Cross-Language Subset
+To assess cross-language transfer (§4.4), we translated a subset of the suite from Python to Java and Go. We selected
+modules whose semantics are amenable to cross-language transfer—i.e., those that do not rely on Python libraries lacking
+apple-to-apple counterparts in Java or Go. Translation preserved test inputs exactly, with Python data structures mapped
+to their target-language equivalents; expected outputs were adapted to the target type system while preserving semantic
+equivalence, and the surrounding harness code was rewritten in JUnit 5 for Java and the standard testing package for Go.
+This procedure preserves the input–output contract of original test, so passing a translated test is equivalent to passing its
+Python counterpart, allowing target-language code generation to be evaluated against the same behavioral specification as in
+the Python setting.
+
+H. Test Case Generation
+This appendix describes the LLM-based test case generation process used to guide D OC S EARCH’s search without access to
+ground-truth tests.
+
+H.1. Overview
+D OC S EARCH operates as a self-improving framework where the search is guided by LLM-generated test cases rather than
+ground-truth tests. This design choice reflects realistic deployment scenarios where comprehensive test suites may not exist.
+The key insight is that even imperfect tests provide valuable diagnostic signals—test failures reveal knowledge gaps in the
+documentation, enabling targeted refinement.
+The test generation process follows a generate-then-validate approach:
+
+1. Test generation: The LLM generates complete test functions—including inputs, assertions, and error messages—based
+   on entity signatures and reference source code.
+2. Validation: Each generated test is executed on the reference implementation. Only tests that pass are retained; those that
+   fail (due to incorrect assertions or invalid inputs) are discarded.
+
+Two additional filters are applied post-validation: (i) tests that reach the target entity only via transitive calls to other
+functions are discarded, ensuring each retained test directly exercises its target; and (ii) tests with identical normalized inputs
+
+                                                                26
+
+===== PDF p.27 =====
+Escaping Whack-a-Mole
+
+and assertions are deduplicated. This ensures test correctness by construction: every retained test is consistent with the
+reference implementation and contributes a distinct diagnostic signal.
+
+H.2. Coverage-Driven Test Generation
+For each entity ei , we employ a coverage-driven generation strategy in which the LLM generates test functions iteratively
+until branch coverage exceeds a target threshold τcov . Each iteration asks the LLM to cover a mix of normal usage scenarios,
+edge cases such as empty inputs or single-element collections, corner cases involving special values that exercise specific
+code paths, and—once coverage feedback is available—targeted inputs aimed at the branches still left uncovered.
+The generation loop terminates when (1) branch coverage reaches τcov (primary criterion), or (2) the per-iteration branch
+coverage gain stays below a positive threshold ε for P consecutive iterations (no-progress early-stop). The loop is bounded
+because (i) progress iterations (gain ≥ ε) number at most ⌊1/ε⌋, since branch coverage is bounded above by 1.0 and each
+contributes at least ε; and (ii) no-progress iterations (gain < ε) cannot accumulate indefinitely because the P -th consecutive
+one triggers the early-stop.
+The generation prompt (provided in Appendix E) includes the entity’s signature and type information, the reference source
+code so that the LLM can infer the intended behavior, the signatures of its callees to keep generated tests consistent with
+downstream dependencies, and—when available—coverage feedback in the form of (line number, source snippet) pairs
+extracted from coverage.py’s branch-coverage output, indicating which lines remain uncovered.
+
+H.3. Quality Considerations
+While the validation step ensures test correctness, LLM-generated tests may have quality limitations that motivate our
+diversified error batch sampling (§3.3).
+
+Error Message Quality Variation. Since the LLM writes complete test functions, the diagnostic value of error messages
+depends entirely on how each assertion is written. Some tests include informative messages (e.g., assert result ==
+[1,2,3], f"Expected [1,2,3] got {result}") that directly reveal the failure mode, while others use bare
+assertions (e.g., assert result == expected) that produce only AssertionError with no actionable signal.
+This heterogeneity is inherent to LLM-generated tests and cannot be controlled a priori.
+
+Input Quality Variation. Not all generated test inputs are equally informative. Some inputs may exercise redundant code
+paths, miss critical edge cases, or cluster around similar patterns. By conditioning refinements on different test subsets,
+diversified error batch sampling increases the probability of encountering informative failure signals.
+
+Cascading Failures. When entity ei calls entity ej , an incorrect implementation of ej can cause ei ’s tests to fail even
+if ei ’s documentation is correct. These cascading failures are noisy in the sense of Definition 4—they do not reveal ei ’s
+knowledge gap. Our reverse topological ordering addresses this by ensuring callees are finalized before callers.
+
+External Dependencies. External dependencies (filesystem, network, time, randomness) are detected via static analysis
+of import statements and AST patterns; the LLM is then prompted to isolate them through pytest fixtures (mocks for
+filesystem and network calls, frozen-time wrappers for time-dependent code) so that test outcomes remain deterministic and
+reproducible across runs.
+
+H.4. Hyperparameters
+We use the following hyperparameters for test generation:
+
+• LLM: GPT-4o (fixed across all experiments for consistency)
+
+• Temperature: τ = 0.7 for input diversity
+
+• Coverage threshold: τcov = 90% branch coverage
+
+• No-progress patience: P = 2 consecutive iterations within ε = 0.01 coverage gain
+
+                                                              27
+
+===== PDF p.28 =====
+Escaping Whack-a-Mole
+
+I. Additional Related Work: Dependency-Guided LLM Generation
+A growing line of work uses structural dependencies—ASTs, call graphs, repository dependency graphs, or dataflow—to
+guide LLM-based generation. For repository-level code completion, graph- and structure-based retrieval methods scope
+the LLM’s context (Shrivastava et al., 2023; Zhang et al., 2023a; Wu et al., 2024; Liu et al., 2025a). At the edit and agent
+level, dependency structure drives plan propagation, context plug-ins, AST-aware search APIs, and decoder-level constraints
+from static analysis (Bairi et al., 2024; Ouyang et al., 2025; Zhang et al., 2024; Agrawal et al., 2023), exemplified by
+CodePlan (Bairi et al., 2024), which maintains a repository-wide dependency graph and propagates edits along a plan graph
+derived from incremental dependency analysis. For repository-level documentation, RepoAgent (Luo et al., 2024) and
+DocAgent (Yang et al., 2025) use global structure analysis and topological traversal, with DocAgent in particular processing
+entities in topological order so each is documented after its dependencies. Beyond code, NL2LOGIC (Putra et al., 2026) uses
+an AST as an intermediate representation for translating natural language into first-order logic. D OC S EARCH walks along
+this path and uses the call-dependency DAG to govern a search over the documentation space, where test-time feedback
+drives iterative refinements and a worthy condition prevents the regressions induced by output coupling.
+
+
+
+
+                                                            28

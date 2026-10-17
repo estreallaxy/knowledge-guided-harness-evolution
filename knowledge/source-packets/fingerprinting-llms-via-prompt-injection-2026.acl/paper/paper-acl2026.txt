@@ -1,0 +1,1098 @@
+===== PDF p.1 =====
+Fingerprinting LLMs via Prompt Injection
+
+               Yuepeng Hu1 , Zhengyuan Jiang1 , Mengyuan Li1 , Osama Ahmed1 ,
+                         Zhicong Huang2 , Cheng Hong2 , Neil Gong1
+                                1
+                                  Duke University, 2 Ant Group
+      {yuepeng.hu, zhengyuan.jiang, alyssa.li, osama.shawir, neil.gong}@duke.edu
+                         {zhicong.hzc, vince.hc}@antgroup.com
+
+
+
+                           Abstract                                computational resources, data, and engineering ef-
+                                                                   fort, and for ensuring accountability by detecting
+         Large language models (LLMs) are often mod-               unauthorized redistribution. However, reliably es-
+         ified after release through post-processing such          tablishing provenance for LLMs is far from trivial,
+         as post-training or quantization, which makes
+                                                                   especially once models have been altered through
+         it challenging to determine whether one model
+         is derived from another. Existing provenance              post-processing such as post-training or quantiza-
+         detection methods have two main limitations:              tion. For clarity, we refer to the released model
+         (1) they embed signals into the base model be-            under protection as the base model, and to any
+         fore release, which is infeasible for already             model under investigation as a suspect model.
+         published models, or (2) they compare out-                   Existing LLM provenance detection methods
+         puts across models using hand-crafted or ran-             fall into two main categories. Proactive meth-
+         dom prompts, which are not robust to post-
+                                                                   ods (Wang et al., 2025; Wu et al., 2025a; Gloaguen
+         processing. In this work, we propose LLM-
+         Print, a novel detection framework that con-              et al., 2025; Wanli et al., 2025) embed signals into
+         structs fingerprints by exploiting LLMs’ in-              the base model during training–such as watermarks
+         herent vulnerability to prompt injection. Our             or injected fingerprints–prior to release. These
+         key insight is that by optimizing fingerprint             methods require modifying the base model and
+         prompts to enforce consistent token prefer-               are therefore inapplicable to models that have al-
+         ences, we can obtain fingerprints that are both           ready been released. Passive methods (Gubri et al.,
+         unique to the base model and robust to post-              2024; Nikolic et al., 2025; Wu et al., 2025b; Yoon
+         processing. We further develop a unified verifi-
+                                                                   et al., 2025; Ren et al., 2025; Pasquini et al., 2025),
+         cation procedure that applies to both gray-box
+         and black-box settings, with statistical guar-            by contrast, avoid altering the base model and in-
+         antees. We evaluate LLMPrint on five base                 stead design prompts to elicit inherent behaviors
+         models and around 700 post-trained or quan-               that can be compared between the base and suspect
+         tized variants. Our results show that LLMPrint            models. For instance, some approaches measure
+         achieves high true positive rates while keeping           agreement over large pools of randomly sampled
+         false positive rates near zero. The code is pub-          prompts (Nikolic et al., 2025), while others craft
+         licly available at https://github.com/hif
+                                                                   prompts to expose lexical, stylistic, or reasoning
+         i-hyp/ACL-LLMPrint.
+                                                                   patterns (Pasquini et al., 2025; Ren et al., 2025).
+    1    Introduction                                                 However, such fingerprints may inadvertently
+                                                                   match models derived from different bases or fail to
+    Large language models (LLMs) are rapidly ad-                   persist under post-processing such as post-training
+    vancing and increasingly deployed in real-world                or quantization, leading to false positives and false
+    products (Google, 2025; OpenAI, 2025; Microsoft,               negatives. Moreover, most prior work assumes
+    2023). As models proliferate across organiza-                  either full white-box access to parameters of the
+    tions, questions of provenance–specifically, ver-              suspect model (Wu et al., 2025b; Yoon et al.,
+    ifying whether a given model has been derived                  2025) or the most restrictive black-box access to
+    from a particular released model–become critical.              its API (Gubri et al., 2024; Nikolic et al., 2025;
+    Establishing provenance is important both for safe-            Ren et al., 2025; Pasquini et al., 2025). The prac-
+    guarding intellectual property (Tramèr et al., 2016;           tically important gray-box setting–where the sus-
+    Wang and Gong, 2018; Carlini et al., 2024), since              pect model’s API exposes per-token probabilities–
+    training a competitive LLM requires substantial                remains largely unexplored.
+                                                             11795
+Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 11795–11810
+                                 July 2-7, 2026 ©2026 Association for Computational Linguistics
+
+===== PDF p.2 =====
+Fingerprint construction                          Fingerprint verification
+                                                                                        Fingerprint
+                                                                                        prompt set
+                                  w1+
+                                         w3+         w3−
+            Decision boundary:                                       Base model MB                    Suspect model MS
+
+
+            Fingerprint prompt:    w1−         w4+                       111111                           101011
+
+
+
+                                                                                Bitwise accuracy A(MB , MS )
+                                                           w4−
+                                           w2−
+                                  w2+
+                                                                     Positive        A(MB , MS ) ≥ τ ?         Negative
+
+
+
+                                          Figure 1: Overview of LLMPrint.
+
+   In this work, we propose LLMPrint, a new prove-               ter. We further analyze failure cases and find
+nance detection framework that overcomes these                   that post-trained or quantized variants incorrectly
+limitations. Our key insight is to exploit the inher-            identified as not derived from their base model
+ent vulnerability of LLMs to prompt injection (Liu               tend to exhibit large performance drops on widely
+et al., 2024), where carefully designed prompts                  used benchmarks such as MMLU (Hendrycks
+override a model’s default behavior and force it to              et al., 2021), HellaSwag (Zellers et al., 2019), and
+perform an injected task.                                        PIQA (Bisk et al., 2020) that measure general-
+   We repurpose this vulnerability for provenance                purpose capability. This suggests that such failures
+detection by constructing what we call fingerprint               are mainly due to significant degradation of the sus-
+prompts. Each fingerprint prompt encodes a sim-                  pect models themselves rather than limitations of
+ple injected task: it enforces a preference between              LLMPrint. Our main contributions are as follows:
+a randomly chosen pair of tokens when the base
+model generates its first token given the prompt.                • Fingerprint construction via prompt injection.
+Conceptually, this can be viewed as reframing the                  We introduce a novel way to construct finger-
+first-token generation of an LLM as a classifica-                  prints for LLMs by exploiting their inherent vul-
+tion problem: given a prompt, the model selects                    nerability to prompt injection. Optimized fin-
+one token from its vocabulary, with its unique deci-               gerprint prompts enforce consistent pairwise to-
+sion boundary partitioning the prompt space into                   ken preferences, yielding fingerprints that are
+regions corresponding to different output tokens.                  both unique to the base model and robust to post-
+From this perspective, each fingerprint prompt                     processing techniques for it.
+(Figure 1, left) is optimized to lie close to the                • Unified and statistically grounded verification.
+decision boundary between the target token pair                    We develop a verification framework that func-
+(wj+ , wj− ), making it unique to the base model,                  tions under the most restrictive black-box access
+while remaining distant from regions associated                    to the suspect model, while further improving in
+with other tokens, which enhances robustness to                    the practical gray-box setting. Our framework
+post-processing. Fingerprint verification then re-                 leverages either repeated sampling or per-token
+duces to checking whether a suspect model pre-                     probabilities, calibrates decision thresholds using
+serves these same token preferences under the fin-                 validation suspect models not derived from the
+gerprint prompts (Figure 1, right).                                base model, and provides statistical guarantees
+   We evaluate LLMPrint on five open-source base                   for provenance verification.
+models, covering 463 post-trained and 230 quan-                  • Comprehensive empirical evaluation. We con-
+tized suspect models. Across both gray-box and                     duct large-scale experiments on five base mod-
+black-box access to the suspect model, LLMPrint                    els and around 700 suspect models, demonstrat-
+achieves high true positive rates while keeping false              ing that LLMPrint outperforms prior approaches
+positive rates close to zero. Compared with prior                  such as TRAP, LLMmap, and IPGuard. In rare
+methods–including TRAP (Gubri et al., 2024) and                    failure cases, we observe that suspect models mis-
+LLMmap (Pasquini et al., 2025), which operate                      classified as not derived from their base typically
+in the black-box setting, and IPGuard (Cao et al.,                 show signs of overall quality degradation, sug-
+2021), a fingerprinting method originally designed                 gesting that these errors reflect weaknesses of the
+for classifiers–LLMPrint consistently performs bet-                suspect models rather than of our fingerprints.
+                                                             11796
+
+===== PDF p.3 =====
+Table 1: Summary of LLM provenance detection meth-                            LLMmap (Pasquini et al., 2025) employs hand-
+ods. We compare LLMPrint with TRAP and LLMmap,                                crafted prompts to elicit lexical or stylistic patterns,
+since other methods are either not applicable to our set-
+                                                                              while CoTSRF (Ren et al., 2025) extracts chain-of-
+ting or cannot be reliably reproduced due to lacking
+experimental details and open-source implementations.                         thought and analyzes structural statistics of reason-
+                                                                              ing outputs.
+Method
+                                 Modification   Access
+                                                          Venue     Time          However, these fingerprints often lack unique-
+                                 Pass.   Pro.   W G B
+                                                                              ness to the base model and its post-processed ver-
+TRAP (Gubri et al., 2024)         ✓                  ✓    ACL      2024-08
+Nikolic et al. (2025)             ✓                  ✓    arXiv    2025-02    sions (leading to false positives) or robustness
+Wu et al. (2025b)                 ✓             ✓         arXiv    2025-07
+Yoon et al. (2025)                ✓             ✓         arXiv    2025-07    to post-processing (leading to false negatives).
+FPEdit (Wang et al., 2025)                ✓          ✓    arXiv    2025-08    Gradient- and attention-based fingerprints (Wu
+EditMF (Wu et al., 2025a)                 ✓          ✓    arXiv    2025-08
+Gloaguen et al. (2025)                    ✓          ✓    arXiv    2025-05    et al., 2025b; Yoon et al., 2025) instead rely on inter-
+Wanli et al. (2025)                       ✓          ✓    arXiv    2025-08
+                                                                              nal gradients or attention statistics, but they require
+CoTSRF (Ren et al., 2025)         ✓                  ✓    arXiv    2025-05
+LLMmap (Pasquini et al., 2025)    ✓                  ✓ USENIX Sec. 2025-02    white-box access to the suspect model, which is
+Our LLMPrint                      ✓                 ✓ ✓     –         –       rarely available in deployment. Unlike these meth-
+Pass./Pro. indicate passive/proactive modification of the base                ods, our LLMPrint exploits an inherent prompt-
+ model; W/G/B denote white-/gray-/black-box access to the
+                       suspect model.                                         injection vulnerability of the base model and turns
+                                                                              it into a unique and robust fingerprint.
+2     Related Work
+                                                                              Access to the suspect model (white-box vs. gray-
+2.1 LLM Provenance Detection                                                  box vs. black-box): Another key dimension is the
+We review existing methods for LLM provenance                                 level of access to the suspect model. White-box
+detection from two complementary perspectives:                                approaches (Wu et al., 2025b; Yoon et al., 2025)
+(i) whether the approach modifies the base model–                             assume access to the model parameters. Black-
+categorized as passive versus proactive–and (ii) the                          box approaches assume the most restricted setting,
+access to the suspect model, ranging from white-                              where only final text outputs are observable; exam-
+box to gray-box to black-box. Table 1 summarizes                              ples include statistical provenance testing (Nikolic
+representative methods across these dimensions.                               et al., 2025), CoTSRF (Ren et al., 2025), domain-
+                                                                              specific watermarking (Gloaguen et al., 2025), Ed-
+Modification of the base model (passive vs.
+                                                                              itMF (Wu et al., 2025a), and LLMmap (Pasquini
+proactive): Proactive methods embed signals (e.g.,
+                                                                              et al., 2025). Gray-box approaches assume access
+watermarks or injected fingerprints) into the base
+                                                                              to token-level output distributions, a setting often
+model during training or post-training to enable
+                                                                              realized in practice since many commercial APIs
+subsequent verification. Examples include domain-
+                                                                              (e.g., GPT models) expose per-token probabilities
+specific watermarking (Gloaguen et al., 2025), lo-
+                                                                              or top-k probabilities. This provides richer infor-
+calized knowledge editing for natural-language fin-
+                                                                              mation than pure text outputs, while still restricting
+gerprints (Wang et al., 2025), and training-free edit-
+                                                                              access to model parameters.
+ing approaches such as EditMF (Wu et al., 2025a)
+                                                                                 To the best of our knowledge, no prior prove-
+and implicit fingerprints (Wanli et al., 2025). These
+                                                                              nance detection methods have exploited the gray-
+methods modify the base model’s parameters or
+                                                                              box setting. Our method requires no white-box ac-
+sampling distribution, which can inevitably de-
+                                                                              cess, remains effective even in the most restricted
+grade utility, and they are inapplicable to legacy
+                                                                              black-box scenario, and further benefits from gray-
+base models that have already been released.
+                                                                              box access when available.
+   In contrast, passive methods do not alter the
+base model but instead design prompts to elicit
+                                                                              2.2   Prompt Injection
+inherent behaviors (i.e., fingerprints) and then com-
+pare outputs between the base and suspect mod-                                Prompt injection (Greshake et al., 2023; Liu et al.,
+els. For example, TRAP (Gubri et al., 2024)                                   2024) exposes an inherent vulnerability of LLMs:
+optimizes prompts to induce the base model                                    carefully crafted prompts can steer a model to per-
+to output a specific string and checks whether                                form a specified injected task. Different injected
+the suspect model reproduces the same output.                                 tasks, together with their associated prompts, re-
+Nikolic et al. (2025) sample large pools of ran-                              veal distinct facets of a model’s vulnerability and
+dom prompts and test whether the suspect model                                thus expose model-specific characteristics. Unlike
+matches the base model’s next-token predictions.                              jailbreak attacks (Zou et al., 2023), which perturb
+                                                                           11797
+
+===== PDF p.4 =====
+unsafe prompts to bypass refusals and induce harm-        therefore a binary decision task: given (MB , MS ),
+ful outputs, injected tasks in prompt injection need      decide whether MS is positive or negative.
+not be tied to harmful content.                           Fingerprint-based detection: Our method ad-
+   To realize an injected task, prompts can               dresses this task by extracting a fingerprint from
+be constructed using either heuristic-based or            MB and then verifying whether MS preserves the
+optimization-based approaches. Heuristic-based            same fingerprint. For the fingerprint to be effective,
+approaches rely on manually designed patterns,            it must satisfy two key properties: uniqueness and
+such as context-ignoring separators or fake com-          robustness. Uniqueness means that the fingerprint
+pletions. Representative methods include Naive            of MB should not be extractable from the suspect
+Attack (Willison, 2022), Context Ignoring (Perez          model MS if it is negative; robustness means that
+and Ribeiro, 2022), Fake Completion (Willison,            the fingerprint of MB should be extractable from
+2023), and Combined Attack (Liu et al., 2024), the        MS if it is positive.
+latter concatenating multiple heuristics and shown
+                                                          Access assumptions: Since the base model owner
+to be the most effective among this family (Liu
+                                                          is typically the party performing provenance de-
+et al., 2024). While simple and broadly applicable,
+                                                          tection, the detector generally has full white-box
+such heuristics are suboptimal at reliably steering
+                                                          access to the base model MB . In contrast, the sus-
+an LLM to perform the injected task.
+                                                          pect model MS is from another party and may be
+   Optimization-based approaches (Hui et al., 2024;       deployed as a cloud service with only limited API
+Shi et al., 2024; Pasquini et al., 2024; Jia et al.,      access. We therefore consider two access scenarios
+2025) instead frame prompt injection as an opti-          for MS :
+mization problem. Given an injected task, a loss
+function quantifies how well the model’s output           • Gray-box access: The detector can query MS
+satisfies the task, and the prompt is iteratively opti-     for token-level probabilities, as supported by
+mized to minimize this loss. A widely adopted tech-         APIs that expose per-token probabilities or top-k
+nique is the Greedy Coordinate Gradient (GCG)               probabilities.
+algorithm (Zou et al., 2023), which incrementally         • Black-box access: The detector can only access
+adjusts the prompt to reduce the loss and better            the generated tokens from MS in response to
+align the output with the injected task.                    queries, corresponding to deployment settings
+   LLMPrint leverages this vulnerability not of-            where APIs do not expose logits.
+fensively, but defensively–transforming prompt in-
+                                                          4     Our LLMPrint
+jection into a tool for LLM provenance detection.
+Specifically, LLMPrint constructs unique and ro-          4.1    Overview
+bust fingerprints by designing novel injected tasks       Our LLMPrint determines whether a suspect model
+and optimizing their associated prompts with GCG.         MS is positive or negative with respect to a base
+                                                          model MB . It consists of two components: (i)
+3   Problem Formulation
+                                                          fingerprint construction, where we generate finger-
+We study the problem of LLM provenance detec-             print prompts that encode a statistical fingerprint
+tion: given a base model MB and a suspect model           of MB ; and (ii) fingerprint verification, where we
+MS , determine whether MS is derived from MB .            test whether MS preserves this fingerprint under
+A suspect model is considered derived from a base         gray-box or black-box access.
+model if it is obtained through post-processing           Motivation: LLMs are inherently vulnerable to
+operations–such as post-training (Hu et al., 2022;        prompt injection: carefully crafted inputs can over-
+Ouyang et al., 2022) or quantization (Zhu et al.,         ride their default behavior and steer them toward
+2024; Lin et al., 2024) that maps floating-point          performing an injected task. We exploit this vul-
+weights to lower-precision formats–rather than be-        nerability as a fingerprint by strategically defining
+ing trained independently from scratch.                   n injected tasks, each enforcing a preference be-
+Positive and negative suspect models: We call             tween a randomly selected token pair (wj+ , wj− ).
+MS a positive suspect model if it is derived from         For each pair (wj+ , wj− ), we optimize a fingerprint
+MB via post-processing, and a negative suspect            prompt such that, when provided as input, the base
+model if it is independently trained and thus unre-       model assigns a higher probability to wj+ than to
+lated to MB . The provenance detection problem is         wj− when generating the first predicted token. If a
+                                                     11798
+
+===== PDF p.5 =====
+suspect model reproduces these preferences under         ability to wj+ than to wj− , where σ denotes the
+the same fingerprint prompts, it is likely derived       sigmoid function, and zj+ and zj− are the logits
+from the base model.                                     assigned by the base model to wj+ and wj− , re-
+   This process can also be understood from a clas-      spectively, when generating the first token given
+sification perspective. For the first predicted token,   pj as input; this smooth formulation avoids hard
+an LLM with a vocabulary of size K can be seen           constraints and provides stable gradients for opti-
+as a K-class classifier: the prompt is the input, and    mization. The second term, |zj+ − zj− |, discourages
+the predicted token is the class output. Each clas-      the margin from growing too large, ensuring that
+sifier is uniquely identified by its decision bound-     the fingerprint prompt remains near the decision
+ary, which partitions the prompt space into regions      boundary and thus discriminative across different
+where all prompts within a region induce the same        base models. Formally, we have:
+first token. Accordingly, our fingerprint prompts                                            ⃓           ⃓
+are located near the decision boundary of the base        Lu (sj ) = − log σ(zj+ − zj− ) + α ⃓ zj+ − zj− ⃓, (1)
+model. In particular, the fingerprint prompt for a
+token pair (wj+ , wj− ) lies near the boundary sepa-     where α > 0 is a hyperparameter that balances the
+                                                         two terms.
+rating the regions for wj+ and wj− .
+                                                            Robustness requires that the fingerprint prompt
+   Our LLMPrint constructs fingerprint prompts
+                                                         for (wj+ , wj− ) not only lies near the boundary sep-
+with two goals: (i) uniqueness, by extracting fin-
+gerprint prompts near the base model’s decision          arating wj+ and wj− , but also stays far from the
+boundary so they are discriminative across base          regions corresponding to all other tokens. Other-
+models, and (ii) robustness, by ensuring that a fin-     wise, the comparison between wj+ and wj− could
+gerprint prompt for (wj+ , wj− ) lies far from the re-   be overshadowed by unrelated tokens, making the
+gions of all other tokens, making it stable under        fingerprint unstable under post-processing. To cap-
+post-processing of the base model.                       ture this, we penalize cases where the collective
+                                                         probability mass of all other tokens exceeds that of
+4.2 Fingerprint Construction                             the token pair. Instead of using a hard maximum
+                                                         over∑︁the logits, we adopt the smooth approximation
+Formulate an optimization problem: For each              log k∈V\{w+ ,w− } ezk , where V denotes the base
+                                                                         j  j
+token pair (wj+ , wj− ) in an injected task, we con-     model’s vocabulary. This formulation aggregates
+struct a fingerprint prompt pj of the form pj =          the influence of all other tokens while remaining
+p ∥ sj where p is a fixed instruction template and sj    differentiable and stable for optimization. Formally,
+is a fixed-length suffix to be optimized. In our ex-     we have:
+periments, we set p to the simple instruction “Ran-                        (︂            ∑︂                )︂
+domly output a word from your vocabulary”, which           Lr (sj ) = max 0, log                  ezk − zj+ .
+anchors the injected task and ensures a consistent                                k∈V\{wj+ ,wj− }
+context across token pairs. We optimize only the                                                           (2)
+suffix sj : keeping p fixed reduces the search space     This term ensures that zj+ remains larger than the
+and stabilizes optimization, while optimizing the        aggregate contribution of all other tokens’ logits,
+entire fingerprint prompt pj empirically leads to        thereby keeping wj+ and wj− competitive and the
+weaker detection performance, as we demonstrate          pairwise decision meaningful.
+in our experiments.                                        Balancing the two loss functions yields our final
+   Our goal is to optimize sj such that it yields a      objective:
+fingerprint prompt with both uniqueness and ro-
+bustness. Specifically, we design a loss function               min L(sj ) = Lu (sj ) + β Lr (sj ),        (3)
+                                                                  sj
+Lu (sj ) to quantify uniqueness, and a loss func-
+tion Lr (sj ) to quantify robustness. Uniqueness re-     where β > 0 trades off uniqueness and robustness.
+quires that the model consistently prefers wj+ over      Solve the optimization problem: The optimiza-
+wj− , but only by a small margin so that the finger-     tion problem in Equation 3 is non-convex and
+print prompt lies close to the base model’s decision     involves discrete token choices, rendering it in-
+boundary. We therefore design Lu with two com-           tractable for direct optimization via gradient de-
+plementary terms. The first term, − log σ(zj+ −zj− ),    scent. We therefore adopt the Greedy Coordi-
+encourages the base model to assign higher prob-         nate Gradient (GCG) algorithm, a method widely
+                                                    11799
+
+===== PDF p.6 =====
+used in adversarial prompt optimization (Zou et al.,           τ that balances false positives and false negatives.
+2023). GCG iteratively updates the suffix sj by                We model the accuracies A(MB , Mi ) as samples
+replacing individual tokens with candidates that               from a Gaussian distribution with mean µ and vari-
+most reduce the objective, while keeping the suffix            ance σ 2 . Given a z-score z, we define the detection
+length fixed. The full procedure is summarized in              threshold as τ = µ + z · σ. A suspect model is then
+Algorithm 1 in Appendix, which outputs a set of                declared positive if A(MB , MS ) ≥ τ , and nega-
+fingerprint prompts {pj }nj=1 that collectively con-           tive otherwise. The difference between gray-box
+stitute the fingerprint of the base model.                     and black-box verification lies in how the bit string
+                                                               b̂ is computed (Line 2 of Algorithm 2). We next
+4.3 Fingerprint Verification                                   elaborate on the details for these two settings.
+Given a suspect model MS , our goal is to deter-               Gray-box verification: In the gray-box setting,
+mine whether it preserves the fingerprint of a base            we assume access to the token-level probabili-
+model MB . To this end, we unify gray-box and                  ties from the suspect model MS . We denote by
+black-box settings into a single verification frame-           PMS (w | p) the probability assigned by MS
+work. The complete procedure is summarized in                  to token w conditioned on prompt p. For each
+Algorithm 2 in Appendix.                                       fingerprint prompt pj , we query MS to obtain
+                                                                                               −              −
+   Given a set of fingerprint prompts {pj }nj=1 and            ℓ̂+              +
+                                                                 j = PMS (wj | pj ) and ℓ̂j = PMS (wj | pj ).
+corresponding token pairs (wj+ , wj− ), we extract             If the API only returns the top-k probabilities, we
+                                                                            −
+two n-bit strings: a reference bit string b =                  set ℓ̂+
+                                                                     j or ℓ̂j to the reported probability if the token
+(b1 , . . . , bn ) from the base model MB and a pre-           appears in the top-k list, and to 0 otherwise. The
+dicted bit string b̂ = (b̂1 , . . . , b̂n ) from the suspect   predicted bit is then defined as b̂j = 1[ ℓ̂+       −
+                                                                                                            j ≥ ℓ̂j ].
+model MS . For each j, the base model MB as-                   We further evaluate this top-k case in our exper-
+signs a reference bit bj = 1[zj+ ≥ zj− ], where zj+            iments to assess LLMPrint’s performance under
+                                                               limited probability access.
+and zj− denote the logits of wj+ and wj− as the first
+predicted token when taking pj as input. For the               Black-box verification: In the black-box setting,
+suspect model MS , the predicted bit b̂j is obtained           we rely on repeated sampling to estimate the bit
+either (i) directly from token-level probabilities in          string b̂. For each fingerprint prompt pj and corre-
+the gray-box setting, or (ii) by repeated sampling             sponding token pair (wj+ , wj− ), we query the sus-
+and comparing empirical frequencies in the black-              pect model T times, each time recording the first
+box setting. This yields a bit string b̂ for MS that           token generated by the model in response to pj .
+                                                                               −
+can be compared against the reference bit string               Let c+ j and cj denote the number of times wj
+                                                                                                                 +
+
+b. We quantify agreement            via bitwise accuracy:      and wj− are generated as the first token, respec-
+                           ∑︁
+A(MB , MS ) = n1 nj=1 1[b̂j = bj ].                            tively, across the T trials. We then define b̂j as
+   However, raw agreement alone is insufficient to             b̂j = 1[ c+       −
+                                                                          j ≥ cj ]. Equivalently, this can be seen
+reliably distinguish positive suspect models from              as comparing the empirical frequencies c+  j /T and
+negative ones. First, different LLMs may coinci-               c−  /T  of the two  tokens under pj .
+                                                                 j
+dentally agree on a subset of fingerprint prompts
+due to shared pretraining corpora or similar archi-            5     Experiments
+tectures. Second, stochasticity in generation and
+                                                               5.1    Experimental Setup
+optimization artifacts during fingerprint prompt
+construction can introduce noise, potentially in-              Base models:         We evaluate our method on
+flating or deflating raw accuracy.                             five widely used open-source LLMs of differ-
+   To address this, we introduce a statistical base-           ent families and scales: Llama-3-8B (Meta,
+line that captures the expected accuracy of negative           2024), Mistral-7B-v0.3 (Mistral, 2024), Qwen3-
+suspect models. Specifically, we define a validation           8B (Qwen, 2025), DeepSeek-R1-Distill-Qwen-
+negative suspect model set {Mi }ki=1 , which serves            1.5B (DeepSeek, 2025) (abbreviated as DeepSeek-
+two purposes: (i) it provides an empirical distri-             R1), and SmoLLM2-135M (HuggingFaceTB,
+bution of bitwise accuracies A(MB , Mi ) under                 2025). These models span parameter counts from
+negative suspect models, enabling us to estimate               135M to 8B and cover both recent state-of-the-art
+how much agreement can occur by chance; and (ii)               architectures (e.g., Llama, Mistral, Qwen) and dis-
+it supports the selection of a principled threshold            tilled or lightweight variants (e.g., DeepSeek-R1,
+                                                          11800
+
+===== PDF p.7 =====
+Table 2: TPR and FPR of LLMPrint for post-training                                  Table 3: ROC-AUC of LLMPrint for post-training and
+and quantization.                                                                   quantization.
+
+                            Gray-box                       Black-box                                               Gray-box                       Black-box
+Base model                                                                           Base model
+                  Post-training   Quantization    Post-training   Quantization                         Post-training    Quantization   Post-training      Quantization
+                  TPR ↑   FPR ↓   TPR ↑   FPR ↓   TPR ↑   FPR ↓   TPR ↑   FPR ↓      Meta-Llama-3-8B       0.978              0.938       0.980               0.943
+Meta-Llama-3-8B   0.956     0     0.875     0     0.944     0     0.833     0        Mistral-7B-v0.3       0.961              0.992       0.959               0.989
+Mistral-7B-v0.3   0.903     0     0.906     0     0.893     0     0.984   0.012      Qwen3-8B              0.979              0.979       0.994               0.977
+Qwen3-8B          0.958     0     0.957     0     0.938   0.015   0.812     0        DeepSeek-R1           0.984              0.983       0.980               0.990
+DeepSeek-R1       0.951   0.006   0.952     0     0.961     0     0.889     0        SmoLLM2-135M          0.983              0.964       0.965               0.953
+SmoLLM2-135M      0.967     0     0.900   0.005   0.867     0     0.900     0
+
+
+                                                                                    Table 4: TPR and FPR of different detection methods
+SmoLLM2). This diverse selection allows us to as-
+                                                                                    in the black-box setting, using Meta-Llama-3-8B as the
+sess whether LLMPrint generalizes across different                                  base model.
+model families and parameter scales.
+                                                                                                                    Post-training      Quantization
+Suspect models: For each base model, we collect                                                   Method
+                                                                                                                    TPR ↑      FPR ↓   TPR ↑   FPR ↓
+post-trained and quantized variants as suspect mod-
+                                                                                                  IPGuard             0          0       0          0
+els. Post-trained models are selected from Hugging                                                TRAP              0.596      0.500   0.792      0.594
+Face by ranking repositories by download counts                                                   LLMmap            0.789      0.082   0.333      0.563
+                                                                                                  LLMPrint-CA       0.011      0.008     0          0
+to cover widely used checkpoints. Quantized mod-                                                  LLMPrint          0.944        0     0.833        0
+els are collected using the same procedure but re-
+stricted to the GGUF format (Gerganov and Docu-                                     derived from its base across both post-training and
+mentation, 2024), which is the community standard                                   quantization. In the gray-box setting, the TPR ex-
+and ensures consistent toolchain compatibility for                                  ceeds 90% for all five base models, reaching up
+reproducibility. We define positive suspect models                                  to 96.7% on SmoLLM2-135M, while the FPR re-
+as post-trained or quantized variants derived from                                  mains essentially zero. In the black-box setting,
+the given base model, and negative suspect models                                   LLMPrint remains effective: the TPR stays above
+as those derived from other base models. Appendix                                   81.2% across all base models, while the FPR is
+Table 6 summarizes the dataset.                                                     consistently below 1.5%. These results collectively
+Baseline methods:        We compare LLMPrint                                        demonstrate that LLMPrint attains (i) uniqueness–
+with four baselines: TRAP (Gubri et al., 2024),                                     FPRs are at or near zero even against large pools of
+LLMmap (Pasquini et al., 2025), IPGuard (Cao                                        negative suspect models–and (ii) robustness–high
+et al., 2021), and Combined Attack (Liu et al.,                                     TPRs persist under post-training and quantization.
+2024) (denoted LLMPrint-CA). Implementation                                         Consistent with these findings, the corresponding
+details of them are in Appendix A.2.                                                ROC-AUC values are also uniformly high across
+                                                                                    base models and settings, further confirming strong
+Evaluation metrics: We evaluate detection perfor-                                   separability between positive and negative suspect
+mance using the true positive rate (TPR) and false                                  models (Table 3).
+positive rate (FPR). For a given base model, TPR is
+defined as the fraction of positive suspect models–                                 Our LLMPrint outperforms baseline prove-
+those actually derived from the base model–that are                                 nance detection methods: Table 4 reports the
+correctly detected as positive. Conversely, FPR is                                  TPR and FPR of LLMPrint and other baseline
+the fraction of negative suspect models–those not                                   methods under black-box verification, for which
+derived from the base model–that are incorrectly                                    these methods were originally designed. TRAP
+detected as positive.                                                               and LLMmap achieve moderate TPRs but suffer
+                                                                                    from high FPRs, exceeding 50% in some cases.
+Parameter setting for LLMPrint: Details of the                                      This is consistent with their design goals: TRAP
+parameter settings for fingerprint construction and                                 relies on fixed-string outputs that are fragile un-
+verification appear in Appendix A.3.                                                der post-processing, while LLMmap depends on
+5.2 Main Results                                                                    lexical or stylistic patterns that are not sufficiently
+                                                                                    discriminative across different base models. IP-
+Our LLMPrint achieves both uniqueness and ro-                                       Guard, designed for conventional classifiers, fails
+bustness goals: Table 2 reports the TPR and FPR                                     entirely in this setting, while LLMPrint-CA also
+of LLMPrint under both gray-box and black-box                                       performs poorly. In contrast, LLMPrint achieves
+verification. The results demonstrate that LLM-                                     high TPR with zero FPR, showing that LLMPrint
+Print reliably detects whether a suspect model is                                   provides unique and robust fingerprint prompts. We
+                                                                                 11801
+
+===== PDF p.8 =====
+Table 5: Performance of LLMPrint under prompt-                                                   pect models employ detectors to identify and
+injection detectors for Meta-Llama-3-8B.                                                         reject injected/fingerprint prompts. Table 5 re-
+                                         Gray-box                       Black-box                ports results with two detectors, DataSentinel (Liu
+Detector       Bypass rate ↑
+                               Post-training   Quantization    Post-training   Quantization      et al., 2025), which is the state-of-the-art, and
+                               TPR ↑   FPR ↓   TPR ↑   FPR ↓   TPR ↑   FPR ↓   TPR ↑   FPR ↓
+DataSentinel      0.950        0.956     0     0.875     0     0.944     0     0.833     0       PPL-Detector (Alon and Kamfonas, 2023). Our
+PPL-Detector      0.807        0.944     0     0.875     0     0.922     0     0.833     0
+                                                                                                 LLMPrint achieves high bypass rates under both
+                                                                                                 DataSentinel (95.0%) and PPL-Detector (80.7%),
+observe the same trend on an additional base model,
+                                                                                                 indicating that most fingerprint prompts bypass
+Mistral-7B-v0.3; the detailed comparison is pro-
+                                                                                                 these detectors. More importantly, the effective-
+vided in Table 7 in Appendix.
+                                                                                                 ness of LLMPrint is largely preserved with the by-
+5.3 Failure Analysis                                                                             passed fingerprint prompts: across both gray-box
+                                                                                                 and black-box settings, TPR remains above 92%
+Table 8 in Appendix presents the average bench-
+                                                                                                 with FPR close to zero. These results demonstrate
+mark score differences between post-trained pos-
+                                                                                                 that LLMPrint remains reliable even when suspect
+itive suspect models, which were incorrectly de-
+                                                                                                 models employ safety guardrails against prompt
+tected as negative under gray-box or black-box
+                                                                                                 injection. Implementation details of the detectors
+verification, and their corresponding base mod-
+                                                                                                 are provided in Appendix A.4.
+els, evaluated on three widely used benchmarks
+(MMLU, HellaSwag, and PIQA) that measure                                                         Scaling to larger base models: We further eval-
+general-purpose capabilities. The results reveal                                                 uate LLMPrint on larger base models beyond 8B
+a clear pattern: missed detections primarily oc-                                                 parameters, namely GPT-OSS-20B (Agarwal et al.,
+cur when the positive suspect models have al-                                                    2025) and Phi-4-14B (Abdin et al., 2024). For
+ready suffered substantial degradation after post-                                               GPT-OSS-20B, we collect 121 post-trained and 39
+processing. For example, post-trained variants of                                                quantized positive suspect models; for Phi-4-14B,
+Mistral-7B-v0.3 drop nearly 20% (gray-box) and                                                   we collect 91 post-trained and 64 quantized positive
+21% (black-box). Even for smaller base models                                                    suspect models. As in our main experiments, neg-
+like SmoLLM2-135M, the misdetected suspects                                                      ative suspect models are post-processed variants
+show substantial drops–for instance, more than                                                   derived from the other five base models evaluated
+12% on PIQA (gray-box). These findings indicate                                                  in our paper. Therefore, for each larger base, we
+that failures are not due to fragile fingerprints but                                            use 463 post-trained and 230 quantized negative
+instead reflect that the suspect models have drifted                                             suspect models. Across both gray-box and black-
+far from the behavior of their base, making reliable                                             box settings, LLMPrint maintains strong detection
+detection inherently difficult.                                                                  performance, with high TPR and consistently near-
+                                                                                                 zero FPR. These results show that LLMPrint scales
+5.4 Ablation Study                                                                               effectively to larger parameter regimes and remains
+Top-k probability vs. full distribution: We evalu-                                               reliable for high-value models where provenance
+ate LLMPrint in a restricted gray-box setting where                                              protection is particularly important. Detailed re-
+the API only exposes the top-k probabilities per                                                 sults are provided in Table 10 in Appendix.
+token instead of the full distribution, following the                                            Token preference vs. tokenizer effects: We fur-
+design of mainstream services such as ChatGPT                                                    ther examine whether LLMPrint captures model-
+that return top-20 probabilities. Table 9 in Ap-                                                 specific token preferences rather than merely ex-
+pendix shows that using only top-20 probabilities                                                ploiting tokenizer differences. To control for to-
+yields almost identical detection performance as                                                 kenizer effects, we conduct an additional experi-
+the full distribution: the TPR remains the same                                                  ment on Meta-Llama-3-8B and Mistral-7B-v0.3,
+for post-training and drops only marginally from                                                 where token pairs are sampled only from the in-
+87.5% to 83.3% for quantization, while the FPR                                                   tersection of their vocabularies and each word in
+remains zero in both cases. It demonstrates that                                                 every pair is required to correspond to exactly one
+LLMPrint remains highly effective even under re-                                                 token under both tokenizers. This removes segmen-
+alistic API constraints.                                                                         tation discrepancies while keeping the fingerprint
+Fingerprint verification under prompt-injection                                                  size fixed. The results remain strong across both
+detectors: We further examine whether fin-                                                       post-training and quantization, under both gray-box
+gerprint verification remains effective when sus-                                                and black-box settings, with FPR at or near zero.
+                                                                                              11802
+
+===== PDF p.9 =====
+These findings suggest that LLMPrint primarily          only once while verification can be executed effi-
+captures model-specific token preference margins        ciently when needed.
+rather than tokenizer artifacts. Detailed results are
+provided in Table 11 in Appendix.                       5.6    Adaptive Attacks
+Other ablation studies: We conducted additional
+                                                        To assess the robustness of LLMPrint under adver-
+ablation studies to better understand key design
+                                                        sarial settings, we conducted adaptive attack experi-
+choices in LLMPrint. First, the fixed base prompt
+                                                        ments where the attacker actively attempts to evade
+p is essential–removing it reduces TPR due to desta-
+                                                        detection with varying levels of knowledge. These
+bilized optimization. Second, category-based to-
+                                                        scenarios go beyond standard robustness tests, rep-
+ken pair selection outperforms random sampling,
+                                                        resenting worst-case attempts to invert the finger-
+as semantically grouped pairs yield more balanced
+                                                        print signal. We consider three settings:
+probabilities and stronger fingerprints. Third, a
+few hundred fingerprint prompts (n ≈ 300) suf-          • White-box. The attacker has full access to
+fice for stable performance. Fourth, varying the          the fingerprint prompts, token pairs (wj+ , wj− ),
+loss weights α and β illustrates their trade-offs be-     and GCG hyperparameters, and uses LoRA fine-
+tween uniqueness and robustness. Across a broad           tuning to induce a preference for wj− over wj+ .
+range of values, LLMPrint maintains high TPR            • Gray-box. The attacker knows the method, GCG
+with low FPR, while extreme settings can degrade          hyperparameters, and the base prompt (a stronger
+performance. Moreover, in the black-box setting,          assumption than realistic), but not the token pairs.
+the number of queries T governs bit estimate reli-        They generate 300 random token pairs and opti-
+ability: moderate values (e.g., T = 100) achieve          mize their own fingerprint prompts.
+high TPR with low FPR, while larger T slightly          • Black-box. The attacker is only aware of the
+increases FPR. Full results and figures, including        high-level algorithm. Using a semantically simi-
+analyses on fingerprint distinctiveness, token-pair       lar base prompt (“Randomly give me a word from
+necessity, GCG iteration count, and model merging         your knowledge base”), they generate 300 ran-
+scenarios, appear in Appendix A.5.                        dom token pairs and optimize fingerprint prompts
+                                                          with self-selected GCG hyperparameters.
+5.5 Efficiency Analysis
+                                                           All attacks target the suspect models correctly
+Fingerprint construction cost: Fingerprint con-         flagged by LLMPrint in the original setting. Ta-
+struction is an offline one-time cost incurred by       ble 14 in Appendix shows that while full evasion
+the model provider. On a single NVIDIA RTX              is possible under white-box access, performance
+6000 (24GB) using Meta-Llama-3-8B, construct-           drops significantly in the gray-box case. In the
+ing one fingerprint prompt requires approximately       black-box case, nearly all suspect models remain
+0.2 GPU-hours. For the default configuration of         detectable. These results highlight LLMPrint’s
+300 fingerprint prompts, this corresponds to about      strong robustness under adversarial scenarios.
+60 GPU-hours in total. Since prompts are opti-
+mized independently, the process is fully paralleliz-
+                                                        6     Conclusion
+able across multiple GPUs, reducing wall-clock
+time nearly linearly with available devices. We         In this work, we show that exploiting the inher-
+also observe substantial acceleration on stronger       ent vulnerability of LLMs to prompt injection
+hardware: on a single NVIDIA H200, constructing         enables reliable detection of whether a suspect
+one fingerprint prompt for GPT-OSS-20B requires         model is derived from a given base model. This
+only about 0.1 GPU-hour.                                is achieved by constructing optimized fingerprint
+Fingerprint verification cost: Verification is sub-     prompts that enforce consistent pairwise token pref-
+stantially cheaper than construction. On the same       erences, yielding signals that are unique to the base
+hardware, gray-box verification of 300 prompts          model and robust under post-processing such as
+takes approximately 14 seconds. In the black-box        post-training and quantization. Extensive evalua-
+setting with T = 100 queries per prompt, verifica-      tion across five base models and around 700 suspect
+tion takes about 28 minutes. These results indicate     models demonstrates that our LLMPrint achieves
+that LLMPrint is practical for real-world deploy-       high true positive rates with near-zero false posi-
+ment, especially since construction is performed        tives, consistently outperforming prior methods.
+                                                   11803
+
+===== PDF p.10 =====
+7   Limitations                                           DeepSeek. 2025. Deepseek-r1-distill-qwen-1.5b. http
+                                                            s://huggingface.co/unsloth/deepseek-r1-d
+While LLMPrint demonstrates strong performance              istill-qwen-1.5b.
+in fingerprint-based provenance detection across          Georgi Gerganov and Hugging Face Documentation.
+multiple base and suspect models, several limita-           2024. Gguf: a format for quantized llms (binary +
+tions remain. First, our method assumes the avail-          metadata) in llama.cpp. https://huggingface.co
+ability of gray-box or black-box API access with            /docs/hub/en/gguf.
+token-level responses or sufficient sampling; real-       Thibaud Gloaguen, Robin Staab, Nikola Jovanović,
+world proprietary APIs may restrict access or rate          and Martin Vechev. 2025. Robust llm fingerprint-
+limit queries in ways that degrade detection perfor-        ing via domain-specific watermarks. arXiv preprint
+                                                            arXiv:2505.16723.
+mance. Second, the technique relies on the inherent
+vulnerability to prompt injection, which might vary       Google. 2025. Ai mode in search: Going beyond infor-
+in strength across different LLM architectures or           mation to intelligence. https://blog.google/pr
+                                                            oducts/search/google-search-ai-mode-updat
+future model training regimes, potentially reducing         e/.
+fingerprint uniqueness or robustness. Third, con-
+structing and optimizing hundreds of fingerprint          Kai Greshake, Sahar Abdelnabi, Shailesh Mishra,
+                                                            Christoph Endres, Thorsten Holz, and Mario Fritz.
+prompts incurs non-trivial computational cost and           2023. Not what you’ve signed up for: Compromising
+query overhead, which may be time-consuming in              real-world llm-integrated applications with indirect
+real-time deployment scenarios.                             prompt injection. In ACM AISec Workshop.
+                                                          Martin Gubri, Dennis Ulmer, Hwaran Lee, Sangdoo
+Acknowledgements                                           Yun, and Seong Joon Oh. 2024. Trap: Targeted ran-
+                                                           dom adversarial prompt honeypot for black-box iden-
+We thank the anonymous reviewers for their valu-           tification. arXiv preprint arXiv:2402.12991.
+able feedback and constructive suggestions. This
+                                                          Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou,
+work was supported in part by NSF Grants No.                Mantas Mazeika, Dawn Song, and Jacob Steinhardt.
+2530786, 2450935, 2414406, and 2112562, and by              2021. Measuring massive multitask language under-
+Ant Group.                                                  standing. In ICLR.
+                                                          Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan
+                                                            Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang,
+References                                                  Weizhu Chen, and 1 others. 2022. Lora: Low-rank
+                                                            adaptation of large language models. In ICLR.
+Marah Abdin, Jyoti Aneja, Harkirat Behl, Sébastien
+ Bubeck, and 1 others. 2024. Phi-4 technical report.      HuggingFaceTB. 2025. Smollm2-135m. https://hu
+ arXiv preprint arXiv:2412.08905.                           ggingface.co/HuggingFaceTB/SmolLM2-135M.
+
+Sandhini Agarwal, Lama Ahmad, Jason Ai, Sam Alt-          Bo Hui, Haolin Yuan, Neil Gong, Philippe Burlina, and
+  man, and 1 others. 2025. gpt-oss-120b & gpt-oss-20b       Yinzhi Cao. 2024. Pleak: Prompt leaking attacks
+  model card. arXiv preprint arXiv:2508.10925.              against large language model applications. In ACM
+                                                            CCS.
+Gabriel Alon and Michael Kamfonas. 2023. Detect-          Yuqi Jia, Zedian Shao, Yupei Liu, Jinyuan Jia, Dawn
+  ing language model attacks with perplexity. arXiv         Song, and Neil Zhenqiang Gong. 2025. A critical
+  preprint arXiv:2308.14132.                                evaluation of defenses against prompt injection at-
+                                                            tacks. arXiv preprint arXiv:2505.18333.
+Yonatan Bisk, Rowan Zellers, Jianfeng Gao, Yejin Choi,
+  and 1 others. 2020. Piqa: Reasoning about physical      Ji Lin, Jiaming Tang, Haotian Tang, Shang Yang, Wei-
+  commonsense in natural language. In AAAI.                  Ming Chen, Wei-Chen Wang, Guangxuan Xiao,
+                                                             Xingyu Dang, Chuang Gan, and Song Han. 2024.
+Xiaoyu Cao, Jinyuan Jia, and Neil Zhenqiang Gong.            Awq: Activation-aware weight quantization for on-
+  2021. Ipguard: Protecting intellectual property of         device llm compression and acceleration.
+  deep neural networks via fingerprinting the classifi-   Yupei Liu, Yuqi Jia, Runpeng Geng, Jinyuan Jia, and
+  cation boundary. In ACM AsiaCCS.                          Neil Zhenqiang Gong. 2024. Formalizing and bench-
+                                                            marking prompt injection attacks and defenses. In
+Nicholas Carlini, Daniel Paleka, Krishnamurthy Dj Dvi-      USENIX Security.
+  jotham, Thomas Steinke, Jonathan Hayase, A Feder
+  Cooper, Katherine Lee, Matthew Jagielski, Milad         Yupei Liu, Yuqi Jia, Jinyuan Jia, Dawn Song, and
+  Nasr, Arthur Conmy, and 1 others. 2024. Stealing          Neil Zhenqiang Gong. 2025. Datasentinel: A game-
+  part of a production language model. arXiv preprint       theoretic detection of prompt injection attacks. In
+  arXiv:2403.06634.                                         IEEE S&P.
+                                                     11804
+
+===== PDF p.11 =====
+Meta. 2024. Llama-3-8b. https://huggingface.co             Simon Willison. 2022. Prompt injection attacks against
+ /meta-llama/Meta-Llama-3-8B.                                gpt-3. https://simonwillison.net/2022/Sep/1
+                                                             2/prompt-injection/.
+Microsoft. 2023. Introducing microsoft 365 copilot –
+  your copilot for work. https://blogs.microsoft.          Simon Willison. 2023. Delimiters won’t save you from
+  com/blog/2023/03/16/introducing-microsoft                  prompt injection. https://simonwillison.net/
+ -365-copilot-your-copilot-for-work/.                        2023/May/11/delimiters-wont-save-you.
+Mistral. 2024. Mistral-7b-v0.3. https://huggingfac         Jiaxuan Wu, Yinghan Zhou, Wanli Peng, Yiming Xue,
+  e.co/mistralai/Mistral-7B-v0.3.                             Juan Wen, and Ping Zhong. 2025a. Editmf: Draw-
+                                                              ing an invisible fingerprint for your large language
+Ivica Nikolic, Teodora Baluta, and Prateek Saxena.            models. arXiv preprint arXiv:2508.08836.
+   2025. Model provenance testing for large language
+   models. arXiv preprint arXiv:2502.00706.                Zehao Wu, Yanjie Zhao, and Haoyu Wang. 2025b.
+                                                             Gradient-based model fingerprinting for llm similar-
+OpenAI. 2025. Chatgpt product discovery. https:
+                                                             ity detection and family classification. arXiv preprint
+  //openai.com/chatgpt/search-product-disco
+                                                             arXiv:2506.01631.
+  very/.
+Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida,          Do-hyeon Yoon, Minsoo Chun, Thomas Allen, Hans
+  Carroll Wainwright, Pamela Mishkin, Chong Zhang,           Müller, Min Wang, and Rajesh Sharma. 2025. In-
+  Sandhini Agarwal, Katarina Slama, Alex Ray, and            trinsic fingerprint of llms: Continue training is not
+  1 others. 2022. Training language models to follow         all you need to steal a model!       arXiv preprint
+  instructions with human feedback. In NeurIPS.              arXiv:2507.03014.
+
+Dario Pasquini, Evgenios M Kornaropoulos, and              Rowan Zellers, Ari Holtzman, Yonatan Bisk, Ali
+  Giuseppe Ateniese. 2025. Llmmap: Fingerprinting            Farhadi, and Yejin Choi. 2019. Hellaswag: Can a
+  for large language models. In USENIX Security.             machine really finish your sentence? In ACL.
+
+Dario Pasquini, Martin Strohmeier, and Carmela Tron-       Xunyu Zhu, Jian Li, Yong Liu, Can Ma, and Weiping
+  coso. 2024. Neural exec: Learning (and learning            Wang. 2024. A survey on model compression for
+  from) execution triggers for prompt injection attacks.     large language models. TACL.
+  In ACM AISec Workshop.
+                                                           Andy Zou, Zifan Wang, Nicholas Carlini, Milad Nasr,
+Fábio Perez and Ian Ribeiro. 2022. Ignore previous           J Zico Kolter, and Matt Fredrikson. 2023. Univer-
+  prompt: Attack techniques for language models. In          sal and transferable adversarial attacks on aligned
+  NeurIPS ML Safety Workshop.                                language models. arXiv preprint arXiv:2307.15043.
+
+Qwen. 2025. Qwen3-8b. https://huggingface.co
+ /Qwen/Qwen3-8B.
+Zhenzhen Ren, GuoBiao Li, Sheng Li, Zhenxing Qian,
+  and Xinpeng Zhang. 2025. Cotsrf: Utilize chain of
+  thought as stealthy and robust fingerprint of large
+  language models. arXiv preprint arXiv:2505.16785.
+Jiawen Shi, Zenghui Yuan, Yinuo Liu, Yue Huang, Pan
+   Zhou, Lichao Sun, and Neil Zhenqiang Gong. 2024.
+   Optimization-based prompt injection attack to llm-
+   as-a-judge. In ACM CCS.
+Florian Tramèr, Fan Zhang, Ari Juels, Michael K Re-
+  iter, and Thomas Ristenpart. 2016. Stealing machine
+  learning models via prediction {APIs}. In USENIX
+  Security.
+Binghui Wang and Neil Zhenqiang Gong. 2018. Steal-
+  ing hyperparameters in machine learning. In IEEE
+  S&P.
+Shida Wang, Chaohu Liu, Yubo Wang, and Linli
+  Xu. 2025. Fpedit: Robust llm fingerprinting
+  through localized knowledge editing. arXiv preprint
+  arXiv:2508.02092.
+Peng Wanli, Xue Yiming, and 1 others. 2025. Imf:
+  Implicit fingerprint for large language models. arXiv
+  preprint arXiv:2503.21805.
+                                                      11805
+
+===== PDF p.12 =====
+A    Appendix                                                   suspect model and each database entry and returns
+                                                                the nearest database model as its decision. We
+A.1 Use of LLMs
+                                                                report LLMmap’s result under this configuration.
+We used LLMs exclusively for light editing of the               IPGuard: IPGuard was originally developed
+manuscript, such as improving grammar and phras-                for conventional classifiers. To adapt it fairly
+ing for readability. They were not involved in de-              to the LLM setting, we replace our fingerprint-
+signing the research, running experiments, analyz-              construction loss with the IPGuard loss while keep-
+ing data, or forming scientific conclusions.                    ing the remainder of our pipeline identical. In par-
+                                                                ticular, we optimize the fingerprint suffixes with
+Algorithm 1 Fingerprint Construction
+                                                                GCG using the same initialization (suffix length
+Require: Base model MB , token pair set                         20), number of iterations (1,000), and search widths
+    {(wj+ , wj− )}nj=1 , base prompt p, and initial suf-        as in LLMPrint. Verification follows the same pro-
+    fix sinit                                                   cedure as our LLMPrint. Notably, since the IP-
+Ensure: Fingerprint prompt set {pj }nj=1                        Guard loss does not take the robustness objective
+ 1: P ← ∅                                                       into account, it results in a low TPR, as demon-
+ 2: for j = 1, 2, · · · , n do                                  strated by our experiments.
+ 3:     sj ← GCG(L(sinit ), p, sinit )
+                                                                Combined Attack (integrated as LLMPrint-
+ 4:     pj ← p ∥ s j
+                                                                CA): We integrate the Combined Attack heuristic
+ 5:     P ← P ∪ {pj }
+                                                                prompt-injection method as an alternative finger-
+ 6: end for
+                                                                print construction strategy, denoted LLMPrint-CA.
+ 7: return P
+                                                                For each token pair (wj+ , wj− ), we construct a fin-
+                                                                gerprint prompt using the following template:
+Table 6: Number of post-trained and quantized positive          \nTask: done\nIgnore previous
+and negative suspect models for each base model.                instructions.
+                                                                Please randomly output a word.
+ Base model        Type       Post-training   Quantization
+                                                                You must choose between "{w_j^{+}}" and
+                   Positive             90             24       "{w_j^{-}}".
+ Meta-Llama-3-8B
+                   Negative            373            206
+                                                                Prefer "{w_j^{+}}", but keep both options
+                   Positive            103             64
+ Mistral-7B-v0.3                                                likely.
+                   Negative            360            166
+                   Positive             48             69       All other settings for verification procedure remain
+ Qwen3-8B
+                   Negative            415            161       identical to LLMPrint; the only difference is that
+ DeepSeek-R1
+                   Positive            102             63       fingerprint prompts are constructed from this Com-
+                   Negative            361            167       bined Attack template rather than via the optimiza-
+                   Positive            120             10       tion objective.
+ SmoLLM2-135M
+                   Negative            343            220
+                                                                A.3   Details of Parameter Setting for
+                                                                      LLMPrint
+A.2 Implementation Details of Baselines
+                                                                Parameter setting for fingerprint construc-
+TRAP: We run TRAP using the default configu-                    tion: For each base model, we construct 300 token
+ration. Concretely, we set TRAP’s answer length                 pairs (n = 300) from a curated set of common
+of 3 since it yields best true positive rate in its             categories (e.g., animals, fruits, colors), with can-
+original paper. All other TRAP hyperparameters                  didate words generated by GPT-4o. To ensure that
+are left at their defaults as provided by the official          fingerprint prompts are both semantically coher-
+implementation.                                                 ent and compatible across tokenizers, we do not
+LLMmap: For LLMmap, we use the official,                        sample token pairs uniformly from the entire vo-
+pretrained detection model and pipeline. Because                cabulary. Instead, we curated 20 semantic cate-
+LLMmap performs nearest-neighbor matching to a                  gories, each containing 20 representative words,
+database of base models, we populate that database              for a total of 400 words spanning diverse domains
+with the five base models used in our experiments               across animals, fruits, vegetables, colors, countries,
+to give LLMmap a favorable setting. During de-                  languages, vehicles, body parts, clothing, technol-
+tection, LLMmap computes distances between the                  ogy, drinks, sports, furniture, stationery, musical
+                                                             11806
+
+===== PDF p.13 =====
+instruments, shapes, music genres, programming                          • Sports: soccer, tennis, rugby, hockey, boxing, racing,
+languages, flowers, and occupations.                                      skiing, surfing, golf, cricket, fencing, archery, bowling,
+                                                                          cycling, judo, karate, wrestling, polo, diving, badminton
+   When constructing token pairs for a given base
+model, we repeatedly sample one category at ran-                        • Furniture: table, chair, sofa, couch, shelf, desk, bed,
+                                                                          stool, cabinet, dresser, closet, bench, cupboard, cra-
+dom and then randomly select two distinct words                           dle, hammock, ottoman, sideboard, vanity, bookcase,
+from that category. A candidate pair is retained                          wardrobe
+only if both words correspond to exactly one to-
+                                                                        • Stationery: pen, pencil, ruler, eraser, paper, notebook,
+ken under the base model’s tokenizer. This process                        marker, binder, envelope, folder, stapler, scissors, high-
+continues until we collect 300 unique token pairs,                        lighter, sharpener, chalk, card, clip, staple, label, crayon
+ensuring that all fingerprint pairs are semantically                    • Musical instruments: piano, guitar, violin, cello, trum-
+meaningful, diverse, and consistent across different                      pet, trombone, saxophone, clarinet, flute, harp, drum,
+model vocabularies.                                                       horn, oboe, bassoon, banjo, organ, tuba, bugle, lyre,
+                                                                          mandolin
+   Unless otherwise specified, when optimizing a
+fingerprint prompt for a token pair, we set α = 0.5                     • Shapes: circle, square, triangle, rectangle, diamond, pen-
+                                                                          tagon, hexagon, octagon, cylinder, sphere, cube, cone,
+and β = 1, initialize the suffix with sinit = 20                          torus, rhombus, trapezoid, ellipse, polygon, oval, star,
+placeholder tokens (“x”), and run GCG for 1,000                           cross
+iterations using default settings.
+   The full set of categories are as follows:                           • Music genres: rock, pop, jazz, blues, reggae, techno,
+                                                                          hiphop, funk, disco, metal, country, gospel, opera,
+   • Animals: cat, dog, lion, tiger, wolf, bear, horse, donkey,           trance, house, swing, rap, soul, folk, edm
+     sheep, goat, rat, mouse, pig, fox, bull, frog, crow, swan,
+                                                                        • Programming languages: python, java, javascript,
+     crane, whale
+                                                                          csharp, ruby, php, swift, kotlin, rust, go, typescript,
+                                                                          fortran, cobol, julia, dart, clojure, scala, perl, groovy,
+   • Fruits: apple, pear, peach, plum, fig, date, lime, lemon,
+                                                                          haskell
+     mango, melon, grape, guava, berry, cherry, papaya, ba-
+     nana, kiwi, orange, lychee, apricot                                • Flowers: rose, lily, tulip, daisy, orchid, iris, violet,
+                                                                          poppy, peony, marigold, hyacinth, lavender, carnation,
+   • Vegetables: carrot, onion, garlic, pepper, chili, radish,            begonia, sunflower, dahlia, zinnia, aster, cosmos, jas-
+     beet, cabbage, lettuce, spinach, broccoli, zucchini, cu-             mine
+     cumber, leek, turnip, pumpkin, squash, pea, corn, celery
+                                                                        • Occupations: doctor, lawyer, teacher, pilot, nurse,
+   • Colors: red, blue, green, yellow, white, black, orange,              farmer, writer, actor, singer, dancer, soldier, tailor, chef,
+     purple, brown, silver, gray, gold, beige, pink, teal, navy,          barber, driver, baker, guard, clerk, banker, painter
+     maroon, lime, cyan, violet
+
+   • Countries: france, italy, spain, germany, greece, turkey,       Parameter setting for fingerprint verifica-
+     brazil, canada, japan, china, india, nepal, kenya, uganda,      tion: For calibration, we collect 13 validation neg-
+     rwanda, egypt, norway, sweden, poland, ireland                  ative suspect models spanning a broad range of fam-
+   • Languages: english, french, spanish, italian, german,           ilies and sizes, including Qwen, Gemma, Bloom,
+     russian, arabic, hebrew, hindi, bengali, polish, turkish,       Phi, OPT, Falcon, DistilGPT2, and GPT2. These
+     swahili, portuguese, chinese, japanese, korean, thai, viet-
+     namese, dutch
+                                                                     validation models are entirely disjoint from all
+                                                                     base and suspect models used for testing. The full
+   • Vehicles: car, bus, truck, train, plane, ship, bike, scooter,   list is as follows: Qwen2.5-3B-Instruct, Gemma-
+     yacht, ferry, tram, taxi, canoe, kayak, glider, rocket,
+     subway, rickshaw, sedan, coupe
+                                                                     3-1B-It, Bloom-560M, Phi-2, OPT-350M, Phi-3-
+                                                                     Mini-128K-Instruct, OPT-1.3B, DistilGPT2, GPT2,
+   • Body parts: head, arm, leg, foot, hand, ear, eye, nose,         Qwen2-7B, Falcon3-7B-Base, Gemma-2B, and
+     mouth, back, chest, hip, brow, cheek, chin, lip, tooth,
+     tongue, knee, elbow
+                                                                     Qwen2.5-7B-Instruct. This collection provides a
+                                                                     diverse set of unrelated families, ensuring reliable
+   • Clothing: shirt, pants, dress, skirt, coat, hat, sock, shoe,    threshold calibration across architectures.
+     glove, tie, belt, scarf, hoodie, jacket, sweater, bra, brief,
+     short, apron, visor                                                We set z = 1.64 for both the gray-box and black-
+                                                                     box settings. Statistically, this corresponds to a
+   • Technology: phone, laptop, tablet, router, modem, cam-          one-sided 95% confidence level for distinguishing
+     era, printer, scanner, keyboard, mouse, joystick, con-
+     sole, monitor, speaker, headset, charger, battery, cable,       base-derived suspects from unrelated models. In
+     remote, server                                                  the black-box case, we query each suspect model
+                                                                     T = 100 times to estimate every predicted bit b̂j ,
+   • Drinks: water, soda, juice, coffee, tea, beer, wine,
+     whisky, vodka, latte, cocoa, mocha, cider, tonic, lager,        which provides stable empirical estimates while
+     sake, mead, punch, rum, cola                                    keeping query costs moderate.
+                                                                11807
+
+===== PDF p.14 =====
+Table 7: TPR and FPR of different detection methods in     the same semantic category (e.g., two animals or
+the black-box setting, using Mistral-7B-v0.3 as the base   two colors). Table 12 shows that random sampling
+model.
+                                                           reduces TPR to 80.0%, since randomly paired to-
+                        Post-training   Quantization       kens are often highly imbalanced in probability
+          Method
+                        TPR ↑   FPR ↓   TPR ↑   FPR ↓      and cannot be adjusted effectively. Category-based
+          IPGuard
+          TRAP
+                        0.000
+                        0.650
+                                0.000
+                                0.569
+                                        0.000
+                                        0.703
+                                                0.000
+                                                0.633
+                                                           pairs yield more balanced probabilities, producing
+          LLMmap        0.748   0.039   0.578   0.265      stronger and more reliable fingerprints.
+          LLMPrint-CA   0.000   0.006   0.000   0.000
+          LLMPrint      0.893   0.000   0.984   0.012      Impact of number of fingerprint prompts
+                                                           n: Figure 2a shows the TPR and FPR when vary-
+                                                           ing the number of fingerprint prompts from 1 to
+A.4 Implementation Details of
+                                                           500. The TPR increases rapidly with more prompts
+    Prompt-Injection Detectors
+                                                           and stabilizes around 95% once n ≥ 300, while
+DataSentinel: For DataSentinel (Liu et al., 2025),         the FPR remains 0 throughout. This shows that a
+we adopt the official implementation and use its           few hundred fingerprint prompts are sufficient for
+default configuration. In particular, the detector         verification.
+employs a fine-tuned Mistral-7B-v0.1 model as the          Impact of α and β: Figures 2b and 2c illustrate
+underlying LLM, which is also the default setting          how α and β trade off uniqueness and robustness.
+released by the authors. Fingerprint prompts are           For α, very small values push prompts far from the
+passed to DataSentinel without modification, and           decision boundary and raise FPR, while very large
+we record whether they are blocked or passed.              values place them too close and lower TPR. For β,
+PPL-Detector: For PPL-Detector, we follow Alon             underweighting robustness increases FPR, whereas
+and Kamfonas (2023) and use GPT-2 as the refer-            moderate to larger values maintain high TPR with
+ence model to compute perplexity scores. To cal-           low FPR. Overall, LLMPrint performs well across
+ibrate the detection threshold, we randomly sam-           a broad range of settings, with performance only
+ple 1,000 questions from the MMLU benchmark                degrading at extreme values.
+and compute their perplexities under GPT-2. The            Impact of number of queries T in black-box
+threshold is then set to the 99.9th percentile of          verification: Figure 2d shows the effect of varying
+this distribution, ensuring that almost all natural        T . With too few queries, bit estimates are noisy
+MMLU questions are accepted while unusually                and TPR is low. As T increases, TPR improves
+high-perplexity inputs are flagged. Fingerprint            and saturates near 95% when T ≥ 100. However,
+prompts are considered blocked if their perplex-           larger T slightly increases FPR (e.g., 9.3% at T =
+ity exceeds this threshold.                                200), as excessive sampling raises the chance of
+                                                           spurious agreement with the base model.
+A.5 Additional Ablation Studies
+                                                           Evaluation of fingerprint distinctiveness: To
+Necessity of base prompt p: We first study the             demonstrate that the fingerprints generated by our
+role of the fixed base prompt p (“Randomly out-            LLMPrint are indeed distinctive between positive
+put a word from your vocabulary”) in fingerprint           and negative suspect models, we measure the Ham-
+construction. In the variant w/o base prompt p +           ming distance between the base model’s fingerprint
+category token pairs, we discard p entirely and di-        and that of each suspect model. Table 13 reports
+rectly optimize the fingerprint prompt from scratch.       the statistical results of the Hamming distances for
+As shown in Table 12, this leads to a drop in TPR          both positive and negative suspect models. The
+(91.1% vs. 95.6%). This indicates that the base            results confirm that our LLMPrint produces finger-
+prompt anchors the injected task and provides a            prints that effectively distinguish between positive
+consistent context across token pairs, stabilizing         and negative suspect models.
+optimization.                                              Single token vs. token pairs: To evaluate whether
+Category vs. random token pairs: We then com-              the negative token is necessary in our token-pair
+pare our category-based token pair selection with          framework, we construct fingerprints using only a
+a random alternative. In the random variant w/             single target token. On Meta-Llama-3-8B, this vari-
+base prompt p + random token pairs, two tokens             ant achieves a high TPR of 0.9889 but an extremely
+are sampled uniformly from the vocabulary, while           high FPR of 0.8633, indicating poor discriminative
+category-based ensures that both tokens come from          ability. In contrast, token pairs substantially reduce
+                                                        11808
+
+===== PDF p.15 =====
+Table 8: Average benchmark accuracy drops between misdetected positive suspect models and their base models.
+Avg. Max Drop is computed as follows: for each misdetected positive suspect model, we calculate its accuracy
+difference from the base on MMLU, HellaSwag, and PIQA, take the largest drop among the three, and then average
+over all suspects of the same base model.
+
+                                                                                 Gray-box                                                                       Black-box
+   Base model
+                                          MMLU               HellaSwag                   PIQA     Avg. Max Drop                    MMLU           HellaSwag                  PIQA         Avg. Max Drop
+   Meta-Llama-3-8B                         -0.144                      -0.087           -0.058              -0.144                  -0.070          -0.034               -0.022                   -0.076
+   Mistral-7B-v0.3                         -0.196                      -0.136           -0.109              -0.197                  -0.217          -0.153               -0.121                   -0.219
+   Qwen3-8B                                -0.088                      -0.008           -0.024              -0.088                  -0.088          -0.008               -0.024                   -0.088
+   DeepSeek-R1                             -0.045                      -0.018           -0.010              -0.053                  -0.054          -0.015               -0.007                   -0.058
+   SmoLLM2-135M                            -0.017                      -0.083           -0.125              -0.125                  -0.013          -0.037               -0.072                   -0.072
+
+       1.0                                                       1.0                                  TPR            1.0                                               1.0
+                                                                                                                                                          TPR
+       0.8                                                                                            FPR                                                 FPR          0.8
+                                                                 0.8                                                 0.8
+       0.6                                                       0.6                                                 0.6                                               0.6
+                                                   TPR                                                                                                                                                        TPR
+
+
+
+
+                                                                                                              Rate
+                                                          Rate
+Rate
+
+
+
+
+                                                                                                                                                                Rate
+       0.4                                         FPR                                                                                                                 0.4                                    FPR
+                                                                 0.4                                                 0.4
+       0.2                                                       0.2                                                 0.2                                               0.2
+       0.0                                                       0.0                                                 0.0                                               0.0
+             1 50 100   200       300      400      500                  0.1      0.5     1.0                              0.1      0.5     1.0                              1       50      100      150      200
+                              n                                                                                                                                                               T
+
+                 (a) Varying n                                                 (b) Varying α                                     (c) Varying β                                    (d) Varying T
+
+Figure 2: Ablation studies of LLMPrint on Meta-Llama-3-8B. Results are reported on post-trained suspect models.
+
+
+Table 9: Performance of LLMPrint when only top-20                                                                Table 11: Detection results when token pairs are re-
+probabilities per token are available.                                                                           stricted to the shared single-token vocabulary of Meta-
+                                                                                                                 Llama-3-8B and Mistral-7B-v0.3.
+                                                 Post-training                     Quantization
+   Access setting                                                                                                                                   Gray-box                               Black-box
+                                             TPR ↑                FPR ↓           TPR ↑         FPR ↓                 Base model
+                                                                                                                                          Post-training    Quantization           Post-training     Quantization
+
+   Top-20 probabilities                      0.956                      0         0.833           0                                       TPR ↑   FPR ↓    TPR ↑    FPR ↓        TPR ↑    FPR ↓    TPR ↑    FPR ↓
+   Full distribution                         0.956                      0         0.875           0                   Meta-Llama-3-8B     0.978   0.000    0.875       0.000      0.944   0.000    0.875     0.000
+                                                                                                                      Mistral-7B-v0.3     0.893   0.000    0.938       0.000      0.883   0.000    0.969     0.006
+
+
+Table 10: Performance of LLMPrint on larger base
+                                                                                                                 Table 12: Comparing variants of LLMPrint on Meta-
+models.
+                                                                                                                 Llama-3-8B under gray-box verification.
+                                        Gray-box                                   Black-box
+  Base model
+                        Post-training            Quantization            Post-training    Quantization                 Variant of LLMPrint                                                TPR ↑        FPR ↓
+                        TPR ↑     FPR ↓          TPR ↑    FPR ↓         TPR ↑     FPR ↓   TPR ↑   FPR ↓                w/o base prompt p + category token pairs                           0.911           0
+  GPT-OSS-20B           1.000      0.000         0.949    0.000         0.926     0.000   0.897   0.000                w/ base prompt p + random token pairs                              0.800         0.003
+  Phi-4-14B             0.923      0.000         0.938    0.000         0.901     0.000   0.891   0.000
+                                                                                                                       w/ base prompt p + category token pairs                            0.956           0
+
+
+false positives, confirming the necessity of the neg-                                                                      Table 13: Statistical results of suspect models.
+ative token for robust and unique fingerprinting.                                                                     Category                     Mean ↓          Std           Median     25th %      75th %
+
+Impact of number of iterations of GCG: To                                                                             Positive suspect model       0.4033       0.1649           0.3883     0.3125         0.5342
+                                                                                                                      Negative suspect model       0.8573       0.0750           0.8467     0.8167         0.9333
+study the trade-off between optimization cost and
+fingerprint strength, we vary the number of GCG
+iterations while keeping all other settings fixed. On                                                            reuse, we evaluate it on a model merging scenario,
+Meta-Llama-3-8B, increasing the iteration count                                                                  where only subsets of weights or behaviors from
+from 200 to 500 improves TPR from 0.9111 to                                                                      the base model are incorporated. We collect 70
+0.9444, while further increasing it to 1500 yields no                                                            merged variants of Meta-Llama-3-8B from Hug-
+additional gains. This suggests 500–1000 iterations                                                              ging Face and treat them as positive suspect models.
+provide a good balance between effectiveness and                                                                 LLMPrint successfully detects 64 out of 70 merged
+efficiency, justifying our default choice.                                                                       models, achieving a TPR of 0.9143. This result
+Performance on model merging scenario: To                                                                        suggests that the fingerprint prompt remains effec-
+explore whether LLMPrint can detect partial model                                                                tive even when the base model is only partially
+                                                                                                          11809
+
+===== PDF p.16 =====
+Table 14: Performance of LLMPrint under different
+adaptive attack settings for Meta-Llama-3-8B.
+
+          Adaptive Attack Setting   TPR ↑
+          White-box                   0
+          Gray-box                  0.167
+          Black-box                 0.967
+                                                    Algorithm 2 Fingerprint Verification
+                                                    Require: Fingerprint prompt set {pj }nj=1 , token
+preserved, providing evidence that LLMPrint can         pair set {(wj+ , wj− )}nj=1 , base model MB , sus-
+extend to partial model stealing settings.              pect model MS , validation negative suspect
+                                                        model set {Mi }ki=1 , and z-score z
+                                                    Ensure: Verification result
+                                                     1: For each j = 1, . . . , n, query MB with pj to
+                                                        obtain preference on (wj+ , wj− ) and set
+
+                                                               bj ← 1[ wj+ preferred over wj− ].
+
+                                                     2: For each j = 1, . . . , n, query MS with pj to
+                                                        obtain preference on (wj+ , wj− ) and set
+
+                                                               b̂j ← 1[ wj+ preferred over wj− ].
+
+                                                     3: Compute bitwise accuracy
+
+                                                                                         n
+                                                                                        ∑︂
+                                                             A(MB , MS ) =          1
+                                                                                    n         1[b̂j = bj ].
+                                                                                        j=1
+
+                                                     4: For each validation negative suspect model
+                                                                                             (i)
+                                                        Mi , repeat line 2 to obtain b̂j and compute
+                                                                                        n
+                                                                                       ∑︂
+                                                             A(MB , Mi ) =         1
+                                                                                   n         1[b̂(i)
+                                                                                                 j = bj ].
+                                                                                       j=1
+
+                                                     5: Estimate mean and variance
+
+                                                                        k
+                                                                       ∑︂
+                                                              µ = k1         A(MB , Mi ),
+                                                                       i=1
+                                                                          k
+                                                                         ∑︂ (︁                  )︁2
+                                                             σ 2 = k−1
+                                                                    1
+                                                                                 A(MB , Mi ) − µ .
+                                                                         i=1
+
+                                                     6: Set detection threshold
+
+                                                                         τ = µ + zσ.
+
+                                                     7: return positive if A(MB , MS ) ≥ τ , other-
+                                                        wise negative.
+
+
+
+
+                                                11810
