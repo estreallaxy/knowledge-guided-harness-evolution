@@ -5,7 +5,7 @@ ReasoningBank extracts reusable experience from complete successful and failed t
 | Field | Mechanism |
 | --- | --- |
 | Target bottleneck | Historical successes and failures are discarded across repeated tasks, so similar reasoning errors recur. |
-| Role | Training-time experience extraction and pre-execution memory retrieval. |
+| Role | Experience extraction from the permitted train split and pre-execution memory retrieval. |
 | Inputs | Current task query, existing experience and embedding cache, complete trajectory, success/failure judgment, and judge, extractor, and embedding-model interfaces. |
 | Trigger | Retrieve before a new task; extract and append after the task ends. In this project, only training runs may update memory, which is frozen before development and test evaluation. |
 | Required steps | Compute similarity between the query and cached experience; select relevant experiences and memory items; judge success or failure; use outcome-specific instructions to extract reusable experience from the trajectory; append new memory items; retrieve them for later tasks. |

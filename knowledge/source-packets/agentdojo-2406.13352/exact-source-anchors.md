@@ -1,5 +1,9 @@
 # Exact source anchors
 
+## Selected liYK interface scope (editorial clarification, 2026-10-22)
+
+The primary selected interface evidence is PDF p.5 §3.2 (text lines 487–496) and p.16 Figures 11–12 (lines 1116–1138). The older broad page/file catalogue below is retained as historical source navigation; it is not a claim that every listed component was reviewed or that p.6 alone specifies the selected interfaces. Exact AD1–AD3 code symbols/ranges and fixed URLs are in the [claim evidence map](claim-evidence-map.json); limits are in [mechanism and boundaries](mechanism-and-boundaries.md).
+
 ## paper
 
 |Check objects|precise location|supportable judgment|

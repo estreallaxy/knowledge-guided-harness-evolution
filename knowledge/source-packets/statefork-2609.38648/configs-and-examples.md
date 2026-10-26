@@ -4,9 +4,9 @@ The configuration, command and use prerequisites are based on the original file 
 
 ## Alex-XJK/StateFork
 
-- [README.md] (official-code/StateFork/README.md)): Fixed original configuration or description.
+- [README.md](official-code/StateFork/README.md): Fixed original configuration or description.
 ## Alex-XJK/waypoint
 
-- [README.md] (official-code/waypoint/README.md)): Fixed original configuration or description.
+- [README.md](official-code/waypoint/README.md): Fixed original configuration or description.
 
-The complete paper is configured in the page-coded [text of the paper] (paper/paper-v1.txt) and [paper PDF] (paper/paper-v1.pdf). Parameters that were not archived or were not clearly given remain unknown; the official whole process is not claimed to have run.
+The complete paper is configured in the page-coded [text of the paper](paper/paper-v1.txt) and [paper PDF](paper/paper-v1.pdf). Parameters that were not archived or were not clearly given remain unknown; the official whole process is not claimed to have run.

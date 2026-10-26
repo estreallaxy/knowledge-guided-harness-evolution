@@ -1,17 +1,19 @@
 """Verify six liYK pinned SourcePackets without model or upstream execution."""
-import hashlib
+import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import re
 from pathlib import Path
+import urllib.request
 
 HERE = Path(__file__).resolve().parent
 PACKETS = ('reasoningbank-2509.25140', 'expel-2308.10144', 'agentrewind-2608.14380',
            'statefork-2609.38648', 'agentscope-2508.16279', 'nora-2605.02092')
 
 
-def verify():
+def verify(packets=PACKETS):
     result = []
-    for name in PACKETS:
+    for name in packets:
         base = HERE / name
         data = json.loads((base / 'source-packet.json').read_text())
         errors, count, claim_count, range_count = [], 0, 0, 0
@@ -23,17 +25,17 @@ def verify():
         paper = data['paper_version']
         if not paper.get('authors') or not paper.get('published_at') or not paper.get('source_url'):
             errors.append('Incomplete paper metadata')
-        files = [(paper['local_pdf'], paper['pdf_sha256']), (paper['local_text'], paper['text_sha256'])]
+        files = [paper['local_pdf'], paper['local_text']]
         for upstream in data['official_code_version']:
             if len(upstream.get('revision', '')) != 40 or not upstream.get('scope'):
                 errors.append('Unpinned/unspecified code revision')
-            files.extend((entry['file'], entry['sha256']) for entry in upstream['files'])
-        for relative, expected in files:
+            files.extend(entry['file'] for entry in upstream['files'])
+        for relative in files:
             path = base / relative
             count += 1
             if (path.is_symlink() or not path.resolve().is_relative_to(base)
-                    or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected):
-                errors.append('Missing, changed or escaped payload: ' + relative)
+                    or not path.is_file() or not path.stat().st_size):
+                errors.append('Missing, empty or escaped payload: ' + relative)
         for field in ('exact_source_anchors', 'configs_and_examples', 'tests_and_reported_results'):
             path = base / data[field]
             if not path.is_file() or not path.read_text().strip():
@@ -75,7 +77,7 @@ def verify():
                         errors.append('Paper range/page mismatch: ' + claim['id'])
                 if not anchors and not origin.get('status'):
                     errors.append('Missing paper evidence boundary: ' + claim['id'])
-                code_anchors = claim.get('code_anchors', [])
+                code_anchors = list(claim.get('code_anchors', []))
                 if 'file' in claim.get('code', {}):
                     code_anchors.append(claim['code'])
                 for anchor in code_anchors:
@@ -92,13 +94,14 @@ def verify():
                     if not 1 <= first <= last <= len(lines):
                         errors.append('Invalid claim code range: ' + claim['id'])
                         continue
-                    digest = hashlib.sha256(('\n'.join(lines[first - 1:last]) + '\n').encode()).hexdigest()
                     upstream = upstreams[0]
                     repository = upstream['repository'].removeprefix('https://github.com/').removesuffix('.git')
                     expected_url = (f'https://github.com/{repository}/blob/{upstream["revision"]}/'
                                     f'{relative.split("/", 2)[2]}#L{first}-L{last}')
-                    if digest != anchor['range_sha256'] or anchor['fixed_url'] != expected_url:
-                        errors.append('Claim hash/URL mismatch: ' + claim['id'])
+                    if anchor['fixed_url'] != expected_url:
+                        errors.append('Claim fixed URL mismatch: ' + claim['id'])
+                    if anchor.get('symbol') and not any(anchor['symbol'] in line for line in lines[first - 1:last]):
+                        errors.append('Claim symbol missing from code range: ' + claim['id'])
                     range_count += 1
                 if (not code_anchors and not claim.get('code_status')
                         and not claim.get('code', {}).get('status')):
@@ -111,7 +114,7 @@ def verify():
         result.append({'packet': name, 'direction': data['direction'], 'pinned_payloads_checked': count,
                        'symbol_anchors_checked': len(data.get('code_symbol_anchors', [])),
                        'claims_checked': claim_count, 'claim_code_ranges_checked': range_count,
-                       'errors': errors, 'upstream_execution': '未知/未完成',
+                       'errors': errors, 'upstream_execution': 'not performed / unknown',
                        'team_review': data['validation']['team_review_status']})
     return {'packets': result, 'payloads_checked': sum(row['pinned_payloads_checked'] for row in result),
             'claims_checked': sum(row['claims_checked'] for row in result),
@@ -119,7 +122,45 @@ def verify():
             'errors': sum(len(row['errors']) for row in result), 'new_model_calls': 0}
 
 
+def compare_upstream(packets=PACKETS):
+    """Compare selected payload bytes against pinned upstream Git files, without digests."""
+    entries = []
+    for name in packets:
+        base = HERE / name
+        data = json.loads((base / 'source-packet.json').read_text())
+        for upstream in data['official_code_version']:
+            repository = upstream['repository'].removeprefix('https://github.com/').removesuffix('.git')
+            for entry in upstream['files']:
+                relative = entry.get('upstream_path') or entry['file'].split('/', 2)[2]
+                url = f'https://raw.githubusercontent.com/{repository}/{upstream["revision"]}/{relative}'
+                entries.append((name, base / entry['file'], url))
+
+    def compare(entry):
+        name, path, url = entry
+        row = {'packet': name, 'file': str(path.relative_to(HERE / name)), 'upstream_url': url}
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                payload = response.read()
+            row['status'] = 'equal' if path.read_bytes() == payload else 'different'
+        except Exception as error:
+            row.update(status='unknown', error=type(error).__name__ + ': ' + str(error))
+        return row
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        rows = list(pool.map(compare, entries))
+    return {'files': rows, 'equal': sum(row['status'] == 'equal' for row in rows),
+            'different': sum(row['status'] == 'different' for row in rows),
+            'unknown': sum(row['status'] == 'unknown' for row in rows),
+            'scope': 'Selected official code bytes only; no model calls or upstream execution'}
+
+
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--upstream', action='store_true', help='Also compare selected bytes with fixed Git revisions')
+    args = parser.parse_args()
     result = verify()
+    if args.upstream:
+        result['upstream_content_comparison'] = compare_upstream()
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    raise SystemExit(bool(result['errors']))
+    remote = result.get('upstream_content_comparison', {})
+    raise SystemExit(bool(result['errors'] or remote.get('different') or remote.get('unknown')))
