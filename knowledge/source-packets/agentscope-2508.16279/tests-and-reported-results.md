@@ -1,9 +1,9 @@
-# AgentScope 1.0 report results and review boundaries
+# AgentScope 1.0 reported results and review boundaries
 
-Fixed paper`2508.16279v1`, original text positioning: §3.1.4 / PDF pp.10–11; fixed _agent_base.py, _agent_meta.py of v1.0.0.
+Fixed paper `2508.16279v1`: §3.1.4 / PDF pp.10–11; pinned v1.0.0 `_agent_base.py` and `_agent_meta.py`.
 
-The original text and fixed code prove that the pre/post interface of reply/observe/reasoning/acting/printexists; there is no independently quantifiable hook success rate or cost ablation. The entire framework performance cannot be attributed to the callback mechanism.
+The paper and pinned code establish pre/post interfaces associated with reply/observe/reasoning/acting/print. There is no isolated hook success-rate or cost ablation in this review. Framework performance cannot be attributed to callbacks. The selected two files primarily inspect reply/observe/print; other methods are not claimed to have been checked here.
 
-Historical verification of fixed code and local adaptation: the instance hook of the fixed version of async_wrapper precedes the class hook, the pre parameters and post parameters/output are all deepcopy, and post is executed after original_func returns normally. This key behavior is retained locally, a universal function wrapper and an explicit shared registry are added, and bound function and positional parameters are supported to be rebinded; AgentScope is not installed, and the old interface is not rolled back with the new version of middleware.
+Historical adaptation comparison: pinned `async_wrapper` runs instance hooks before class hooks, deep-copies pre arguments and post arguments/output, and executes post only after `original_func` returns normally. The local adaptation retained that behavior and added a generic wrapper/shared registry plus rebinding support. AgentScope was not installed. These are historical adaptation facts, not validation against a newer middleware interface or guaranteed finally/cleanup behavior.
 
-Execution results of the official test: unknown; the complete upstream system is not running. Fixed official entry in README saved in [configs-and-examples.md]. Previously independent local adaptation passed 5 synthetic functional tests; these tests are neither official tests nor H0 migrations, gains, or full paper reproductions.
+Official test execution and full upstream reproduction remain unknown/not performed. See [configuration and examples](configs-and-examples.md). A prior independent local adaptation passed 5 synthetic functional tests; this is a historical report, not a new run, official test, H0 migration or measured transfer benefit.

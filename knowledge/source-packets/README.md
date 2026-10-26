@@ -453,6 +453,8 @@ Follow these collection rules:
 
 ## Mechanism-level packet index
 
+Stage-two structural checks, supplementary sources, and remaining work are recorded in [mechanism coverage and review](liyk-stage2-mechanism-coverage.md). Index inclusion does not certify human review, upstream reproduction, or H0 transfer.
+
 | Source | Extracted mechanism | Mechanism and boundaries | Claim-level evidence |
 | --- | --- | --- | --- |
 | ReasoningBank | Extracting and retrieving reasoning experience from success and failure | [Description](reasoningbank-2509.25140/mechanism-and-boundaries.md) | [Evidence map](reasoningbank-2509.25140/claim-evidence-map.json) |
@@ -461,3 +463,5 @@ Follow these collection rules:
 | StateFork | Separation of logical branching and physical state recovery | [Description](statefork-2609.38648/mechanism-and-boundaries.md) | [Evidence map](statefork-2609.38648/claim-evidence-map.json) |
 | AgentScope | Lifecycle callback input/output contracts | [Description](agentscope-2508.16279/mechanism-and-boundaries.md) | [Evidence map](agentscope-2508.16279/claim-evidence-map.json) |
 | NORA | Host events and structured session handoff | [Description](nora-2605.02092/mechanism-and-boundaries.md) | [Evidence map](nora-2605.02092/claim-evidence-map.json) |
+| G-Memory | Hierarchical experience organization, retrieval, and continual updates | [Description](g-memory-2506.07398/mechanism-and-boundaries.md) | [Evidence map](g-memory-2506.07398/claim-evidence-map.json) |
+| AgentDojo | Composable pipeline interfaces and tool-output extension points | [Description](agentdojo-2406.13352/mechanism-and-boundaries.md) | [Evidence map](agentdojo-2406.13352/claim-evidence-map.json) |

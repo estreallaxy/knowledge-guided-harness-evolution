@@ -1,35 +1,35 @@
 # StateFork paper and code location
 
-Institutional interfaces, use of boundaries and methodological relationships are presented in [Mechanismsm-and-bundaries.md] and article-by-article paper page numbers, text line numbers and fixed code ranges are presented in [evidence map] (claim-evidence-map.json).
+Institutional interfaces, use of boundaries and methodological relationships are presented in [mechanism-and-boundaries.md](mechanism-and-boundaries.md) and article-by-article paper page numbers, text line numbers and fixed code ranges are presented in [evidence map](claim-evidence-map.json).
 
 Fixed paper`2609.38648v1`: §2.2 state boundary; §3.1-3.3 / PDF pp.6-7; §4 Waypoint; §5.2 /pp.11-12; Appendix A Conditions for evaluation.
 
-PDF, see [fixed paper] (paper/paper-v1.pdf), full text divided by PDF page number. The code save range is the selected original file and is not complete enough to install checkout; the correspondence with the original dissertation experiment is unknown.
+PDF, see [fixed paper](paper/paper-v1.pdf), full text divided by PDF page number. The code save range is the selected original file and is not complete enough to install checkout; the correspondence with the original dissertation experiment is unknown.
 
 ## Alex-XJK/StateFork
 
 Fixed review:`9fdb3242e5555f9edfc62d086e0b2e76a90b0a1c`; licence: Apache-2.0.
 
-|Fixed code position|Original Source| SHA256 |
-| --- | --- | --- |
-| [README.md](official-code/StateFork/README.md) |[Upstream fixed file] (https://github.com/Alex-XJK/StateFork/blob/9fdb3242e5555f9edfc62d086e0b2e76a90b0a1c/README.md)| `18aa6e9a22df6fc5bd3bfa39c787971cf08417911d03a385340341dbbb3b4e0e` |
-| [LICENSE](official-code/StateFork/LICENSE) |[Upstream fixed file] (https://github.com/Alex-XJK/StateFork/blob/9fdb3242e5555f9edfc62d086e0b2e76a90b0a1c/LICENSE)| `cddf00b77e2d22068bde8e501d95bca1e3de615e0b4e905298e5752b04deea11` |
-| [decider/decider.py](official-code/StateFork/decider/decider.py) |[Upstream fixed file] (https://github.com/Alex-XJK/StateFork/blob/9fdb3242e5555f9edfc62d086e0b2e76a90b0a1c/decider/decider.py)| `e553563e9d3f68b9e2d529fad4eacb142469f91c8c5404100256cb173919371a` |
-| [controller/base_env_manager.py](official-code/StateFork/controller/base_env_manager.py) |[Upstream fixed file] (https://github.com/Alex-XJK/StateFork/blob/9fdb3242e5555f9edfc62d086e0b2e76a90b0a1c/controller/base_env_manager.py)| `a7bbe9e8ccc31ed52ca3e926078171f8c15fc172ba1a1408ecddff2bbe25dfb3` |
-| [controller/forkable_env_manager.py](official-code/StateFork/controller/forkable_env_manager.py) |[Upstream fixed file] (https://github.com/Alex-XJK/StateFork/blob/9fdb3242e5555f9edfc62d086e0b2e76a90b0a1c/controller/forkable_env_manager.py)| `adfb91ae7270ebc5a8a12735749f4a2d2824b53a583899ce67d89c7f5fa26b2c` |
-| [controller/waypoint_env_manager.py](official-code/StateFork/controller/waypoint_env_manager.py) |[Upstream fixed file] (https://github.com/Alex-XJK/StateFork/blob/9fdb3242e5555f9edfc62d086e0b2e76a90b0a1c/controller/waypoint_env_manager.py)| `0082997942c9f9a2227767a68b7bf5c9c3c463120fc6b92b3aa8d3cad3f487b9` |
+|Fixed code position|Original Source|
+| --- | --- |
+| [README.md](official-code/StateFork/README.md) |[Upstream fixed file](https://github.com/Alex-XJK/StateFork/blob/9fdb3242e5555f9edfc62d086e0b2e76a90b0a1c/README.md)|
+| [LICENSE](official-code/StateFork/LICENSE) |[Upstream fixed file](https://github.com/Alex-XJK/StateFork/blob/9fdb3242e5555f9edfc62d086e0b2e76a90b0a1c/LICENSE)|
+| [decider/decider.py](official-code/StateFork/decider/decider.py) |[Upstream fixed file](https://github.com/Alex-XJK/StateFork/blob/9fdb3242e5555f9edfc62d086e0b2e76a90b0a1c/decider/decider.py)|
+| [controller/base_env_manager.py](official-code/StateFork/controller/base_env_manager.py) |[Upstream fixed file](https://github.com/Alex-XJK/StateFork/blob/9fdb3242e5555f9edfc62d086e0b2e76a90b0a1c/controller/base_env_manager.py)|
+| [controller/forkable_env_manager.py](official-code/StateFork/controller/forkable_env_manager.py) |[Upstream fixed file](https://github.com/Alex-XJK/StateFork/blob/9fdb3242e5555f9edfc62d086e0b2e76a90b0a1c/controller/forkable_env_manager.py)|
+| [controller/waypoint_env_manager.py](official-code/StateFork/controller/waypoint_env_manager.py) |[Upstream fixed file](https://github.com/Alex-XJK/StateFork/blob/9fdb3242e5555f9edfc62d086e0b2e76a90b0a1c/controller/waypoint_env_manager.py)|
 
 ## Alex-XJK/waypoint
 
 Fixed review:`dcb6a7b0f4114f4732b9d7f1d1824dc5e4ff4a24`; licence: Apache-2.0.
 
-|Fixed code position|Original Source| SHA256 |
-| --- | --- | --- |
-| [README.md](official-code/waypoint/README.md) |[Upstream fixed file] (https://github.com/Alex-XJK/waypoint/blob/dcb6a7b0f4114f4732b9d7f1d1824dc5e4ff4a24/README.md)| `c7bfd71b2ac70bd8acd4d707461013f0fa6daf9def98a8b8855790aa8b408188` |
-| [LICENSE](official-code/waypoint/LICENSE) |[Upstream fixed file] (https://github.com/Alex-XJK/waypoint/blob/dcb6a7b0f4114f4732b9d7f1d1824dc5e4ff4a24/LICENSE)| `cddf00b77e2d22068bde8e501d95bca1e3de615e0b4e905298e5752b04deea11` |
-| [pkg/waypoint/checkpoint.go](official-code/waypoint/pkg/waypoint/checkpoint.go) |[Upstream fixed file] (https://github.com/Alex-XJK/waypoint/blob/dcb6a7b0f4114f4732b9d7f1d1824dc5e4ff4a24/pkg/waypoint/checkpoint.go)| `03cecc6fab5aaafff9369dafccb53373beabb14f4dfa574d2a349061b8939a01` |
-| [docs/INSTALL.md](official-code/waypoint/docs/INSTALL.md) |[Upstream fixed file] (https://github.com/Alex-XJK/waypoint/blob/dcb6a7b0f4114f4732b9d7f1d1824dc5e4ff4a24/docs/INSTALL.md)| `288810a96645d941b1da4bcc0b1d7e93a437bcd6847a6916e35dc5e235385783` |
-| [go.mod](official-code/waypoint/go.mod) |[Upstream fixed file] (https://github.com/Alex-XJK/waypoint/blob/dcb6a7b0f4114f4732b9d7f1d1824dc5e4ff4a24/go.mod)| `96c01ebb7fba1b9bc243ba028af4aa55754425c0d1a24cebbdc28530e49dee64` |
+|Fixed code position|Original Source|
+| --- | --- |
+| [README.md](official-code/waypoint/README.md) |[Upstream fixed file](https://github.com/Alex-XJK/waypoint/blob/dcb6a7b0f4114f4732b9d7f1d1824dc5e4ff4a24/README.md)|
+| [LICENSE](official-code/waypoint/LICENSE) |[Upstream fixed file](https://github.com/Alex-XJK/waypoint/blob/dcb6a7b0f4114f4732b9d7f1d1824dc5e4ff4a24/LICENSE)|
+| [pkg/waypoint/checkpoint.go](official-code/waypoint/pkg/waypoint/checkpoint.go) |[Upstream fixed file](https://github.com/Alex-XJK/waypoint/blob/dcb6a7b0f4114f4732b9d7f1d1824dc5e4ff4a24/pkg/waypoint/checkpoint.go)|
+| [docs/INSTALL.md](official-code/waypoint/docs/INSTALL.md) |[Upstream fixed file](https://github.com/Alex-XJK/waypoint/blob/dcb6a7b0f4114f4732b9d7f1d1824dc5e4ff4a24/docs/INSTALL.md)|
+| [go.mod](official-code/waypoint/go.mod) |[Upstream fixed file](https://github.com/Alex-XJK/waypoint/blob/dcb6a7b0f4114f4732b9d7f1d1824dc5e4ff4a24/go.mod)|
 
 # Fixed code symbol line number
 

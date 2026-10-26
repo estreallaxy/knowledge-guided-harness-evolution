@@ -1,5 +1,9 @@
 # Exact source anchors
 
+## Selected liYK memory scope (editorial clarification, 2026-10-22)
+
+The primary selected mechanism evidence is §3 and §4.1–4.3 / PDF pp.4–6: representation at text lines 227–266, retrieval at 342–410, and updates at 412–451. Section 5.4 is an experimental framework dimension, not the primary mechanism specification. The older broad page/file catalogue below remains historical navigation. Exact GM1–GM4 code ranges, fixed URLs and the code-only fallback branch are in the [claim evidence map](claim-evidence-map.json); limits are in [mechanism and boundaries](mechanism-and-boundaries.md).
+
 # Papers
 
 |Check Object|Exact Location|Supportable judgement|

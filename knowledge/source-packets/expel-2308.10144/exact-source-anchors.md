@@ -1,23 +1,23 @@
 # ExpeL thesis and code positioning
 
-Institutional interfaces, use of boundaries and methodological relationships are presented in [Mechanismsm-and-bundaries.md] and article-by-article paper page numbers, text line numbers and fixed code ranges are presented in [evidence map] (claim-evidence-map.json).
+Institutional interfaces, use of boundaries and methodological relationships are presented in [mechanism-and-boundaries.md](mechanism-and-boundaries.md) and article-by-article paper page numbers, text line numbers and fixed code ranges are presented in [evidence map](claim-evidence-map.json).
 
 Fixed thesis`2308.10144v3`: §4.1-4.3 / PDF pp. 3-5; Algorithms 1-3/p.6; Table 2/p.9; Table 3/p.10.
 
-For the paper as it is, see [fixed paper] (paper/paper-v3.pdf), the full text is separated by PDF page number. The code save range is the selected original file and is not complete enough to install checkout; the correspondence with the original dissertation experiment is unknown.
+For the paper as it is, see [fixed paper](paper/paper-v3.pdf), the full text is separated by PDF page number. The code save range is the selected original file and is not complete enough to install checkout; the correspondence with the original dissertation experiment is unknown.
 
 ## LeapLabTHU/ExpeL
 
 Fixed review:`e41ec9a24823e7b560c561ab191441b56d9bcefc`; licence: Apache-2.0.
 
-|Fixed code position|Original Source| SHA256 |
-| --- | --- | --- |
-| [README.md](official-code/ExpeL/README.md) |[Upstream fixed file] (https://github.com/LeapLabTHU/ExpeL/blob/e41ec9a24823e7b560c561ab191441b56d9bcefc/README.md)| `761a26ab3d4ceb381663b44da1f68f670d1a3585cc04d602347e418eb8d5ccfc` |
-| [LICENSE](official-code/ExpeL/LICENSE) |[Upstream fixed file] (https://github.com/LeapLabTHU/ExpeL/blob/e41ec9a24823e7b560c561ab191441b56d9bcefc/LICENSE)| `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` |
-| [insight_extraction.py](official-code/ExpeL/insight_extraction.py) |[Upstream fixed file] (https://github.com/LeapLabTHU/ExpeL/blob/e41ec9a24823e7b560c561ab191441b56d9bcefc/insight_extraction.py)| `3f6851932d6031ac43353e6428412069d6df53c3ecb08fcfb681c0dd8de10f3e` |
-| [agent/expel.py](official-code/ExpeL/agent/expel.py) |[Upstream fixed file] (https://github.com/LeapLabTHU/ExpeL/blob/e41ec9a24823e7b560c561ab191441b56d9bcefc/agent/expel.py)| `7db4e1be3c16dfca589eb2e194cfb4604be224dab32a04f7f03c4529b1dfcf74` |
-| [configs/insight_extraction.yaml](official-code/ExpeL/configs/insight_extraction.yaml) |[Upstream fixed file] (https://github.com/LeapLabTHU/ExpeL/blob/e41ec9a24823e7b560c561ab191441b56d9bcefc/configs/insight_extraction.yaml)| `6708d53a211d1c22261bfaa050ef7e2f4667583852f052a4dc7ce42df02d8db7` |
-| [configs/agent/expel.yaml](official-code/ExpeL/configs/agent/expel.yaml) |[Upstream fixed file] (https://github.com/LeapLabTHU/ExpeL/blob/e41ec9a24823e7b560c561ab191441b56d9bcefc/configs/agent/expel.yaml)| `8d0e75d5693d24267d54cf5857a721485c41b8eefbbea2c66353ea528a2781e0` |
+|Fixed code position|Original Source|
+| --- | --- |
+| [README.md](official-code/ExpeL/README.md) |[Upstream fixed file](https://github.com/LeapLabTHU/ExpeL/blob/e41ec9a24823e7b560c561ab191441b56d9bcefc/README.md)|
+| [LICENSE](official-code/ExpeL/LICENSE) |[Upstream fixed file](https://github.com/LeapLabTHU/ExpeL/blob/e41ec9a24823e7b560c561ab191441b56d9bcefc/LICENSE)|
+| [insight_extraction.py](official-code/ExpeL/insight_extraction.py) |[Upstream fixed file](https://github.com/LeapLabTHU/ExpeL/blob/e41ec9a24823e7b560c561ab191441b56d9bcefc/insight_extraction.py)|
+| [agent/expel.py](official-code/ExpeL/agent/expel.py) |[Upstream fixed file](https://github.com/LeapLabTHU/ExpeL/blob/e41ec9a24823e7b560c561ab191441b56d9bcefc/agent/expel.py)|
+| [configs/insight_extraction.yaml](official-code/ExpeL/configs/insight_extraction.yaml) |[Upstream fixed file](https://github.com/LeapLabTHU/ExpeL/blob/e41ec9a24823e7b560c561ab191441b56d9bcefc/configs/insight_extraction.yaml)|
+| [configs/agent/expel.yaml](official-code/ExpeL/configs/agent/expel.yaml) |[Upstream fixed file](https://github.com/LeapLabTHU/ExpeL/blob/e41ec9a24823e7b560c561ab191441b56d9bcefc/configs/agent/expel.yaml)|
 
 # Fixed code symbol line number
 

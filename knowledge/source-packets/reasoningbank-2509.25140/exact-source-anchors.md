@@ -1,22 +1,22 @@
 # Reasoning Bank paper and code location
 
-Institutional interfaces, use of boundaries and methodological relationships are presented in [Mechanismsm-and-bundaries.md] and article-by-article paper page numbers, text line numbers and fixed code ranges are presented in [evidence map] (claim-evidence-map.json).
+Institutional interfaces, use of boundaries and methodological relationships are presented in [mechanism-and-boundaries.md](mechanism-and-boundaries.md) and article-by-article paper page numbers, text line numbers and fixed code ranges are presented in [evidence map](claim-evidence-map.json).
 
 Fixed paper`2509.25140v2`: §3.2 / PDF pp.4-5; Appendix A.1–A.2/pp.21–22; Table 1/p.7; Appendix C2/Table 5/p.27.
 
-For the paper as it is, see [fixed paper] (paper/paper-v2.pdf), the full text is separated by PDF page number. The code save range is the selected original file and is not complete enough to install checkout; the correspondence with the original dissertation experiment is unknown.
+For the paper as it is, see [fixed paper](paper/paper-v2.pdf), the full text is separated by PDF page number. The code save range is the selected original file and is not complete enough to install checkout; the correspondence with the original dissertation experiment is unknown.
 
 ## google-research/reasoning-bank
 
 Fixed review:`ed80611788292ea739f1effd31f16c53823b8a0d`; licence: Apache-2.0.
 
-|Fixed code position|Original Source| SHA256 |
-| --- | --- | --- |
-| [README.md](official-code/reasoning-bank/README.md) |[Upstream fixed file] (https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/README.md)| `7bceb3ce5bfcbb844f165d1395d52741a3b45645f1642e8be4636a444cbe7369` |
-| [LICENSE](official-code/reasoning-bank/LICENSE) |[Upstream fixed file] (https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/LICENSE)| `58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd` |
-| [WebArena/memory_management.py](official-code/reasoning-bank/WebArena/memory_management.py) |[Upstream fixed file] (https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/memory_management.py)| `35b8b800180024f3446c4a295fe9d7c19d4aa2cddd0b2f2a44b6680e4d6bc4f9` |
-| [WebArena/induce_memory.py](official-code/reasoning-bank/WebArena/induce_memory.py) |[Upstream fixed file] (https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/induce_memory.py)| `97d7da3fe5bd3e37d05e4aa07c050b1154334951cc2cad20619774ae77e0912c` |
-| [WebArena/reeval_memevol_prompt.py](official-code/reasoning-bank/WebArena/reeval_memevol_prompt.py) |[Upstream fixed file] (https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/reeval_memevol_prompt.py)| `8f657d1b72f2166c729a688d2a601492acf9b822e1a8b46e8c40041395022345` |
+|Fixed code position|Original Source|
+| --- | --- |
+| [README.md](official-code/reasoning-bank/README.md) |[Upstream fixed file](https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/README.md)|
+| [LICENSE](official-code/reasoning-bank/LICENSE) |[Upstream fixed file](https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/LICENSE)|
+| [WebArena/memory_management.py](official-code/reasoning-bank/WebArena/memory_management.py) |[Upstream fixed file](https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/memory_management.py)|
+| [WebArena/induce_memory.py](official-code/reasoning-bank/WebArena/induce_memory.py) |[Upstream fixed file](https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/induce_memory.py)|
+| [WebArena/reeval_memevol_prompt.py](official-code/reasoning-bank/WebArena/reeval_memevol_prompt.py) |[Upstream fixed file](https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/reeval_memevol_prompt.py)|
 
 # Fixed code symbol line number
 
@@ -42,6 +42,6 @@ Fixed review:`ed80611788292ea739f1effd31f16c53823b8a0d`; licence: Apache-2.0.
 - `main`:[official-code/reasoning-bank/WebArena/reeval_memevol_prompt.py:131](https://github.com/google-research/reasoning-bank/blob/ed80611788292ea739f1effd31f16c53823b8a0d/WebArena/reeval_memevol_prompt.py#L131).
 
 
-#2026-10-12 Article by Article Map
+# 2026-10-12 Article by Article Map
 
-The code symbol catalogue is not an evidence map of a mechanism claim. The location of each mechanism, condition and restriction, fixed code line numbers and the range of support have been added to [mechanism-and-bundaries.md] and [claim-vidence-map.json] (claim-vidence-map.json).
+The code symbol catalogue is not an evidence map of a mechanism claim. The location of each mechanism, condition and restriction, fixed code line numbers and the range of support have been added to [mechanism-and-bundaries.md] and [claim-evidence-map.json](claim-evidence-map.json).

@@ -21,7 +21,7 @@ AgentScope's lifecycle hooks allow extending behavior without directly modifying
 | AS2 |Instance callbacks precede class callbacks. Parameters and results are copied and passed in. None is not replaced.| `_agent_meta.py:_wrap_with_hooks` |The specific semantics of the fixed code; the paper does not specify the order and copying contract|
 | AS3 |Registering a hook with the same name will overwrite the original callback; the original method exception will not trigger the normal post| `_agent_base.py:register_instance_hook`, `register_class_hook`; `_agent_meta.py:_wrap_with_hooks` |Fixed code behavior; no analogy to finally hooks or exception recovery capabilities|
 
-See [evidence map](claim-evidence-map.json) for the exact line number and range hash. The paper mentions events such as reasoning/acting, but this package selects`_agent_base.py`and`_agent_meta.py`to mainly check reply/observe/print; the unarchived parts will not be reworked to implement the location. For frame results and hook ablation boundaries, see [Result Description](tests-and-reported-results.md).
+See [evidence map](claim-evidence-map.json) for the exact line number and pinned revision links. The paper mentions events such as reasoning/acting, but this package selects`_agent_base.py`and`_agent_meta.py`to mainly check reply/observe/print; the unarchived parts will not be reworked to implement the location. For frame results and hook ablation boundaries, see [Result Description](tests-and-reported-results.md).
 
 ## Method relationships and project usage boundaries
 

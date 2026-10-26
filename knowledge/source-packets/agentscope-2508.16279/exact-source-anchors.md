@@ -10,13 +10,13 @@ The original PDF of the paper can be found in [Fixed paper](paper/paper-v1.pdf),
 
 Fixed revision:`47042b888b90bca2672567a041f61fb665da0bc6`; License: Apache-2.0.
 
-|Fixed code location|original source| SHA256 |
-| --- | --- | --- |
-| [README.md](official-code/agentscope/README.md) |[Upstream Fixed File](https://github.com/agentscope-ai/agentscope/blob/47042b888b90bca2672567a041f61fb665da0bc6/README.md)| `bd594ed8eb145a10d9c26a8ce546db57ec6ba9afa89f2939a31a32fe69293808` |
-| [LICENSE](official-code/agentscope/LICENSE) |[Upstream Fixed File](https://github.com/agentscope-ai/agentscope/blob/47042b888b90bca2672567a041f61fb665da0bc6/LICENSE)| `4186bcadf358c60080060309769db6b2a352720d7353d827bb574c600fee9913` |
-| [src/agentscope/agent/_agent_base.py](official-code/agentscope/src/agentscope/agent/_agent_base.py) |[Upstream Fixed File](https://github.com/agentscope-ai/agentscope/blob/47042b888b90bca2672567a041f61fb665da0bc6/src/agentscope/agent/_agent_base.py)| `bee5fb34c4886a7d3680221e3a6334272f83b81ae18a422accee3da11a853ef0` |
-| [src/agentscope/agent/_agent_meta.py](official-code/agentscope/src/agentscope/agent/_agent_meta.py) |[Upstream Fixed File](https://github.com/agentscope-ai/agentscope/blob/47042b888b90bca2672567a041f61fb665da0bc6/src/agentscope/agent/_agent_meta.py)| `22575ae05a27ab6f68790de45034c8b3c75beb9e4c42a588873bf11a2194ad2c` |
-| [src/agentscope/_utils/_common.py](official-code/agentscope/src/agentscope/_utils/_common.py) |[Upstream Fixed File](https://github.com/agentscope-ai/agentscope/blob/47042b888b90bca2672567a041f61fb665da0bc6/src/agentscope/_utils/_common.py)| `1b40e4c275ed3cc23a366c3f17f471efe589b23b7bdb4f0d79c0cc293651a4be` |
+|Fixed code location|original source|
+| --- | --- |
+| [README.md](official-code/agentscope/README.md) |[Upstream Fixed File](https://github.com/agentscope-ai/agentscope/blob/47042b888b90bca2672567a041f61fb665da0bc6/README.md)|
+| [LICENSE](official-code/agentscope/LICENSE) |[Upstream Fixed File](https://github.com/agentscope-ai/agentscope/blob/47042b888b90bca2672567a041f61fb665da0bc6/LICENSE)|
+| [src/agentscope/agent/_agent_base.py](official-code/agentscope/src/agentscope/agent/_agent_base.py) |[Upstream Fixed File](https://github.com/agentscope-ai/agentscope/blob/47042b888b90bca2672567a041f61fb665da0bc6/src/agentscope/agent/_agent_base.py)|
+| [src/agentscope/agent/_agent_meta.py](official-code/agentscope/src/agentscope/agent/_agent_meta.py) |[Upstream Fixed File](https://github.com/agentscope-ai/agentscope/blob/47042b888b90bca2672567a041f61fb665da0bc6/src/agentscope/agent/_agent_meta.py)|
+| [src/agentscope/_utils/_common.py](official-code/agentscope/src/agentscope/_utils/_common.py) |[Upstream Fixed File](https://github.com/agentscope-ai/agentscope/blob/47042b888b90bca2672567a041f61fb665da0bc6/src/agentscope/_utils/_common.py)|
 
 ## Fixed code symbol line number
 
